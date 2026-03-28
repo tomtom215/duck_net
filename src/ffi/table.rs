@@ -100,11 +100,7 @@ unsafe extern "C" fn paginate_init(info: duckdb_init_info) {
     FfiInitData::<PaginateInitData>::set(
         info,
         PaginateInitData {
-            state: PaginateState {
-                current_page: 0,
-                next_url: None,
-                done: false,
-            },
+            state: PaginateState::empty(),
         },
     );
 }

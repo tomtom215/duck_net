@@ -80,7 +80,9 @@ SELECT * FROM http_paginate(
 
 | Function | Signature | Returns |
 |----------|-----------|---------|
-| `duck_net_set_rate_limit` | `(requests_per_second INTEGER)` | `VARCHAR` — confirmation message |
+| `duck_net_set_rate_limit` | `(requests_per_second INTEGER)` | `VARCHAR` — confirmation. 0 to disable |
+| `duck_net_set_retries` | `(max_retries INTEGER, backoff_ms INTEGER)` | `VARCHAR` — configures retry with exponential backoff |
+| `duck_net_set_timeout` | `(seconds INTEGER)` | `VARCHAR` — sets global HTTP timeout |
 
 ### DNS Lookups
 

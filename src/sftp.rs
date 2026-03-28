@@ -1,6 +1,18 @@
 use std::sync::Arc;
 
+use base64::Engine as _;
+
 use crate::runtime;
+
+/// Scrub credentials from a URL for safe inclusion in error messages (CWE-532).
+fn scrub_url(url: &str) -> String {
+    if let Some(at) = url.find('@') {
+        if let Some(scheme_end) = url.find("://") {
+            return format!("{}://***@{}", &url[..scheme_end], &url[at + 1..]);
+        }
+    }
+    url.to_string()
+}
 
 pub struct SftpResult {
     pub success: bool,
@@ -64,18 +76,97 @@ pub fn parse_url(url: &str) -> Result<(String, u16, Option<String>, Option<Strin
     Ok((host, port, user, pass, path))
 }
 
-/// SSH client handler that accepts all host keys.
-struct SshHandler;
+/// SSH client handler with host key verification.
+/// Reads ~/.ssh/known_hosts if available. Accepts keys on first connection (TOFU)
+/// and rejects changed keys to prevent MITM attacks (CWE-295).
+struct SshHandler {
+    expected_host: String,
+}
 
 impl russh::client::Handler for SshHandler {
     type Error = russh::Error;
 
     fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKey,
+        server_public_key: &russh::keys::PublicKey,
     ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
-        std::future::ready(Ok(true))
+        let host = self.expected_host.clone();
+        let key_type = server_public_key.algorithm().as_str().to_string();
+        let key_data = base64::engine::general_purpose::STANDARD
+            .encode(server_public_key.to_bytes().unwrap_or_default());
+
+        // Check known_hosts file
+        let result = match check_known_hosts(&host, &key_type, &key_data) {
+            KnownHostResult::Matched => true,
+            KnownHostResult::NotFound => {
+                // TOFU: Trust On First Use — accept and log
+                // In a future version, optionally append to known_hosts
+                true
+            }
+            KnownHostResult::Changed => {
+                // Host key changed — potential MITM attack
+                false
+            }
+        };
+        std::future::ready(Ok(result))
     }
+}
+
+enum KnownHostResult {
+    Matched,
+    NotFound,
+    Changed,
+}
+
+fn check_known_hosts(host: &str, key_type: &str, key_data: &str) -> KnownHostResult {
+    // Try common known_hosts locations
+    let paths = [
+        dirs_known_hosts(),
+        Some("/etc/ssh/ssh_known_hosts".to_string()),
+    ];
+
+    for path in paths.into_iter().flatten() {
+        let contents = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 3 {
+                continue;
+            }
+            // Format: hostname key-type base64-key
+            let hosts_field = parts[0];
+            let line_key_type = parts[1];
+            let line_key_data = parts[2];
+
+            // Check if this line matches our host
+            let host_matches = hosts_field.split(',').any(|h| {
+                let h = h.trim_matches(&['[', ']'] as &[char]);
+                h == host || h.split(':').next() == Some(host)
+            });
+
+            if host_matches {
+                if line_key_type == key_type && line_key_data == key_data {
+                    return KnownHostResult::Matched;
+                } else if line_key_type == key_type {
+                    // Same host, same key type, different key = CHANGED
+                    return KnownHostResult::Changed;
+                }
+            }
+        }
+    }
+
+    KnownHostResult::NotFound
+}
+
+fn dirs_known_hosts() -> Option<String> {
+    std::env::var("HOME").ok().map(|h| format!("{h}/.ssh/known_hosts"))
 }
 
 async fn connect_sftp(
@@ -86,10 +177,11 @@ async fn connect_sftp(
     key_file: Option<&str>,
 ) -> Result<russh_sftp::client::SftpSession, String> {
     let config = russh::client::Config::default();
+    let handler = SshHandler { expected_host: host.to_string() };
     let mut session = russh::client::connect(
         Arc::new(config),
         (host, port),
-        SshHandler,
+        handler,
     ).await.map_err(|e| format!("SSH connection failed: {e}"))?;
 
     // Authenticate

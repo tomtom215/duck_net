@@ -24,6 +24,21 @@ const DEFAULT_RETRY_BACKOFF_FACTOR: f64 = 2.0;
 /// HTTP status codes that are retryable by default.
 const DEFAULT_RETRYABLE_STATUSES: &[u16] = &[429, 500, 502, 503, 504];
 
+// ===== User-configurable globals =====
+
+static GLOBAL_MAX_RETRIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static GLOBAL_RETRY_BACKOFF_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1000);
+static GLOBAL_TIMEOUT_SECS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(30);
+
+pub fn set_max_retries(n: u32) { GLOBAL_MAX_RETRIES.store(n, std::sync::atomic::Ordering::Relaxed); }
+pub fn get_max_retries() -> u32 { GLOBAL_MAX_RETRIES.load(std::sync::atomic::Ordering::Relaxed) }
+
+pub fn set_retry_backoff_ms(ms: u64) { GLOBAL_RETRY_BACKOFF_MS.store(ms, std::sync::atomic::Ordering::Relaxed); }
+pub fn get_retry_backoff_ms() -> u64 { GLOBAL_RETRY_BACKOFF_MS.load(std::sync::atomic::Ordering::Relaxed) }
+
+pub fn set_timeout_secs(s: u64) { GLOBAL_TIMEOUT_SECS.store(s, std::sync::atomic::Ordering::Relaxed); }
+pub(crate) fn get_timeout_secs() -> u64 { GLOBAL_TIMEOUT_SECS.load(std::sync::atomic::Ordering::Relaxed) }
+
 static AGENT: LazyLock<Agent> = LazyLock::new(|| {
     // Use the platform's native certificate verifier so we trust the OS CA store.
     // This is critical for environments with corporate proxies or custom CAs.
@@ -150,7 +165,13 @@ pub fn execute(
 ) -> HttpResponse {
     // Apply rate limiting before making the request
     crate::rate_limit::acquire_for_url(url);
-    execute_with_retry(method, url, headers, body, &RetryConfig::default())
+    let config = RetryConfig {
+        max_retries: get_max_retries(),
+        backoff_ms: get_retry_backoff_ms(),
+        backoff_factor: DEFAULT_RETRY_BACKOFF_FACTOR,
+        retryable_statuses: DEFAULT_RETRYABLE_STATUSES.to_vec(),
+    };
+    execute_with_retry(method, url, headers, body, &config)
 }
 
 pub fn execute_with_retry(

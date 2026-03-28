@@ -408,6 +408,46 @@ unsafe extern "C" fn cb_set_rate_limit(
     }
 }
 
+/// Callback: duck_net_set_retries(max_retries INTEGER, backoff_ms INTEGER) -> VARCHAR
+unsafe extern "C" fn cb_set_retries(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let retries_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const i32;
+    let backoff_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 1)) as *const i32;
+
+    for row in 0..row_count {
+        let retries = (*retries_data.add(row as usize)).max(0) as u32;
+        let backoff_ms = (*backoff_data.add(row as usize)).max(100) as u64;
+        http::set_max_retries(retries);
+        http::set_retry_backoff_ms(backoff_ms);
+        let msg = if retries == 0 {
+            "Retries disabled".to_string()
+        } else {
+            format!("Retries set to {retries} with {backoff_ms}ms base backoff")
+        };
+        write_varchar(output, row, &msg);
+    }
+}
+
+/// Callback: duck_net_set_timeout(seconds INTEGER) -> VARCHAR
+unsafe extern "C" fn cb_set_timeout(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let secs_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const i32;
+
+    for row in 0..row_count {
+        let secs = (*secs_data.add(row as usize)).max(1) as u64;
+        http::set_timeout_secs(secs);
+        write_varchar(output, row, &format!("Timeout set to {secs} seconds"));
+    }
+}
+
 // ===== Registration (quack-rs 0.8.0 builders) =====
 // LogicalType is RAII (Drop destroys the handle), so we create fresh instances
 // for each builder call via the helper functions above.
@@ -543,6 +583,21 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(TypeId::Integer)
         .returns(TypeId::Varchar)
         .function(cb_set_rate_limit)
+        .register(con)?;
+
+    // Retry config: duck_net_set_retries(max_retries INTEGER, backoff_ms INTEGER) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_retries")
+        .param(TypeId::Integer)
+        .param(TypeId::Integer)
+        .returns(TypeId::Varchar)
+        .function(cb_set_retries)
+        .register(con)?;
+
+    // Timeout config: duck_net_set_timeout(seconds INTEGER) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_timeout")
+        .param(TypeId::Integer)
+        .returns(TypeId::Varchar)
+        .function(cb_set_timeout)
         .register(con)?;
 
     Ok(())

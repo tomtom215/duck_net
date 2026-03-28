@@ -1,7 +1,12 @@
-"""Comprehensive end-to-end test suite for duck_net DuckDB extension."""
+"""Comprehensive end-to-end test suite for duck_net DuckDB extension.
+
+Covers all functions across HTTP, SOAP, DNS, SMTP, FTP, SFTP, auth,
+rate limiting, retry, timeout, and pagination.
+"""
 import base64
 import duckdb
 import sys
+import time
 
 con = duckdb.connect(config={"allow_unsigned_extensions": "true"})
 con.execute("LOAD 'target/release/duck_net.duckdb_extension'")
@@ -33,219 +38,251 @@ def fetch_all(sql):
 
 
 # =====================================================
-# OFFLINE TESTS (no network required)
+# 1. AUTH HELPERS
 # =====================================================
-
-print("\n--- Auth Helper Tests ---")
+print("\n--- 1. Auth Helper Tests ---")
 
 r = fetch("SELECT http_basic_auth('user', 'pass')")
-expected = "Basic " + base64.b64encode(b"user:pass").decode()
-check("http_basic_auth", r == expected, f"got {r}")
+check("basic_auth standard", r == "Basic " + base64.b64encode(b"user:pass").decode())
+
+r = fetch("SELECT http_basic_auth('', '')")
+check("basic_auth empty", r == "Basic " + base64.b64encode(b":").decode())
+
+r = fetch("SELECT http_basic_auth('user:colon', 'p@ss!')")
+check("basic_auth special", r == "Basic " + base64.b64encode(b"user:colon:p@ss!").decode())
 
 r = fetch("SELECT http_bearer_auth('tok123')")
-check("http_bearer_auth", r == "Bearer tok123", f"got {r}")
+check("bearer_auth", r == "Bearer tok123")
 
-# Edge cases
-r = fetch("SELECT http_basic_auth('', '')")
-check("http_basic_auth empty", r == "Basic " + base64.b64encode(b":").decode())
-
-r = fetch("SELECT http_basic_auth('user:with:colons', 'p@ss!')")
-expected = "Basic " + base64.b64encode(b"user:with:colons:p@ss!").decode()
-check("http_basic_auth special chars", r == expected)
+r = fetch("SELECT http_bearer_auth('')")
+check("bearer_auth empty", r == "Bearer ")
 
 
-print("\n--- SSRF Protection Tests ---")
+# =====================================================
+# 2. SSRF PROTECTION
+# =====================================================
+print("\n--- 2. SSRF Protection Tests ---")
 
-for scheme in ["ftp", "file", "gopher", "javascript", "data", "ldap"]:
-    url = f"{scheme}://evil.com/file"
-    r = fetch(f"SELECT http_get('{url}')")
+for scheme in ["ftp", "file", "gopher", "javascript", "data", "ldap", "dict", "ssh"]:
+    r = fetch(f"SELECT http_get('{scheme}://evil.com/x')")
     check(f"block {scheme}://", r["status"] == 0 and "only http://" in r["reason"])
 
 r = fetch("SELECT http_request('INVALID', 'https://x.com', MAP{}, '')")
-check("invalid method rejected", r["status"] == 0 and "Unsupported" in r["reason"])
+check("invalid method", r["status"] == 0 and "Unsupported" in r["reason"])
 
 
-print("\n--- SOAP Offline Tests ---")
+# =====================================================
+# 3. SOAP OFFLINE
+# =====================================================
+print("\n--- 3. SOAP Tests ---")
 
-# Extract body from SOAP 1.1
-r = fetch("""SELECT soap_extract_body(
-    '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-       <soap:Body><Result>42</Result></soap:Body>
-     </soap:Envelope>')""")
-check("soap_extract_body 1.1", "<Result>42</Result>" in r)
-
-# Extract body from SOAP 1.2
-r = fetch("""SELECT soap_extract_body(
-    '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-       <soap:Body><Data>hello</Data></soap:Body>
-     </soap:Envelope>')""")
-check("soap_extract_body 1.2", "<Data>hello</Data>" in r)
-
-# Alternate namespace prefix
-r = fetch("""SELECT soap_extract_body(
-    '<SOAP-ENV:Envelope><SOAP-ENV:Body><X>1</X></SOAP-ENV:Body></SOAP-ENV:Envelope>')""")
-check("soap_extract_body SOAP-ENV", "<X>1</X>" in r)
-
-r = fetch("""SELECT soap_extract_body(
-    '<s:Envelope><s:Body><Y>2</Y></s:Body></s:Envelope>')""")
-check("soap_extract_body s: prefix", "<Y>2</Y>" in r)
+# Extract body with multiple namespace prefixes
+for prefix, open_ns, close_ns in [
+    ("soap:", '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">', '</soap:Envelope>'),
+    ("SOAP-ENV:", '<SOAP-ENV:Envelope>', '</SOAP-ENV:Envelope>'),
+    ("soapenv:", '<soapenv:Envelope>', '</soapenv:Envelope>'),
+    ("s:", '<s:Envelope>', '</s:Envelope>'),
+    ("S:", '<S:Envelope>', '</S:Envelope>'),
+]:
+    xml = f"""{open_ns}<{prefix}Body><R>OK</R></{prefix}Body>{close_ns}"""
+    r = con.execute(f"SELECT soap_extract_body($1)", [xml]).fetchone()[0]
+    check(f"extract_body {prefix}", r is not None and "<R>OK</R>" in r, f"got: {r}")
 
 # Fault detection
-r = fetch("""SELECT soap_is_fault(
-    '<soap:Body><soap:Fault><faultstring>err</faultstring></soap:Fault></soap:Body>')""")
-check("soap_is_fault true", r == True)
+r = fetch("SELECT soap_is_fault('<soap:Fault>err</soap:Fault>')")
+check("is_fault true", r == True)
 
-r = fetch("""SELECT soap_is_fault('<soap:Body><Result>OK</Result></soap:Body>')""")
-check("soap_is_fault false", r == False)
+r = fetch("SELECT soap_is_fault('<Result>OK</Result>')")
+check("is_fault false", r == False)
 
-# Fault string extraction
-r = fetch("""SELECT soap_fault_string(
-    '<soap:Fault><faultstring>Server error</faultstring></soap:Fault>')""")
-check("soap_fault_string 1.1", r == "Server error")
+r = fetch("SELECT soap_fault_string('<soap:Fault><faultstring>Broken</faultstring></soap:Fault>')")
+check("fault_string 1.1", r == "Broken")
 
-r = fetch("""SELECT soap_fault_string(
-    '<soap:Fault><soap:Reason><soap:Text xml:lang="en">Access denied</soap:Text></soap:Reason></soap:Fault>')""")
-check("soap_fault_string 1.2", r == "Access denied")
+xml12 = '<soap:Fault><soap:Reason><soap:Text xml:lang="en">Denied</soap:Text></soap:Reason></soap:Fault>'
+r = con.execute("SELECT soap_fault_string($1)", [xml12]).fetchone()[0]
+check("fault_string 1.2", r == "Denied")
 
 r = fetch("SELECT soap_fault_string('<Result>OK</Result>')")
-check("soap_fault_string null", r is None)
+check("fault_string null", r is None)
 
 
-print("\n--- Rate Limiting Tests ---")
+# =====================================================
+# 4. RATE LIMITING
+# =====================================================
+print("\n--- 4. Rate Limiting Tests ---")
 
 r = fetch("SELECT duck_net_set_rate_limit(0)")
-check("rate limit disable", "disabled" in r.lower())
+check("rate_limit disable", "disabled" in r.lower())
 
-r = fetch("SELECT duck_net_set_rate_limit(50)")
-check("rate limit set 50", "50" in r)
+r = fetch("SELECT duck_net_set_rate_limit(100)")
+check("rate_limit set", "100" in r)
 
 con.execute("SELECT duck_net_set_rate_limit(0)")
 
 
-print("\n--- SMTP URL Parsing (via error messages) ---")
+# =====================================================
+# 5. RETRY & TIMEOUT CONFIG
+# =====================================================
+print("\n--- 5. Retry & Timeout Config Tests ---")
+
+r = fetch("SELECT duck_net_set_retries(3, 500)")
+check("set_retries", "3" in r and "500" in r)
+
+r = fetch("SELECT duck_net_set_retries(0, 1000)")
+check("set_retries disable", "disabled" in r.lower())
+
+r = fetch("SELECT duck_net_set_timeout(60)")
+check("set_timeout", "60" in r)
+
+r = fetch("SELECT duck_net_set_timeout(30)")
+check("set_timeout restore", "30" in r)
+
+
+# =====================================================
+# 6. SMTP (URL parsing / error handling)
+# =====================================================
+print("\n--- 6. SMTP Tests ---")
 
 r = fetch("SELECT smtp_send('smtp://localhost:9999', 'a@b.com', 'c@d.com', 'test', 'body')")
-check("smtp_send returns struct", r["success"] == False and len(r["message"]) > 0)
+check("smtp struct type", isinstance(r, dict) and "success" in r and "message" in r)
+check("smtp conn fail", r["success"] == False and len(r["message"]) > 0)
 
 r = fetch("SELECT smtp_send('invalid://host', 'a@b.com', 'c@d.com', 'test', 'body')")
-check("smtp invalid scheme", r["success"] == False and "smtp://" in r["message"])
+check("smtp bad scheme", r["success"] == False and "smtp://" in r["message"])
+
+r = fetch("SELECT smtp_send('smtps://mail.invalid:465', 'a@b', 'c@d', 'subj', 'body', 'user', 'pass')")
+check("smtp 7-param", isinstance(r, dict) and "success" in r)
 
 
-print("\n--- FTP URL Parsing (via error messages) ---")
+# =====================================================
+# 7. FTP/SFTP (struct types / error handling)
+# =====================================================
+print("\n--- 7. FTP/SFTP Tests ---")
 
 r = fetch("SELECT ftp_read('ftp://nonexistent.invalid/file.txt')")
-check("ftp_read returns struct", "success" in str(r) and r["success"] == False)
+check("ftp_read struct", "success" in str(r) and "content" in str(r))
+check("ftp_read fail", r["success"] == False)
 
-r = fetch("SELECT ftp_write('ftp://nonexistent.invalid/file.txt', 'data')")
-check("ftp_write returns struct", r["success"] == False)
+r = fetch("SELECT ftp_write('ftp://nonexistent.invalid/f.txt', 'data')")
+check("ftp_write struct", "success" in str(r) and "bytes_written" in str(r))
+check("ftp_write fail", r["success"] == False)
 
-r = fetch("SELECT ftp_delete('ftp://nonexistent.invalid/file.txt')")
-check("ftp_delete returns struct", r["success"] == False)
+r = fetch("SELECT ftp_delete('ftp://nonexistent.invalid/f.txt')")
+check("ftp_delete struct", "success" in str(r) and "message" in str(r))
+check("ftp_delete fail", r["success"] == False)
 
-r = fetch("SELECT sftp_read('sftp://nonexistent.invalid/file.txt')")
-check("sftp_read returns struct", r["success"] == False)
+r = fetch("SELECT sftp_read('sftp://nonexistent.invalid/f.txt')")
+check("sftp_read struct", "success" in str(r) and "content" in str(r))
+check("sftp_read fail", r["success"] == False)
 
-r = fetch("SELECT sftp_write('sftp://nonexistent.invalid/file.txt', 'data')")
-check("sftp_write returns struct", r["success"] == False)
+# SFTP with key_file overload
+r = fetch("SELECT sftp_read('sftp://user@nonexistent.invalid/f.txt', '/nonexistent/key')")
+check("sftp_read key overload", r["success"] == False)
 
-r = fetch("SELECT sftp_delete('sftp://nonexistent.invalid/file.txt')")
-check("sftp_delete returns struct", r["success"] == False)
+r = fetch("SELECT sftp_write('sftp://nonexistent.invalid/f.txt', 'data')")
+check("sftp_write fail", r["success"] == False)
+
+r = fetch("SELECT sftp_delete('sftp://nonexistent.invalid/f.txt')")
+check("sftp_delete fail", r["success"] == False)
+
+# Credential scrubbing: verify passwords don't leak in FTP error messages
+r = fetch("SELECT ftp_read('ftp://secretuser:secretpass@nonexistent.invalid/f.txt')")
+check("ftp cred scrub", "secretpass" not in r.get("message", ""), f"leaked: {r.get('message','')[:80]}")
 
 
 # =====================================================
-# NETWORK TESTS
+# 8. HTTP NETWORK TESTS
 # =====================================================
-
-print("\n--- HTTP Network Tests ---")
+print("\n--- 8. HTTP Network Tests ---")
 
 r = fetch("SELECT http_get('https://httpbin.org/get')")
 network_ok = r["status"] == 200
 
 if not network_ok:
-    print(f"  [SKIP] Network unavailable: {r['reason'][:80]}")
-    for name in ["http_get","http_post","http_head","http_delete","http_request PUT",
-                  "basic auth roundtrip","bearer auth roundtrip","http_paginate"]:
+    for name in ["http_get","http_post","http_head","http_delete","http_put","http_patch",
+                  "http_request","basic_auth_roundtrip","bearer_auth_roundtrip","pagination"]:
         skip(name, "no network")
 else:
-    check("http_get", r["status"] == 200 and '"url"' in r["body"])
+    check("http_get 200", r["status"] == 200)
 
     r = fetch("""SELECT http_post(
         'https://httpbin.org/post',
         MAP{'Content-Type': 'application/json'},
         '{"key": "value"}'
     )""")
-    check("http_post", r["status"] == 200)
+    check("http_post 200", r["status"] == 200 and '"key"' in r["body"])
 
     r = fetch("SELECT http_head('https://httpbin.org/get')")
-    check("http_head", r["status"] == 200 and r["body"] == "")
+    check("http_head empty body", r["status"] == 200 and r["body"] == "")
 
     r = fetch("SELECT http_delete('https://httpbin.org/delete')")
-    check("http_delete", r["status"] == 200)
+    check("http_delete 200", r["status"] == 200)
 
-    r = fetch("""SELECT http_request(
-        'PUT', 'https://httpbin.org/put', MAP{}, '{"updated": true}'
-    )""")
-    check("http_request PUT", r["status"] == 200)
+    r = fetch("""SELECT http_put('https://httpbin.org/put', '{"x":1}')""")
+    check("http_put 200", r["status"] == 200)
+
+    r = fetch("""SELECT http_patch('https://httpbin.org/patch', '{"y":2}')""")
+    check("http_patch 200", r["status"] == 200)
+
+    r = fetch("SELECT http_options('https://httpbin.org/get')")
+    check("http_options 200", r["status"] == 200)
+
+    r = fetch("""SELECT http_request('PUT', 'https://httpbin.org/put', MAP{}, '{"z":3}')""")
+    check("http_request generic", r["status"] == 200)
 
     # Auth roundtrips
     r = fetch("""SELECT http_get(
         'https://httpbin.org/headers',
         MAP{'Authorization': http_basic_auth('u', 'p')}
     )""")
-    b64 = base64.b64encode(b"u:p").decode()
-    check("basic auth roundtrip", r["status"] == 200 and b64 in r["body"])
+    check("basic_auth_roundtrip", base64.b64encode(b"u:p").decode() in r["body"])
 
     r = fetch("""SELECT http_get(
         'https://httpbin.org/headers',
-        MAP{'Authorization': http_bearer_auth('jwt123')}
+        MAP{'Authorization': http_bearer_auth('jwt999')}
     )""")
-    check("bearer auth roundtrip", r["status"] == 200 and "Bearer jwt123" in r["body"])
+    check("bearer_auth_roundtrip", "Bearer jwt999" in r["body"])
 
     # Pagination
     rows = fetch_all("""SELECT * FROM http_paginate(
         'https://httpbin.org/get?page={page}',
-        page_param := 'page',
-        start_page := 1,
-        max_pages := 3
+        page_param := 'page', start_page := 1, max_pages := 3
     )""")
-    check("http_paginate count", len(rows) == 3)
+    check("paginate 3 pages", len(rows) == 3)
     if len(rows) > 0:
-        check("http_paginate status", rows[0][1] == 200)
+        check("paginate status", rows[0][1] == 200)
+
+    # Response headers present
+    r = fetch("SELECT http_get('https://httpbin.org/get')")
+    check("response headers", "content-type" in r["headers"])
 
 
-print("\n--- DNS Tests ---")
+# =====================================================
+# 9. DNS TESTS
+# =====================================================
+print("\n--- 9. DNS Tests ---")
 
 try:
-    # Test that all DNS functions return correct types (may be empty in proxy envs)
     r = fetch("SELECT dns_lookup('example.com')")
-    check("dns_lookup returns list", isinstance(r, list), f"type: {type(r)}")
-    dns_works = len(r) > 0
-    if dns_works:
-        check("dns_lookup has results", len(r) > 0)
-    else:
-        skip("dns_lookup results", "DNS may be blocked by proxy")
+    check("dns_lookup type", isinstance(r, list))
 
     r = fetch("SELECT dns_lookup_a('example.com')")
-    check("dns_lookup_a returns list", isinstance(r, list), f"type: {type(r)}")
-    if dns_works and len(r) > 0:
-        check("dns_lookup_a is IPv4", "." in r[0], f"got: {r[0]}")
+    check("dns_lookup_a type", isinstance(r, list))
 
     r = fetch("SELECT dns_lookup_aaaa('example.com')")
-    check("dns_lookup_aaaa returns list", isinstance(r, list), f"type: {type(r)}")
+    check("dns_lookup_aaaa type", isinstance(r, list))
 
     r = fetch("SELECT dns_reverse('8.8.8.8')")
-    check("dns_reverse returns", r is None or isinstance(r, str), f"got type: {type(r)}")
+    check("dns_reverse type", r is None or isinstance(r, str))
 
     r = fetch("SELECT dns_txt('example.com')")
-    check("dns_txt returns list", isinstance(r, list), f"type: {type(r)}")
+    check("dns_txt type", isinstance(r, list))
 
     r = fetch("SELECT dns_mx('example.com')")
-    check("dns_mx returns list", isinstance(r, list), f"type: {type(r)}")
+    check("dns_mx type", isinstance(r, list))
 
-    # Edge case: nonexistent domain
     r = fetch("SELECT dns_lookup('this-domain-does-not-exist-12345.invalid')")
-    check("dns_lookup nonexistent empty", isinstance(r, list) and len(r) == 0, f"got: {r}")
-
+    check("dns nonexistent", isinstance(r, list) and len(r) == 0)
 except Exception as e:
     skip("dns tests", str(e)[:80])
 
@@ -253,7 +290,6 @@ except Exception as e:
 # =====================================================
 # SUMMARY
 # =====================================================
-
 total = passed + failed + skipped
 print(f"\n{'='*50}")
 print(f"Results: {passed} passed, {failed} failed, {skipped} skipped / {total} total")

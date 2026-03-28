@@ -1,5 +1,15 @@
 use suppaftp::FtpStream;
 
+/// Scrub credentials from a URL for safe inclusion in error messages (CWE-532).
+fn scrub_url(url: &str) -> String {
+    if let Some(at) = url.find('@') {
+        if let Some(scheme_end) = url.find("://") {
+            return format!("{}://***@{}", &url[..scheme_end], &url[at + 1..]);
+        }
+    }
+    url.to_string()
+}
+
 pub struct FtpResult {
     pub success: bool,
     pub message: String,
@@ -67,7 +77,7 @@ fn connect_and_login(url: &str) -> Result<(FtpStream, String), String> {
     let (host, port, user, pass, path) = parse_url(url)?;
     let addr = format!("{host}:{port}");
     let mut ftp = FtpStream::connect(&addr)
-        .map_err(|e| format!("FTP connection failed to {addr}: {e}"))?;
+        .map_err(|e| format!("FTP connection failed to {}: {e}", scrub_url(url)))?;
 
     let username = user.as_deref().unwrap_or("anonymous");
     let password = pass.as_deref().unwrap_or("duck_net@");

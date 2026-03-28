@@ -3,7 +3,6 @@ use crate::json;
 
 pub enum PaginationStrategy {
     PageNumber {
-        #[allow(dead_code)]
         param_name: String,
         start: i64,
         increment: i64,
@@ -25,13 +24,26 @@ pub struct PaginateState {
     pub current_page: i64,
     pub next_url: Option<String>,
     pub done: bool,
+    seen_urls: std::collections::HashSet<String>,
+}
+
+impl PaginateState {
+    /// Create a placeholder state (will be initialized on first scan).
+    pub fn empty() -> Self {
+        Self {
+            current_page: 0,
+            next_url: None,
+            done: false,
+            seen_urls: std::collections::HashSet::new(),
+        }
+    }
 }
 
 impl PaginateState {
     pub fn new(config: &PaginateConfig) -> Self {
         let next_url = match &config.strategy {
-            PaginationStrategy::PageNumber { start, .. } => {
-                Some(build_page_url(&config.base_url, *start))
+            PaginationStrategy::PageNumber { param_name, start, .. } => {
+                Some(build_page_url(&config.base_url, param_name, *start))
             }
             PaginationStrategy::NextUrl { .. } => Some(config.base_url.clone()),
         };
@@ -39,13 +51,14 @@ impl PaginateState {
             current_page: 0,
             next_url,
             done: false,
+            seen_urls: std::collections::HashSet::new(),
         }
     }
 }
 
-fn build_page_url(template: &str, page: i64) -> String {
-    template.replace("{page}", &page.to_string())
-        .replace("{offset}", &page.to_string())
+fn build_page_url(template: &str, param_name: &str, page: i64) -> String {
+    let placeholder = format!("{{{param_name}}}");
+    template.replace(&placeholder, &page.to_string())
 }
 
 /// Fetch the next page. Returns (page_number, response) or None if done.
@@ -55,6 +68,13 @@ pub fn fetch_next(config: &PaginateConfig, state: &mut PaginateState) -> Option<
     }
 
     let url = state.next_url.take()?;
+
+    // Infinite loop protection: reject URLs we've already fetched
+    if !state.seen_urls.insert(url.clone()) {
+        state.done = true;
+        return None;
+    }
+
     state.current_page += 1;
     let page_num = state.current_page;
 
@@ -72,9 +92,9 @@ pub fn fetch_next(config: &PaginateConfig, state: &mut PaginateState) -> Option<
     }
 
     match &config.strategy {
-        PaginationStrategy::PageNumber { param_name: _, start, increment } => {
+        PaginationStrategy::PageNumber { param_name, start, increment } => {
             let next_page_val = start + (page_num as i64) * increment;
-            let next = build_page_url(&config.base_url, next_page_val);
+            let next = build_page_url(&config.base_url, param_name, next_page_val);
             state.next_url = Some(next);
         }
         PaginationStrategy::NextUrl { json_path, use_link_header } => {
