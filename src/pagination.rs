@@ -42,9 +42,9 @@ impl PaginateState {
 impl PaginateState {
     pub fn new(config: &PaginateConfig) -> Self {
         let next_url = match &config.strategy {
-            PaginationStrategy::PageNumber { param_name, start, .. } => {
-                Some(build_page_url(&config.base_url, param_name, *start))
-            }
+            PaginationStrategy::PageNumber {
+                param_name, start, ..
+            } => Some(build_page_url(&config.base_url, param_name, *start)),
             PaginationStrategy::NextUrl { .. } => Some(config.base_url.clone()),
         };
         Self {
@@ -62,7 +62,10 @@ fn build_page_url(template: &str, param_name: &str, page: i64) -> String {
 }
 
 /// Fetch the next page. Returns (page_number, response) or None if done.
-pub fn fetch_next(config: &PaginateConfig, state: &mut PaginateState) -> Option<(i64, HttpResponse)> {
+pub fn fetch_next(
+    config: &PaginateConfig,
+    state: &mut PaginateState,
+) -> Option<(i64, HttpResponse)> {
     if state.done {
         return None;
     }
@@ -92,12 +95,19 @@ pub fn fetch_next(config: &PaginateConfig, state: &mut PaginateState) -> Option<
     }
 
     match &config.strategy {
-        PaginationStrategy::PageNumber { param_name, start, increment } => {
-            let next_page_val = start + (page_num as i64) * increment;
+        PaginationStrategy::PageNumber {
+            param_name,
+            start,
+            increment,
+        } => {
+            let next_page_val = start + page_num * increment;
             let next = build_page_url(&config.base_url, param_name, next_page_val);
             state.next_url = Some(next);
         }
-        PaginationStrategy::NextUrl { json_path, use_link_header } => {
+        PaginationStrategy::NextUrl {
+            json_path,
+            use_link_header,
+        } => {
             let mut found = false;
 
             // Try JSON path first

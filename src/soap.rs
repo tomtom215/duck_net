@@ -77,9 +77,12 @@ pub fn extract_body(xml: &str) -> Option<&str> {
 
 /// Check if a SOAP response contains a fault.
 pub fn is_fault(xml: &str) -> bool {
-    xml.contains("<soap:Fault") || xml.contains("<SOAP-ENV:Fault")
-        || xml.contains("<soapenv:Fault") || xml.contains("<Fault")
-        || xml.contains("<s:Fault") || xml.contains("<S:Fault")
+    xml.contains("<soap:Fault")
+        || xml.contains("<SOAP-ENV:Fault")
+        || xml.contains("<soapenv:Fault")
+        || xml.contains("<Fault")
+        || xml.contains("<s:Fault")
+        || xml.contains("<S:Fault")
 }
 
 /// Extract the fault string from a SOAP fault response.

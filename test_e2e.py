@@ -137,6 +137,16 @@ check("set_timeout", "60" in r)
 r = fetch("SELECT duck_net_set_timeout(30)")
 check("set_timeout restore", "30" in r)
 
+# Configurable retry status codes
+r = fetch("SELECT duck_net_set_retry_statuses('429,500,502,503,504')")
+check("set_retry_statuses", "429" in r and "504" in r)
+
+r = fetch("SELECT duck_net_set_retry_statuses('429,503')")
+check("set_retry_statuses custom", "429" in r and "503" in r)
+
+r = fetch("SELECT duck_net_set_retry_statuses('notanumber')")
+check("set_retry_statuses invalid", "error" in r.lower())
+
 
 # =====================================================
 # 6. SMTP (URL parsing / error handling)
@@ -188,6 +198,76 @@ check("sftp_delete fail", r["success"] == False)
 # Credential scrubbing: verify passwords don't leak in FTP error messages
 r = fetch("SELECT ftp_read('ftp://secretuser:secretpass@nonexistent.invalid/f.txt')")
 check("ftp cred scrub", "secretpass" not in r.get("message", ""), f"leaked: {r.get('message','')[:80]}")
+
+
+# =====================================================
+# 7b. FTP/SFTP BLOB + LIST + CONNECTION CACHE
+# =====================================================
+print("\n--- 7b. FTP/SFTP Blob & List Tests ---")
+
+# ftp_read_blob returns STRUCT with BLOB data field
+r = fetch("SELECT ftp_read_blob('ftp://nonexistent.invalid/file.bin')")
+check("ftp_read_blob struct", "success" in str(r) and "data" in str(r))
+check("ftp_read_blob fail", r["success"] == False)
+
+# sftp_read_blob returns STRUCT with BLOB data field
+r = fetch("SELECT sftp_read_blob('sftp://nonexistent.invalid/file.bin')")
+check("sftp_read_blob struct", "success" in str(r) and "data" in str(r))
+check("sftp_read_blob fail", r["success"] == False)
+
+# sftp_read_blob with key_file
+r = fetch("SELECT sftp_read_blob('sftp://user@nonexistent.invalid/f.bin', '/no/key')")
+check("sftp_read_blob key", r["success"] == False)
+
+# ftp_list table function (will fail to connect but validates registration)
+try:
+    rows = fetch_all("SELECT * FROM ftp_list('ftp://nonexistent.invalid/')")
+    check("ftp_list registered", False, "should have errored")
+except Exception as e:
+    check("ftp_list registered", "ftp" in str(e).lower() or "connection" in str(e).lower(),
+          str(e)[:80])
+
+# sftp_list table function
+try:
+    rows = fetch_all("SELECT * FROM sftp_list('sftp://nonexistent.invalid/')")
+    check("sftp_list registered", False, "should have errored")
+except Exception as e:
+    check("sftp_list registered", "ssh" in str(e).lower() or "sftp" in str(e).lower()
+          or "connection" in str(e).lower(), str(e)[:80])
+
+
+# =====================================================
+# 7c. OAuth2 WITH SCOPES
+# =====================================================
+print("\n--- 7c. OAuth2 Scopes Test ---")
+
+# Verify 4-param overload exists (will fail at network level but validates registration)
+r = fetch("""SELECT http_oauth2_token(
+    'https://auth.invalid/token', 'id', 'secret', 'read write'
+)""")
+check("oauth2 scopes overload", isinstance(r, str) and "OAuth2" in r, f"got: {r}")
+
+
+# =====================================================
+# 7d. PER-DOMAIN RATE LIMITING
+# =====================================================
+print("\n--- 7d. Per-Domain Rate Limiting Tests ---")
+
+# JSON format
+r = fetch("""SELECT duck_net_set_domain_rate_limits('{"api.example.com": 10, "*.slow.com": 2}')""")
+check("domain limits json", "2 domain" in r, f"got: {r}")
+
+# Simple format
+r = fetch("SELECT duck_net_set_domain_rate_limits('api.fast.com=50,api.slow.com=5')")
+check("domain limits simple", "2 domain" in r, f"got: {r}")
+
+# Clear
+r = fetch("SELECT duck_net_set_domain_rate_limits('')")
+check("domain limits clear", "cleared" in r.lower(), f"got: {r}")
+
+# Invalid format
+r = fetch("SELECT duck_net_set_domain_rate_limits('bad=notanumber')")
+check("domain limits invalid", "error" in r.lower(), f"got: {r}")
 
 
 # =====================================================

@@ -124,7 +124,10 @@ unsafe extern "C" fn paginate_scan(info: duckdb_function_info, output: duckdb_da
     };
 
     // Initialize state on first scan
-    if init_data.state.next_url.is_none() && init_data.state.current_page == 0 && !init_data.state.done {
+    if init_data.state.next_url.is_none()
+        && init_data.state.current_page == 0
+        && !init_data.state.done
+    {
         init_data.state = PaginateState::new(&bind_data.config);
     }
 

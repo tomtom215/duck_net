@@ -111,14 +111,24 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
     ScalarFunctionSetBuilder::new("smtp_send")
         .overload(
             ScalarOverloadBuilder::new()
-                .param(v).param(v).param(v).param(v).param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
                 .returns_logical(smtp_result_type())
                 .function(cb_smtp_send_5)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
         .overload(
             ScalarOverloadBuilder::new()
-                .param(v).param(v).param(v).param(v).param(v).param(v).param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
                 .returns_logical(smtp_result_type())
                 .function(cb_smtp_send_7)
                 .null_handling(NullHandling::SpecialNullHandling),

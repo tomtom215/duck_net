@@ -31,7 +31,9 @@ pub fn parse_server_url(url: &str) -> Result<(String, u16, bool), String> {
 
     let (host, port) = if let Some(colon) = rest.rfind(':') {
         let port_str = &rest[colon + 1..].trim_end_matches('/');
-        let port: u16 = port_str.parse().map_err(|_| format!("Invalid port: {port_str}"))?;
+        let port: u16 = port_str
+            .parse()
+            .map_err(|_| format!("Invalid port: {port_str}"))?;
         (rest[..colon].to_string(), port)
     } else {
         let default_port = if scheme { 465 } else { 587 };
@@ -62,21 +64,32 @@ fn dot_stuff(body: &str) -> String {
 
 pub fn send(config: &SmtpConfig) -> SmtpResult {
     match send_inner(config) {
-        Ok(msg) => SmtpResult { success: true, message: msg },
-        Err(msg) => SmtpResult { success: false, message: msg },
+        Ok(msg) => SmtpResult {
+            success: true,
+            message: msg,
+        },
+        Err(msg) => SmtpResult {
+            success: false,
+            message: msg,
+        },
     }
 }
 
 fn send_inner(config: &SmtpConfig) -> Result<String, String> {
     let addr = format!("{}:{}", config.host, config.port);
     let stream = TcpStream::connect_timeout(
-        &addr.parse().map_err(|e| format!("Invalid address {addr}: {e}"))?,
+        &addr
+            .parse()
+            .map_err(|e| format!("Invalid address {addr}: {e}"))?,
         Duration::from_secs(10),
-    ).map_err(|e| format!("Connection failed to {addr}: {e}"))?;
+    )
+    .map_err(|e| format!("Connection failed to {addr}: {e}"))?;
 
-    stream.set_read_timeout(Some(Duration::from_secs(15)))
+    stream
+        .set_read_timeout(Some(Duration::from_secs(15)))
         .map_err(|e| format!("Set timeout failed: {e}"))?;
-    stream.set_write_timeout(Some(Duration::from_secs(15)))
+    stream
+        .set_write_timeout(Some(Duration::from_secs(15)))
         .map_err(|e| format!("Set timeout failed: {e}"))?;
 
     if config.use_tls {
@@ -97,7 +110,7 @@ fn send_with_starttls(config: &SmtpConfig, stream: TcpStream) -> Result<String, 
     expect_code(&greeting, 220)?;
 
     // EHLO
-    write_cmd(&mut writer, &format!("EHLO duck_net\r\n"))?;
+    write_cmd(&mut writer, "EHLO duck_net\r\n")?;
     let ehlo_resp = read_response(&mut reader)?;
     expect_code(&ehlo_resp, 250)?;
 
@@ -118,12 +131,11 @@ fn send_with_starttls(config: &SmtpConfig, stream: TcpStream) -> Result<String, 
 }
 
 fn send_over_tls(config: &SmtpConfig, stream: TcpStream) -> Result<String, String> {
-    use std::sync::Arc;
     use rustls::pki_types::ServerName;
+    use std::sync::Arc;
 
-    let root_store = rustls::RootCertStore::from_iter(
-        webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
-    );
+    let root_store =
+        rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let tls_config = rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_no_client_auth();
@@ -131,10 +143,8 @@ fn send_over_tls(config: &SmtpConfig, stream: TcpStream) -> Result<String, Strin
     let server_name = ServerName::try_from(config.host.clone())
         .map_err(|e| format!("Invalid server name: {e}"))?;
 
-    let tls_conn = rustls::ClientConnection::new(
-        Arc::new(tls_config),
-        server_name,
-    ).map_err(|e| format!("TLS init failed: {e}"))?;
+    let tls_conn = rustls::ClientConnection::new(Arc::new(tls_config), server_name)
+        .map_err(|e| format!("TLS init failed: {e}"))?;
 
     let mut tls_stream = rustls::StreamOwned::new(tls_conn, stream);
 
@@ -150,8 +160,12 @@ fn send_over_tls(config: &SmtpConfig, stream: TcpStream) -> Result<String, Strin
     drop(buf_reader);
 
     // EHLO
-    tls_stream.write_all(b"EHLO duck_net\r\n").map_err(|e| format!("Write failed: {e}"))?;
-    tls_stream.flush().map_err(|e| format!("Flush failed: {e}"))?;
+    tls_stream
+        .write_all(b"EHLO duck_net\r\n")
+        .map_err(|e| format!("Write failed: {e}"))?;
+    tls_stream
+        .flush()
+        .map_err(|e| format!("Flush failed: {e}"))?;
 
     let mut buf_reader = BufReader::new(&mut tls_stream);
     let ehlo_resp = read_response_generic(&mut buf_reader)?;
@@ -166,8 +180,12 @@ fn send_over_tls(config: &SmtpConfig, stream: TcpStream) -> Result<String, Strin
             auth_str.as_bytes(),
         );
         let auth_cmd = format!("AUTH PLAIN {encoded}\r\n");
-        tls_stream.write_all(auth_cmd.as_bytes()).map_err(|e| format!("Write failed: {e}"))?;
-        tls_stream.flush().map_err(|e| format!("Flush failed: {e}"))?;
+        tls_stream
+            .write_all(auth_cmd.as_bytes())
+            .map_err(|e| format!("Write failed: {e}"))?;
+        tls_stream
+            .flush()
+            .map_err(|e| format!("Flush failed: {e}"))?;
 
         let mut buf_reader = BufReader::new(&mut tls_stream);
         let auth_resp = read_response_generic(&mut buf_reader)?;
@@ -177,8 +195,12 @@ fn send_over_tls(config: &SmtpConfig, stream: TcpStream) -> Result<String, Strin
 
     // MAIL FROM
     let from_cmd = format!("MAIL FROM:<{}>\r\n", sanitize_header(&config.from));
-    tls_stream.write_all(from_cmd.as_bytes()).map_err(|e| format!("Write failed: {e}"))?;
-    tls_stream.flush().map_err(|e| format!("Flush failed: {e}"))?;
+    tls_stream
+        .write_all(from_cmd.as_bytes())
+        .map_err(|e| format!("Write failed: {e}"))?;
+    tls_stream
+        .flush()
+        .map_err(|e| format!("Flush failed: {e}"))?;
     let mut buf_reader = BufReader::new(&mut tls_stream);
     let from_resp = read_response_generic(&mut buf_reader)?;
     expect_code(&from_resp, 250)?;
@@ -186,16 +208,24 @@ fn send_over_tls(config: &SmtpConfig, stream: TcpStream) -> Result<String, Strin
 
     // RCPT TO
     let to_cmd = format!("RCPT TO:<{}>\r\n", sanitize_header(&config.to));
-    tls_stream.write_all(to_cmd.as_bytes()).map_err(|e| format!("Write failed: {e}"))?;
-    tls_stream.flush().map_err(|e| format!("Flush failed: {e}"))?;
+    tls_stream
+        .write_all(to_cmd.as_bytes())
+        .map_err(|e| format!("Write failed: {e}"))?;
+    tls_stream
+        .flush()
+        .map_err(|e| format!("Flush failed: {e}"))?;
     let mut buf_reader = BufReader::new(&mut tls_stream);
     let to_resp = read_response_generic(&mut buf_reader)?;
     expect_code(&to_resp, 250)?;
     drop(buf_reader);
 
     // DATA
-    tls_stream.write_all(b"DATA\r\n").map_err(|e| format!("Write failed: {e}"))?;
-    tls_stream.flush().map_err(|e| format!("Flush failed: {e}"))?;
+    tls_stream
+        .write_all(b"DATA\r\n")
+        .map_err(|e| format!("Write failed: {e}"))?;
+    tls_stream
+        .flush()
+        .map_err(|e| format!("Flush failed: {e}"))?;
     let mut buf_reader = BufReader::new(&mut tls_stream);
     let data_resp = read_response_generic(&mut buf_reader)?;
     expect_code(&data_resp, 354)?;
@@ -209,9 +239,15 @@ fn send_over_tls(config: &SmtpConfig, stream: TcpStream) -> Result<String, Strin
         sanitize_header(&config.subject),
         dot_stuff(&config.body),
     );
-    tls_stream.write_all(message.as_bytes()).map_err(|e| format!("Write failed: {e}"))?;
-    tls_stream.write_all(b"\r\n.\r\n").map_err(|e| format!("Write failed: {e}"))?;
-    tls_stream.flush().map_err(|e| format!("Flush failed: {e}"))?;
+    tls_stream
+        .write_all(message.as_bytes())
+        .map_err(|e| format!("Write failed: {e}"))?;
+    tls_stream
+        .write_all(b"\r\n.\r\n")
+        .map_err(|e| format!("Write failed: {e}"))?;
+    tls_stream
+        .flush()
+        .map_err(|e| format!("Flush failed: {e}"))?;
 
     let mut buf_reader = BufReader::new(&mut tls_stream);
     let send_resp = read_response_generic(&mut buf_reader)?;
@@ -219,7 +255,9 @@ fn send_over_tls(config: &SmtpConfig, stream: TcpStream) -> Result<String, Strin
     drop(buf_reader);
 
     // QUIT
-    tls_stream.write_all(b"QUIT\r\n").map_err(|e| format!("Write failed: {e}"))?;
+    tls_stream
+        .write_all(b"QUIT\r\n")
+        .map_err(|e| format!("Write failed: {e}"))?;
     tls_stream.flush().ok();
 
     Ok(send_resp)
@@ -243,12 +281,18 @@ fn send_mail_commands<R: BufRead, W: Write>(
     }
 
     // MAIL FROM
-    write_cmd(writer, &format!("MAIL FROM:<{}>\r\n", sanitize_header(&config.from)))?;
+    write_cmd(
+        writer,
+        &format!("MAIL FROM:<{}>\r\n", sanitize_header(&config.from)),
+    )?;
     let resp = read_response(reader)?;
     expect_code(&resp, 250)?;
 
     // RCPT TO
-    write_cmd(writer, &format!("RCPT TO:<{}>\r\n", sanitize_header(&config.to)))?;
+    write_cmd(
+        writer,
+        &format!("RCPT TO:<{}>\r\n", sanitize_header(&config.to)),
+    )?;
     let resp = read_response(reader)?;
     expect_code(&resp, 250)?;
 
@@ -276,7 +320,8 @@ fn send_mail_commands<R: BufRead, W: Write>(
 }
 
 fn write_cmd<W: Write>(w: &mut W, cmd: &str) -> Result<(), String> {
-    w.write_all(cmd.as_bytes()).map_err(|e| format!("Write failed: {e}"))?;
+    w.write_all(cmd.as_bytes())
+        .map_err(|e| format!("Write failed: {e}"))?;
     w.flush().map_err(|e| format!("Flush failed: {e}"))
 }
 
@@ -288,7 +333,9 @@ fn read_response_generic<R: BufRead>(reader: &mut R) -> Result<String, String> {
     let mut full_response = String::new();
     loop {
         let mut line = String::new();
-        reader.read_line(&mut line).map_err(|e| format!("Read failed: {e}"))?;
+        reader
+            .read_line(&mut line)
+            .map_err(|e| format!("Read failed: {e}"))?;
         if line.is_empty() {
             break;
         }

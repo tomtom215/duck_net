@@ -317,8 +317,7 @@ unsafe extern "C" fn cb_basic_auth(
     for row in 0..row_count {
         let user = user_reader.read_str(row as usize);
         let pass = pass_reader.read_str(row as usize);
-        let encoded = base64::engine::general_purpose::STANDARD
-            .encode(format!("{user}:{pass}"));
+        let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
         let header = format!("Basic {encoded}");
         write_varchar(output, row, &header);
     }
@@ -367,19 +366,131 @@ unsafe extern "C" fn cb_oauth2_token(
         let resp = http::execute(
             Method::Post,
             token_url,
-            &[("Content-Type".into(), "application/x-www-form-urlencoded".into())],
+            &[(
+                "Content-Type".into(),
+                "application/x-www-form-urlencoded".into(),
+            )],
             Some(&form_body),
         );
 
         let header = if resp.status == 200 {
             match json::extract_string(&resp.body, "access_token") {
                 Some(token) => format!("Bearer {token}"),
-                None => format!("OAuth2 error: no access_token in response body"),
+                None => "OAuth2 error: no access_token in response body".to_string(),
             }
         } else {
             format!("OAuth2 error: {} {}", resp.status, resp.reason)
         };
         write_varchar(output, row, &header);
+    }
+}
+
+/// Callback: http_oauth2_token(token_url, client_id, client_secret, scope) -> VARCHAR
+unsafe extern "C" fn cb_oauth2_token_scoped(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let id_reader = VectorReader::new(input, 1);
+    let secret_reader = VectorReader::new(input, 2);
+    let scope_reader = VectorReader::new(input, 3);
+
+    for row in 0..row_count {
+        let token_url = url_reader.read_str(row as usize);
+        let client_id = id_reader.read_str(row as usize);
+        let client_secret = secret_reader.read_str(row as usize);
+        let scope = scope_reader.read_str(row as usize);
+
+        let form_body = format!(
+            "grant_type=client_credentials&client_id={}&client_secret={}&scope={}",
+            json::form_urlencode(client_id),
+            json::form_urlencode(client_secret),
+            json::form_urlencode(scope),
+        );
+
+        let resp = http::execute(
+            Method::Post,
+            token_url,
+            &[(
+                "Content-Type".into(),
+                "application/x-www-form-urlencoded".into(),
+            )],
+            Some(&form_body),
+        );
+
+        let header = if resp.status == 200 {
+            match json::extract_string(&resp.body, "access_token") {
+                Some(token) => format!("Bearer {token}"),
+                None => "OAuth2 error: no access_token in response body".to_string(),
+            }
+        } else {
+            format!("OAuth2 error: {} {}", resp.status, resp.reason)
+        };
+        write_varchar(output, row, &header);
+    }
+}
+
+/// Callback: duck_net_set_retry_statuses(statuses VARCHAR) -> VARCHAR
+/// Accepts comma-separated status codes, e.g. "429,500,502,503,504"
+unsafe extern "C" fn cb_set_retry_statuses(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let statuses_reader = VectorReader::new(input, 0);
+
+    for row in 0..row_count {
+        let input_str = statuses_reader.read_str(row as usize);
+        let mut codes = Vec::new();
+        let mut err = None;
+        for part in input_str.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            match part.parse::<u16>() {
+                Ok(code) => codes.push(code),
+                Err(_) => {
+                    err = Some(format!("Invalid status code: {part}"));
+                    break;
+                }
+            }
+        }
+        let msg = match err {
+            Some(e) => format!("Error: {e}"),
+            None => {
+                let desc = codes
+                    .iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                http::set_retry_statuses(codes);
+                format!("Retry statuses set to: {desc}")
+            }
+        };
+        write_varchar(output, row, &msg);
+    }
+}
+
+/// Callback: duck_net_set_domain_rate_limits(config VARCHAR) -> VARCHAR
+unsafe extern "C" fn cb_set_domain_rate_limits(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let config_reader = VectorReader::new(input, 0);
+
+    for row in 0..row_count {
+        let config = config_reader.read_str(row as usize);
+        let msg = match rate_limit::set_domain_limits(config) {
+            Ok(m) => m,
+            Err(e) => format!("Error: {e}"),
+        };
+        write_varchar(output, row, &msg);
     }
 }
 
@@ -391,9 +502,7 @@ unsafe extern "C" fn cb_set_rate_limit(
     output: duckdb_vector,
 ) {
     let row_count = duckdb_data_chunk_get_size(input);
-    let rps_data = duckdb_vector_get_data(
-        duckdb_data_chunk_get_vector(input, 0),
-    ) as *const i32;
+    let rps_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const i32;
 
     for row in 0..row_count {
         let rps = *rps_data.add(row as usize);
@@ -569,13 +678,25 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .function(cb_bearer_auth)
         .register(con)?;
 
-    // Auth helpers: http_oauth2_token(token_url, client_id, client_secret) -> VARCHAR
-    ScalarFunctionBuilder::new("http_oauth2_token")
-        .param(TypeId::Varchar)
-        .param(TypeId::Varchar)
-        .param(TypeId::Varchar)
-        .returns(TypeId::Varchar)
-        .function(cb_oauth2_token)
+    // Auth helpers: http_oauth2_token (3-param and 4-param with scopes)
+    ScalarFunctionSetBuilder::new("http_oauth2_token")
+        .overload(
+            ScalarOverloadBuilder::new()
+                .param(TypeId::Varchar)
+                .param(TypeId::Varchar)
+                .param(TypeId::Varchar)
+                .returns(TypeId::Varchar)
+                .function(cb_oauth2_token),
+        )
+        .overload(
+            ScalarOverloadBuilder::new()
+                .param(TypeId::Varchar)
+                .param(TypeId::Varchar)
+                .param(TypeId::Varchar)
+                .param(TypeId::Varchar)
+                .returns(TypeId::Varchar)
+                .function(cb_oauth2_token_scoped),
+        )
         .register(con)?;
 
     // Rate limiting: duck_net_set_rate_limit(requests_per_second INTEGER) -> VARCHAR
@@ -598,6 +719,20 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(TypeId::Integer)
         .returns(TypeId::Varchar)
         .function(cb_set_timeout)
+        .register(con)?;
+
+    // Retry status codes: duck_net_set_retry_statuses(statuses VARCHAR) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_retry_statuses")
+        .param(TypeId::Varchar)
+        .returns(TypeId::Varchar)
+        .function(cb_set_retry_statuses)
+        .register(con)?;
+
+    // Per-domain rate limiting: duck_net_set_domain_rate_limits(config VARCHAR) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_domain_rate_limits")
+        .param(TypeId::Varchar)
+        .returns(TypeId::Varchar)
+        .function(cb_set_domain_rate_limits)
         .register(con)?;
 
     Ok(())

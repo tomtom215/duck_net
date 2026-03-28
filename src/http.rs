@@ -2,8 +2,8 @@ use std::io::Read as _;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use ureq::Agent;
 use ureq::tls::{RootCerts, TlsConfig};
+use ureq::Agent;
 
 /// Maximum response body size: 256 MiB.
 /// Prevents OOM from unbounded response buffering (CWE-400).
@@ -27,17 +27,40 @@ const DEFAULT_RETRYABLE_STATUSES: &[u16] = &[429, 500, 502, 503, 504];
 // ===== User-configurable globals =====
 
 static GLOBAL_MAX_RETRIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-static GLOBAL_RETRY_BACKOFF_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1000);
+static GLOBAL_RETRY_BACKOFF_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1000);
 static GLOBAL_TIMEOUT_SECS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(30);
+static GLOBAL_RETRY_STATUSES: std::sync::LazyLock<std::sync::Mutex<Vec<u16>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(DEFAULT_RETRYABLE_STATUSES.to_vec()));
 
-pub fn set_max_retries(n: u32) { GLOBAL_MAX_RETRIES.store(n, std::sync::atomic::Ordering::Relaxed); }
-pub fn get_max_retries() -> u32 { GLOBAL_MAX_RETRIES.load(std::sync::atomic::Ordering::Relaxed) }
+pub fn set_max_retries(n: u32) {
+    GLOBAL_MAX_RETRIES.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+pub fn get_max_retries() -> u32 {
+    GLOBAL_MAX_RETRIES.load(std::sync::atomic::Ordering::Relaxed)
+}
 
-pub fn set_retry_backoff_ms(ms: u64) { GLOBAL_RETRY_BACKOFF_MS.store(ms, std::sync::atomic::Ordering::Relaxed); }
-pub fn get_retry_backoff_ms() -> u64 { GLOBAL_RETRY_BACKOFF_MS.load(std::sync::atomic::Ordering::Relaxed) }
+pub fn set_retry_backoff_ms(ms: u64) {
+    GLOBAL_RETRY_BACKOFF_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
+}
+pub fn get_retry_backoff_ms() -> u64 {
+    GLOBAL_RETRY_BACKOFF_MS.load(std::sync::atomic::Ordering::Relaxed)
+}
 
-pub fn set_timeout_secs(s: u64) { GLOBAL_TIMEOUT_SECS.store(s, std::sync::atomic::Ordering::Relaxed); }
-pub(crate) fn get_timeout_secs() -> u64 { GLOBAL_TIMEOUT_SECS.load(std::sync::atomic::Ordering::Relaxed) }
+pub fn set_timeout_secs(s: u64) {
+    GLOBAL_TIMEOUT_SECS.store(s, std::sync::atomic::Ordering::Relaxed);
+}
+#[allow(dead_code)]
+pub(crate) fn get_timeout_secs() -> u64 {
+    GLOBAL_TIMEOUT_SECS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_retry_statuses(statuses: Vec<u16>) {
+    *GLOBAL_RETRY_STATUSES.lock().unwrap() = statuses;
+}
+pub fn get_retry_statuses() -> Vec<u16> {
+    GLOBAL_RETRY_STATUSES.lock().unwrap().clone()
+}
 
 static AGENT: LazyLock<Agent> = LazyLock::new(|| {
     // Use the platform's native certificate verifier so we trust the OS CA store.
@@ -125,8 +148,7 @@ impl RetryConfig {
     }
 
     fn delay_for_attempt(&self, attempt: u32) -> Duration {
-        let delay_ms =
-            self.backoff_ms as f64 * self.backoff_factor.powi(attempt as i32);
+        let delay_ms = self.backoff_ms as f64 * self.backoff_factor.powi(attempt as i32);
         // Cap at 60 seconds to prevent excessive blocking
         let capped_ms = delay_ms.min(60_000.0) as u64;
         Duration::from_millis(capped_ms)
@@ -153,8 +175,7 @@ fn read_body_limited(body: &mut ureq::Body) -> Result<String, String> {
         .take(MAX_RESPONSE_BODY_BYTES)
         .read_to_end(&mut buf)
         .map_err(|e| format!("Failed to read response body: {e}"))?;
-    String::from_utf8(buf)
-        .map_err(|e| format!("Response body is not valid UTF-8: {e}"))
+    String::from_utf8(buf).map_err(|e| format!("Response body is not valid UTF-8: {e}"))
 }
 
 pub fn execute(
@@ -169,7 +190,7 @@ pub fn execute(
         max_retries: get_max_retries(),
         backoff_ms: get_retry_backoff_ms(),
         backoff_factor: DEFAULT_RETRY_BACKOFF_FACTOR,
-        retryable_statuses: DEFAULT_RETRYABLE_STATUSES.to_vec(),
+        retryable_statuses: get_retry_statuses(),
     };
     execute_with_retry(method, url, headers, body, &config)
 }
@@ -332,7 +353,9 @@ fn execute_multipart_inner(
         builder = builder.header(key.as_str(), value.as_str());
     }
 
-    let mut response = builder.send(form).map_err(|e| format!("Request failed: {e}"))?;
+    let mut response = builder
+        .send(form)
+        .map_err(|e| format!("Request failed: {e}"))?;
 
     let status = response.status().as_u16();
     let reason = response

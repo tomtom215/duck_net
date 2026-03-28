@@ -45,7 +45,7 @@ All functions return `STRUCT(status INTEGER, reason VARCHAR, headers MAP(VARCHAR
 |----------|-----------|---------|
 | `http_basic_auth` | `(username VARCHAR, password VARCHAR)` | `VARCHAR` — `Basic <base64>` header value |
 | `http_bearer_auth` | `(token VARCHAR)` | `VARCHAR` — `Bearer <token>` header value |
-| `http_oauth2_token` | `(token_url VARCHAR, client_id VARCHAR, client_secret VARCHAR)` | `VARCHAR` — `Bearer <access_token>` from OAuth2 Client Credentials grant |
+| `http_oauth2_token` | `(token_url, client_id, client_secret)`, `(token_url, client_id, client_secret, scope)` | `VARCHAR` — `Bearer <access_token>` from OAuth2 Client Credentials grant |
 
 ### SOAP
 
@@ -80,8 +80,10 @@ SELECT * FROM http_paginate(
 
 | Function | Signature | Returns |
 |----------|-----------|---------|
-| `duck_net_set_rate_limit` | `(requests_per_second INTEGER)` | `VARCHAR` — confirmation. 0 to disable |
+| `duck_net_set_rate_limit` | `(requests_per_second INTEGER)` | `VARCHAR` — global rate limit. 0 to disable |
+| `duck_net_set_domain_rate_limits` | `(config VARCHAR)` | `VARCHAR` — per-domain limits. JSON: `{"domain": rps}` or `domain=rps,domain2=rps`. Supports `*.domain.com` wildcards |
 | `duck_net_set_retries` | `(max_retries INTEGER, backoff_ms INTEGER)` | `VARCHAR` — configures retry with exponential backoff |
+| `duck_net_set_retry_statuses` | `(statuses VARCHAR)` | `VARCHAR` — comma-separated HTTP status codes to retry on (e.g., `'429,500,502,503,504'`) |
 | `duck_net_set_timeout` | `(seconds INTEGER)` | `VARCHAR` — sets global HTTP timeout |
 
 ### DNS Lookups
@@ -113,8 +115,20 @@ Returns `STRUCT(success BOOLEAN, message VARCHAR)`. Server URL: `smtp://host:por
 | `sftp_read` | `(url VARCHAR)`, `(url VARCHAR, key_file VARCHAR)` | `STRUCT(success BOOLEAN, content VARCHAR, size BIGINT, message VARCHAR)` |
 | `sftp_write` | `(url VARCHAR, content VARCHAR)` | `STRUCT(success BOOLEAN, bytes_written BIGINT, message VARCHAR)` |
 | `sftp_delete` | `(url VARCHAR)` | `STRUCT(success BOOLEAN, message VARCHAR)` |
+| `ftp_read_blob` | `(url VARCHAR)` | `STRUCT(success BOOLEAN, data BLOB, size BIGINT, message VARCHAR)` |
+| `sftp_read_blob` | `(url VARCHAR)`, `(url VARCHAR, key_file VARCHAR)` | `STRUCT(success BOOLEAN, data BLOB, size BIGINT, message VARCHAR)` |
+
+Table functions for directory listing:
+
+```sql
+SELECT * FROM ftp_list('ftp://user:pass@host/path/');   -- (name, size, is_dir)
+SELECT * FROM sftp_list('sftp://user:pass@host/path/'); -- (name, size, is_dir)
+SELECT * FROM sftp_list('sftp://user@host/path/', key_file := '/path/to/key');
+```
 
 URL format: `ftp://[user:pass@]host[:port]/path`, `sftp://[user:pass@]host[:port]/path`
+
+FTP connections are cached with 60-second TTL for efficient bulk operations.
 
 ## Usage Examples
 
@@ -321,6 +335,11 @@ duckdb -unsigned -cmd "LOAD 'target/release/libduck_net.so';"
 | **Timeouts** | 30-second global timeout per request (connect + transfer) |
 | **Retry with backoff** | Configurable exponential backoff with 60s cap per delay (prevents thundering herd) |
 | **Connection pooling** | Single global ureq Agent reuses TCP connections (HTTP keep-alive) |
+| **FTP connection caching** | Cached with 60-second TTL, NOOP keepalive check, max 32 connections |
+| **SFTP host key verification** | Reads `~/.ssh/known_hosts`, TOFU on first connect, rejects changed keys (CWE-295) |
+| **Credential scrubbing** | FTP/SFTP error messages replace `user:pass` with `***` (CWE-532) |
+| **SMTP injection prevention** | CRLF sanitization in headers, dot-stuffing in body (CWE-93) |
+| **HTTP proxy support** | Automatic — ureq reads `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` environment variables |
 | **No telemetry** | Zero phone-home, zero tracking |
 
 ## Dependencies

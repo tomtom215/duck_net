@@ -1,5 +1,7 @@
 use suppaftp::FtpStream;
 
+use crate::ftp_cache;
+
 /// Scrub credentials from a URL for safe inclusion in error messages (CWE-532).
 fn scrub_url(url: &str) -> String {
     if let Some(at) = url.find('@') {
@@ -8,6 +10,14 @@ fn scrub_url(url: &str) -> String {
         }
     }
     url.to_string()
+}
+
+/// Binary read result (for ftp_read_blob).
+pub struct FtpReadBlobResult {
+    pub success: bool,
+    pub data: Vec<u8>,
+    pub size: i64,
+    pub message: String,
 }
 
 pub struct FtpResult {
@@ -35,8 +45,12 @@ pub struct FtpEntry {
 }
 
 /// Parse FTP URL: ftp://[user:pass@]host[:port]/path
-pub fn parse_url(url: &str) -> Result<(String, u16, Option<String>, Option<String>, String), String> {
-    let rest = url.strip_prefix("ftp://")
+#[allow(clippy::type_complexity)]
+pub fn parse_url(
+    url: &str,
+) -> Result<(String, u16, Option<String>, Option<String>, String), String> {
+    let rest = url
+        .strip_prefix("ftp://")
         .or_else(|| url.strip_prefix("ftps://"))
         .ok_or_else(|| "URL must start with ftp:// or ftps://".to_string())?;
 
@@ -49,7 +63,10 @@ pub fn parse_url(url: &str) -> Result<(String, u16, Option<String>, Option<Strin
     let (user, pass) = match userinfo {
         Some(ui) => {
             if let Some(colon) = ui.find(':') {
-                (Some(ui[..colon].to_string()), Some(ui[colon + 1..].to_string()))
+                (
+                    Some(ui[..colon].to_string()),
+                    Some(ui[colon + 1..].to_string()),
+                )
             } else {
                 (Some(ui.to_string()), None)
             }
@@ -73,24 +90,44 @@ pub fn parse_url(url: &str) -> Result<(String, u16, Option<String>, Option<Strin
     Ok((host, port, user, pass, path))
 }
 
-fn connect_and_login(url: &str) -> Result<(FtpStream, String), String> {
+/// Parsed FTP connection details for cache return.
+struct FtpConn {
+    stream: FtpStream,
+    host: String,
+    port: u16,
+    username: String,
+    path: String,
+}
+
+fn connect_and_login(url: &str) -> Result<FtpConn, String> {
     let (host, port, user, pass, path) = parse_url(url)?;
-    let addr = format!("{host}:{port}");
-    let mut ftp = FtpStream::connect(&addr)
-        .map_err(|e| format!("FTP connection failed to {}: {e}", scrub_url(url)))?;
+    let username = user.unwrap_or_else(|| "anonymous".to_string());
+    let password = pass.unwrap_or_else(|| "duck_net@".to_string());
 
-    let username = user.as_deref().unwrap_or("anonymous");
-    let password = pass.as_deref().unwrap_or("duck_net@");
-    ftp.login(username, password)
-        .map_err(|e| format!("FTP login failed: {e}"))?;
+    let stream = ftp_cache::get_or_connect(&host, port, &username, &password)
+        .map_err(|e| format!("{} ({})", e, scrub_url(url)))?;
 
-    Ok((ftp, path))
+    Ok(FtpConn {
+        stream,
+        host,
+        port,
+        username,
+        path,
+    })
+}
+
+impl FtpConn {
+    fn return_to_cache(self) {
+        ftp_cache::return_to_cache(&self.host, self.port, &self.username, self.stream);
+    }
 }
 
 pub fn list(url: &str) -> Result<Vec<FtpEntry>, String> {
-    let (mut ftp, path) = connect_and_login(url)?;
+    let mut conn = connect_and_login(url)?;
 
-    let listing = ftp.list(Some(&path))
+    let listing = conn
+        .stream
+        .list(Some(&conn.path))
         .map_err(|e| format!("FTP list failed: {e}"))?;
 
     let mut entries = Vec::new();
@@ -100,66 +137,126 @@ pub fn list(url: &str) -> Result<Vec<FtpEntry>, String> {
         }
     }
 
-    ftp.quit().ok();
+    conn.return_to_cache();
     Ok(entries)
 }
 
 pub fn read(url: &str) -> FtpReadResult {
     match read_inner(url) {
         Ok(r) => r,
-        Err(msg) => FtpReadResult { success: false, content: String::new(), size: 0, message: msg },
+        Err(msg) => FtpReadResult {
+            success: false,
+            content: String::new(),
+            size: 0,
+            message: msg,
+        },
     }
 }
 
 fn read_inner(url: &str) -> Result<FtpReadResult, String> {
-    let (mut ftp, path) = connect_and_login(url)?;
+    let mut conn = connect_and_login(url)?;
 
-    let data = ftp.retr_as_buffer(&path)
+    let data = conn
+        .stream
+        .retr_as_buffer(&conn.path)
         .map_err(|e| format!("FTP read failed: {e}"))?;
 
     let buf = data.into_inner();
     let size = buf.len() as i64;
-    let content = String::from_utf8(buf)
-        .map_err(|e| format!("FTP file is not valid UTF-8: {e}"))?;
+    let content =
+        String::from_utf8(buf).map_err(|e| format!("FTP file is not valid UTF-8: {e}"))?;
 
-    ftp.quit().ok();
-    Ok(FtpReadResult { success: true, content, size, message: "OK".into() })
+    conn.return_to_cache();
+    Ok(FtpReadResult {
+        success: true,
+        content,
+        size,
+        message: "OK".into(),
+    })
+}
+
+/// Read a file as raw bytes (binary).
+pub fn read_blob(url: &str) -> FtpReadBlobResult {
+    match read_blob_inner(url) {
+        Ok(r) => r,
+        Err(msg) => FtpReadBlobResult {
+            success: false,
+            data: vec![],
+            size: 0,
+            message: msg,
+        },
+    }
+}
+
+fn read_blob_inner(url: &str) -> Result<FtpReadBlobResult, String> {
+    let mut conn = connect_and_login(url)?;
+
+    let data = conn
+        .stream
+        .retr_as_buffer(&conn.path)
+        .map_err(|e| format!("FTP read failed: {e}"))?;
+
+    let buf = data.into_inner();
+    let size = buf.len() as i64;
+    conn.return_to_cache();
+    Ok(FtpReadBlobResult {
+        success: true,
+        data: buf,
+        size,
+        message: "OK".into(),
+    })
 }
 
 pub fn write(url: &str, content: &str) -> FtpWriteResult {
     match write_inner(url, content) {
         Ok(r) => r,
-        Err(msg) => FtpWriteResult { success: false, bytes_written: 0, message: msg },
+        Err(msg) => FtpWriteResult {
+            success: false,
+            bytes_written: 0,
+            message: msg,
+        },
     }
 }
 
 fn write_inner(url: &str, content: &str) -> Result<FtpWriteResult, String> {
-    let (mut ftp, path) = connect_and_login(url)?;
+    let mut conn = connect_and_login(url)?;
 
     let data = content.as_bytes();
     let mut cursor = std::io::Cursor::new(data);
-    ftp.put_file(&path, &mut cursor)
+    conn.stream
+        .put_file(&conn.path, &mut cursor)
         .map_err(|e| format!("FTP write failed: {e}"))?;
 
     let bytes_written = data.len() as i64;
-    ftp.quit().ok();
-    Ok(FtpWriteResult { success: true, bytes_written, message: "OK".into() })
+    conn.return_to_cache();
+    Ok(FtpWriteResult {
+        success: true,
+        bytes_written,
+        message: "OK".into(),
+    })
 }
 
 pub fn delete(url: &str) -> FtpResult {
     match delete_inner(url) {
-        Ok(msg) => FtpResult { success: true, message: msg },
-        Err(msg) => FtpResult { success: false, message: msg },
+        Ok(msg) => FtpResult {
+            success: true,
+            message: msg,
+        },
+        Err(msg) => FtpResult {
+            success: false,
+            message: msg,
+        },
     }
 }
 
 fn delete_inner(url: &str) -> Result<String, String> {
-    let (mut ftp, path) = connect_and_login(url)?;
+    let mut conn = connect_and_login(url)?;
 
-    ftp.rm(&path)
+    conn.stream
+        .rm(&conn.path)
         .map_err(|e| format!("FTP delete failed: {e}"))?;
 
-    ftp.quit().ok();
+    conn.return_to_cache();
     Ok("OK".into())
 }
 
@@ -169,7 +266,11 @@ fn parse_list_line(line: &str) -> Option<FtpEntry> {
     if parts.len() < 9 {
         // Try simple format: just a filename
         if parts.len() == 1 {
-            return Some(FtpEntry { name: parts[0].to_string(), size: -1, is_dir: false });
+            return Some(FtpEntry {
+                name: parts[0].to_string(),
+                size: -1,
+                is_dir: false,
+            });
         }
         return None;
     }

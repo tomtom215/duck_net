@@ -1,13 +1,12 @@
 mod dns;
 mod ffi;
-#[allow(dead_code)]
 mod ftp;
+mod ftp_cache;
 mod http;
 mod json;
 mod pagination;
 mod rate_limit;
 mod runtime;
-#[allow(dead_code)]
 mod sftp;
 mod smtp;
 mod soap;

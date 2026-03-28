@@ -7,7 +7,12 @@ use super::scalars::write_varchar;
 
 // ===== Helper: write a Vec<String> to a LIST(VARCHAR) vector =====
 
-unsafe fn write_string_list(output: duckdb_vector, row: idx_t, items: &[String], list_offset: &mut idx_t) {
+unsafe fn write_string_list(
+    output: duckdb_vector,
+    row: idx_t,
+    items: &[String],
+    list_offset: &mut idx_t,
+) {
     let n = items.len() as idx_t;
     let new_total = *list_offset + n;
 
@@ -127,7 +132,8 @@ unsafe extern "C" fn cb_dns_mx(
     for row in 0..row_count {
         let hostname = host_reader.read_str(row as usize);
         let records = dns::lookup_mx(hostname).unwrap_or_default();
-        let formatted: Vec<String> = records.iter()
+        let formatted: Vec<String> = records
+            .iter()
             .map(|r| format!("{}\t{}", r.priority, r.host))
             .collect();
         write_string_list(output, row, &formatted, &mut list_offset);
@@ -140,21 +146,27 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
     // dns_lookup(hostname) -> VARCHAR[]
     ScalarFunctionBuilder::new("dns_lookup")
         .param(TypeId::Varchar)
-        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(TypeId::Varchar)))
+        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(
+            TypeId::Varchar,
+        )))
         .function(cb_dns_lookup)
         .register(con)?;
 
     // dns_lookup_a(hostname) -> VARCHAR[]
     ScalarFunctionBuilder::new("dns_lookup_a")
         .param(TypeId::Varchar)
-        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(TypeId::Varchar)))
+        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(
+            TypeId::Varchar,
+        )))
         .function(cb_dns_lookup_a)
         .register(con)?;
 
     // dns_lookup_aaaa(hostname) -> VARCHAR[]
     ScalarFunctionBuilder::new("dns_lookup_aaaa")
         .param(TypeId::Varchar)
-        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(TypeId::Varchar)))
+        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(
+            TypeId::Varchar,
+        )))
         .function(cb_dns_lookup_aaaa)
         .register(con)?;
 
@@ -169,14 +181,18 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
     // dns_txt(hostname) -> VARCHAR[]
     ScalarFunctionBuilder::new("dns_txt")
         .param(TypeId::Varchar)
-        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(TypeId::Varchar)))
+        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(
+            TypeId::Varchar,
+        )))
         .function(cb_dns_txt)
         .register(con)?;
 
     // dns_mx(hostname) -> VARCHAR[] (each entry: "priority\thost")
     ScalarFunctionBuilder::new("dns_mx")
         .param(TypeId::Varchar)
-        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(TypeId::Varchar)))
+        .returns_logical(LogicalType::list_from_logical(&LogicalType::new(
+            TypeId::Varchar,
+        )))
         .function(cb_dns_mx)
         .register(con)?;
 

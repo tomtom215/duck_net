@@ -5,6 +5,7 @@ use base64::Engine as _;
 use crate::runtime;
 
 /// Scrub credentials from a URL for safe inclusion in error messages (CWE-532).
+#[allow(dead_code)]
 fn scrub_url(url: &str) -> String {
     if let Some(at) = url.find('@') {
         if let Some(scheme_end) = url.find("://") {
@@ -16,6 +17,13 @@ fn scrub_url(url: &str) -> String {
 
 pub struct SftpResult {
     pub success: bool,
+    pub message: String,
+}
+
+pub struct SftpReadBlobResult {
+    pub success: bool,
+    pub data: Vec<u8>,
+    pub size: i64,
     pub message: String,
 }
 
@@ -39,8 +47,12 @@ pub struct SftpEntry {
 }
 
 /// Parse SFTP URL: sftp://[user:pass@]host[:port]/path
-pub fn parse_url(url: &str) -> Result<(String, u16, Option<String>, Option<String>, String), String> {
-    let rest = url.strip_prefix("sftp://")
+#[allow(clippy::type_complexity)]
+pub fn parse_url(
+    url: &str,
+) -> Result<(String, u16, Option<String>, Option<String>, String), String> {
+    let rest = url
+        .strip_prefix("sftp://")
         .ok_or_else(|| "URL must start with sftp://".to_string())?;
 
     let (userinfo, hostpath) = if let Some(at) = rest.find('@') {
@@ -52,7 +64,10 @@ pub fn parse_url(url: &str) -> Result<(String, u16, Option<String>, Option<Strin
     let (user, pass) = match userinfo {
         Some(ui) => {
             if let Some(colon) = ui.find(':') {
-                (Some(ui[..colon].to_string()), Some(ui[colon + 1..].to_string()))
+                (
+                    Some(ui[..colon].to_string()),
+                    Some(ui[colon + 1..].to_string()),
+                )
             } else {
                 (Some(ui.to_string()), None)
             }
@@ -166,7 +181,9 @@ fn check_known_hosts(host: &str, key_type: &str, key_data: &str) -> KnownHostRes
 }
 
 fn dirs_known_hosts() -> Option<String> {
-    std::env::var("HOME").ok().map(|h| format!("{h}/.ssh/known_hosts"))
+    std::env::var("HOME")
+        .ok()
+        .map(|h| format!("{h}/.ssh/known_hosts"))
 }
 
 async fn connect_sftp(
@@ -177,12 +194,12 @@ async fn connect_sftp(
     key_file: Option<&str>,
 ) -> Result<russh_sftp::client::SftpSession, String> {
     let config = russh::client::Config::default();
-    let handler = SshHandler { expected_host: host.to_string() };
-    let mut session = russh::client::connect(
-        Arc::new(config),
-        (host, port),
-        handler,
-    ).await.map_err(|e| format!("SSH connection failed: {e}"))?;
+    let handler = SshHandler {
+        expected_host: host.to_string(),
+    };
+    let mut session = russh::client::connect(Arc::new(config), (host, port), handler)
+        .await
+        .map_err(|e| format!("SSH connection failed: {e}"))?;
 
     // Authenticate
     if let Some(key_path) = key_file {
@@ -191,13 +208,17 @@ async fn connect_sftp(
         let key = russh::keys::decode_secret_key(&key_data, None)
             .map_err(|e| format!("Failed to parse key file: {e}"))?;
         let key_with_alg = russh::keys::key::PrivateKeyWithHashAlg::new(Arc::new(key), None);
-        let auth = session.authenticate_publickey(user, key_with_alg).await
+        let auth = session
+            .authenticate_publickey(user, key_with_alg)
+            .await
             .map_err(|e| format!("SSH public key auth failed: {e}"))?;
         if !auth.success() {
             return Err("SSH public key authentication rejected".into());
         }
     } else if let Some(password) = pass {
-        let auth = session.authenticate_password(user, password).await
+        let auth = session
+            .authenticate_password(user, password)
+            .await
             .map_err(|e| format!("SSH password auth failed: {e}"))?;
         if !auth.success() {
             return Err("SSH password authentication rejected".into());
@@ -207,12 +228,17 @@ async fn connect_sftp(
     }
 
     // Open SFTP channel
-    let channel = session.channel_open_session().await
+    let channel = session
+        .channel_open_session()
+        .await
         .map_err(|e| format!("SSH channel open failed: {e}"))?;
-    channel.request_subsystem(true, "sftp").await
+    channel
+        .request_subsystem(true, "sftp")
+        .await
         .map_err(|e| format!("SFTP subsystem request failed: {e}"))?;
 
-    let sftp = russh_sftp::client::SftpSession::new(channel.into_stream()).await
+    let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
+        .await
         .map_err(|e| format!("SFTP session init failed: {e}"))?;
 
     Ok(sftp)
@@ -227,7 +253,9 @@ async fn list_async(url: &str, key_file: Option<&str>) -> Result<Vec<SftpEntry>,
     let username = user.as_deref().unwrap_or("root");
     let sftp = connect_sftp(&host, port, username, pass.as_deref(), key_file).await?;
 
-    let entries = sftp.read_dir(&path).await
+    let entries = sftp
+        .read_dir(&path)
+        .await
         .map_err(|e| format!("SFTP readdir failed: {e}"))?;
 
     let mut result = Vec::new();
@@ -247,7 +275,12 @@ async fn list_async(url: &str, key_file: Option<&str>) -> Result<Vec<SftpEntry>,
 pub fn read(url: &str, key_file: Option<&str>) -> SftpReadResult {
     match runtime::block_on(read_async(url, key_file)) {
         Ok(r) => r,
-        Err(msg) => SftpReadResult { success: false, content: String::new(), size: 0, message: msg },
+        Err(msg) => SftpReadResult {
+            success: false,
+            content: String::new(),
+            size: 0,
+            message: msg,
+        },
     }
 }
 
@@ -256,40 +289,98 @@ async fn read_async(url: &str, key_file: Option<&str>) -> Result<SftpReadResult,
     let username = user.as_deref().unwrap_or("root");
     let sftp = connect_sftp(&host, port, username, pass.as_deref(), key_file).await?;
 
-    let data = sftp.read(&path).await
+    let data = sftp
+        .read(&path)
+        .await
         .map_err(|e| format!("SFTP read failed: {e}"))?;
 
     let size = data.len() as i64;
-    let content = String::from_utf8(data)
-        .map_err(|e| format!("SFTP file is not valid UTF-8: {e}"))?;
+    let content =
+        String::from_utf8(data).map_err(|e| format!("SFTP file is not valid UTF-8: {e}"))?;
 
-    Ok(SftpReadResult { success: true, content, size, message: "OK".into() })
+    Ok(SftpReadResult {
+        success: true,
+        content,
+        size,
+        message: "OK".into(),
+    })
+}
+
+/// Read a file as raw bytes (binary).
+pub fn read_blob(url: &str, key_file: Option<&str>) -> SftpReadBlobResult {
+    match runtime::block_on(read_blob_async(url, key_file)) {
+        Ok(r) => r,
+        Err(msg) => SftpReadBlobResult {
+            success: false,
+            data: vec![],
+            size: 0,
+            message: msg,
+        },
+    }
+}
+
+async fn read_blob_async(url: &str, key_file: Option<&str>) -> Result<SftpReadBlobResult, String> {
+    let (host, port, user, pass, path) = parse_url(url)?;
+    let username = user.as_deref().unwrap_or("root");
+    let sftp = connect_sftp(&host, port, username, pass.as_deref(), key_file).await?;
+
+    let data = sftp
+        .read(&path)
+        .await
+        .map_err(|e| format!("SFTP read failed: {e}"))?;
+
+    let size = data.len() as i64;
+    Ok(SftpReadBlobResult {
+        success: true,
+        data,
+        size,
+        message: "OK".into(),
+    })
 }
 
 pub fn write(url: &str, content: &str, key_file: Option<&str>) -> SftpWriteResult {
     match runtime::block_on(write_async(url, content, key_file)) {
         Ok(r) => r,
-        Err(msg) => SftpWriteResult { success: false, bytes_written: 0, message: msg },
+        Err(msg) => SftpWriteResult {
+            success: false,
+            bytes_written: 0,
+            message: msg,
+        },
     }
 }
 
-async fn write_async(url: &str, content: &str, key_file: Option<&str>) -> Result<SftpWriteResult, String> {
+async fn write_async(
+    url: &str,
+    content: &str,
+    key_file: Option<&str>,
+) -> Result<SftpWriteResult, String> {
     let (host, port, user, pass, path) = parse_url(url)?;
     let username = user.as_deref().unwrap_or("root");
     let sftp = connect_sftp(&host, port, username, pass.as_deref(), key_file).await?;
 
     let data = content.as_bytes().to_vec();
     let bytes_written = data.len() as i64;
-    sftp.write(&path, &data).await
+    sftp.write(&path, &data)
+        .await
         .map_err(|e| format!("SFTP write failed: {e}"))?;
 
-    Ok(SftpWriteResult { success: true, bytes_written, message: "OK".into() })
+    Ok(SftpWriteResult {
+        success: true,
+        bytes_written,
+        message: "OK".into(),
+    })
 }
 
 pub fn delete(url: &str, key_file: Option<&str>) -> SftpResult {
     match runtime::block_on(delete_async(url, key_file)) {
-        Ok(msg) => SftpResult { success: true, message: msg },
-        Err(msg) => SftpResult { success: false, message: msg },
+        Ok(msg) => SftpResult {
+            success: true,
+            message: msg,
+        },
+        Err(msg) => SftpResult {
+            success: false,
+            message: msg,
+        },
     }
 }
 
@@ -298,7 +389,8 @@ async fn delete_async(url: &str, key_file: Option<&str>) -> Result<String, Strin
     let username = user.as_deref().unwrap_or("root");
     let sftp = connect_sftp(&host, port, username, pass.as_deref(), key_file).await?;
 
-    sftp.remove_file(&path).await
+    sftp.remove_file(&path)
+        .await
         .map_err(|e| format!("SFTP delete failed: {e}"))?;
 
     Ok("OK".into())

@@ -33,7 +33,9 @@ where
                     .build()
                     .expect("Failed to create nested runtime");
                 rt.block_on(future)
-            }).join().expect("Async task panicked")
+            })
+            .join()
+            .expect("Async task panicked")
         })
     } else {
         // No runtime, use our shared one

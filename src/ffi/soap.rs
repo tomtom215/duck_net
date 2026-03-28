@@ -3,7 +3,9 @@ use quack_rs::prelude::*;
 
 use crate::soap::{self, SoapVersion};
 
-use super::scalars::{read_headers_map, response_type, map_varchar_varchar, write_response, write_varchar};
+use super::scalars::{
+    map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar,
+};
 
 // ===== SOAP Request Callbacks =====
 
@@ -68,7 +70,14 @@ unsafe extern "C" fn cb_soap11_4s(
         let action = action_reader.read_str(row as usize);
         let body_xml = body_reader.read_str(row as usize);
         let soap_hdr = soap_hdr_reader.read_str(row as usize);
-        let resp = soap::send_request(url, action, body_xml, Some(soap_hdr), &[], SoapVersion::V1_1);
+        let resp = soap::send_request(
+            url,
+            action,
+            body_xml,
+            Some(soap_hdr),
+            &[],
+            SoapVersion::V1_1,
+        );
         write_response(output, row, &resp, &mut map_offset);
     }
 }
@@ -92,7 +101,14 @@ unsafe extern "C" fn cb_soap11_5(
         let body_xml = body_reader.read_str(row as usize);
         let soap_hdr = soap_hdr_reader.read_str(row as usize);
         let headers = read_headers_map(input, 4, row as usize);
-        let resp = soap::send_request(url, action, body_xml, Some(soap_hdr), &headers, SoapVersion::V1_1);
+        let resp = soap::send_request(
+            url,
+            action,
+            body_xml,
+            Some(soap_hdr),
+            &headers,
+            SoapVersion::V1_1,
+        );
         write_response(output, row, &resp, &mut map_offset);
     }
 }
@@ -136,7 +152,14 @@ unsafe extern "C" fn cb_soap12_4s(
         let action = action_reader.read_str(row as usize);
         let body_xml = body_reader.read_str(row as usize);
         let soap_hdr = soap_hdr_reader.read_str(row as usize);
-        let resp = soap::send_request(url, action, body_xml, Some(soap_hdr), &[], SoapVersion::V1_2);
+        let resp = soap::send_request(
+            url,
+            action,
+            body_xml,
+            Some(soap_hdr),
+            &[],
+            SoapVersion::V1_2,
+        );
         write_response(output, row, &resp, &mut map_offset);
     }
 }
@@ -160,7 +183,14 @@ unsafe extern "C" fn cb_soap12_5(
         let body_xml = body_reader.read_str(row as usize);
         let soap_hdr = soap_hdr_reader.read_str(row as usize);
         let headers = read_headers_map(input, 4, row as usize);
-        let resp = soap::send_request(url, action, body_xml, Some(soap_hdr), &headers, SoapVersion::V1_2);
+        let resp = soap::send_request(
+            url,
+            action,
+            body_xml,
+            Some(soap_hdr),
+            &headers,
+            SoapVersion::V1_2,
+        );
         write_response(output, row, &resp, &mut map_offset);
     }
 }
@@ -228,28 +258,40 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
     ScalarFunctionSetBuilder::new("soap_request")
         .overload(
             ScalarOverloadBuilder::new()
-                .param(v).param(v).param(v)
+                .param(v)
+                .param(v)
+                .param(v)
                 .returns_logical(response_type())
                 .function(cb_soap11_3)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
         .overload(
             ScalarOverloadBuilder::new()
-                .param(v).param(v).param(v).param_logical(map_varchar_varchar())
+                .param(v)
+                .param(v)
+                .param(v)
+                .param_logical(map_varchar_varchar())
                 .returns_logical(response_type())
                 .function(cb_soap11_4h)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
         .overload(
             ScalarOverloadBuilder::new()
-                .param(v).param(v).param(v).param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
                 .returns_logical(response_type())
                 .function(cb_soap11_4s)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
         .overload(
             ScalarOverloadBuilder::new()
-                .param(v).param(v).param(v).param(v).param_logical(map_varchar_varchar())
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param_logical(map_varchar_varchar())
                 .returns_logical(response_type())
                 .function(cb_soap11_5)
                 .null_handling(NullHandling::SpecialNullHandling),
@@ -260,21 +302,30 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
     ScalarFunctionSetBuilder::new("soap12_request")
         .overload(
             ScalarOverloadBuilder::new()
-                .param(v).param(v).param(v)
+                .param(v)
+                .param(v)
+                .param(v)
                 .returns_logical(response_type())
                 .function(cb_soap12_3)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
         .overload(
             ScalarOverloadBuilder::new()
-                .param(v).param(v).param(v).param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
                 .returns_logical(response_type())
                 .function(cb_soap12_4s)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
         .overload(
             ScalarOverloadBuilder::new()
-                .param(v).param(v).param(v).param(v).param_logical(map_varchar_varchar())
+                .param(v)
+                .param(v)
+                .param(v)
+                .param(v)
+                .param_logical(map_varchar_varchar())
                 .returns_logical(response_type())
                 .function(cb_soap12_5)
                 .null_handling(NullHandling::SpecialNullHandling),
