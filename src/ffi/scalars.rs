@@ -4,6 +4,8 @@ use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::http::{self, HttpResponse, Method};
+use crate::json;
+use crate::rate_limit;
 
 // ===== Type Builders (quack-rs 0.8.0) =====
 
@@ -11,7 +13,7 @@ use crate::http::{self, HttpResponse, Method};
 ///
 /// quack-rs 0.8.0 added `struct_type_from_logical` and `map_from_logical`,
 /// eliminating the need for raw libduckdb-sys type construction.
-fn response_type() -> LogicalType {
+pub(crate) fn response_type() -> LogicalType {
     let headers_map = LogicalType::map_from_logical(
         &LogicalType::new(TypeId::Varchar),
         &LogicalType::new(TypeId::Varchar),
@@ -25,7 +27,7 @@ fn response_type() -> LogicalType {
 }
 
 /// MAP(VARCHAR, VARCHAR) for header/field parameters.
-fn map_varchar_varchar() -> LogicalType {
+pub(crate) fn map_varchar_varchar() -> LogicalType {
     LogicalType::map_from_logical(
         &LogicalType::new(TypeId::Varchar),
         &LogicalType::new(TypeId::Varchar),
@@ -35,7 +37,7 @@ fn map_varchar_varchar() -> LogicalType {
 // ===== Input Helpers =====
 
 /// Read a MAP(VARCHAR, VARCHAR) column from the input chunk at the given row.
-unsafe fn read_headers_map(
+pub(crate) unsafe fn read_headers_map(
     input: duckdb_data_chunk,
     col: idx_t,
     row: usize,
@@ -73,7 +75,7 @@ unsafe fn read_headers_map(
 // ===== Output Helpers =====
 
 /// Write a string to a DuckDB VARCHAR vector at the given row.
-unsafe fn write_varchar(vec: duckdb_vector, row: idx_t, s: &str) {
+pub(crate) unsafe fn write_varchar(vec: duckdb_vector, row: idx_t, s: &str) {
     duckdb_vector_assign_string_element_len(
         vec,
         row,
@@ -84,7 +86,7 @@ unsafe fn write_varchar(vec: duckdb_vector, row: idx_t, s: &str) {
 
 /// Write an HttpResponse into the output STRUCT vector at the given row.
 /// `map_offset` tracks the cumulative offset into the MAP child vector across rows.
-unsafe fn write_response(
+pub(crate) unsafe fn write_response(
     output: duckdb_vector,
     row: idx_t,
     resp: &HttpResponse,
@@ -339,6 +341,73 @@ unsafe extern "C" fn cb_bearer_auth(
     }
 }
 
+/// Callback: http_oauth2_token(token_url, client_id, client_secret) -> VARCHAR
+/// Performs OAuth2 Client Credentials grant and returns "Bearer <access_token>".
+unsafe extern "C" fn cb_oauth2_token(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let id_reader = VectorReader::new(input, 1);
+    let secret_reader = VectorReader::new(input, 2);
+
+    for row in 0..row_count {
+        let token_url = url_reader.read_str(row as usize);
+        let client_id = id_reader.read_str(row as usize);
+        let client_secret = secret_reader.read_str(row as usize);
+
+        let form_body = format!(
+            "grant_type=client_credentials&client_id={}&client_secret={}",
+            json::form_urlencode(client_id),
+            json::form_urlencode(client_secret),
+        );
+
+        let resp = http::execute(
+            Method::Post,
+            token_url,
+            &[("Content-Type".into(), "application/x-www-form-urlencoded".into())],
+            Some(&form_body),
+        );
+
+        let header = if resp.status == 200 {
+            match json::extract_string(&resp.body, "access_token") {
+                Some(token) => format!("Bearer {token}"),
+                None => format!("OAuth2 error: no access_token in response body"),
+            }
+        } else {
+            format!("OAuth2 error: {} {}", resp.status, resp.reason)
+        };
+        write_varchar(output, row, &header);
+    }
+}
+
+/// Callback: duck_net_set_rate_limit(requests_per_second INTEGER) -> VARCHAR
+/// Sets the global rate limit and returns confirmation.
+unsafe extern "C" fn cb_set_rate_limit(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let rps_data = duckdb_vector_get_data(
+        duckdb_data_chunk_get_vector(input, 0),
+    ) as *const i32;
+
+    for row in 0..row_count {
+        let rps = *rps_data.add(row as usize);
+        let rps = rps.max(0) as u32;
+        rate_limit::set_global_rps(rps);
+        let msg = if rps == 0 {
+            "Rate limiting disabled".to_string()
+        } else {
+            format!("Rate limit set to {rps} requests/second")
+        };
+        write_varchar(output, row, &msg);
+    }
+}
+
 // ===== Registration (quack-rs 0.8.0 builders) =====
 // LogicalType is RAII (Drop destroys the handle), so we create fresh instances
 // for each builder call via the helper functions above.
@@ -458,6 +527,22 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(TypeId::Varchar)
         .returns(TypeId::Varchar)
         .function(cb_bearer_auth)
+        .register(con)?;
+
+    // Auth helpers: http_oauth2_token(token_url, client_id, client_secret) -> VARCHAR
+    ScalarFunctionBuilder::new("http_oauth2_token")
+        .param(TypeId::Varchar)
+        .param(TypeId::Varchar)
+        .param(TypeId::Varchar)
+        .returns(TypeId::Varchar)
+        .function(cb_oauth2_token)
+        .register(con)?;
+
+    // Rate limiting: duck_net_set_rate_limit(requests_per_second INTEGER) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_rate_limit")
+        .param(TypeId::Integer)
+        .returns(TypeId::Varchar)
+        .function(cb_set_rate_limit)
         .register(con)?;
 
     Ok(())

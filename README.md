@@ -45,6 +45,42 @@ All functions return `STRUCT(status INTEGER, reason VARCHAR, headers MAP(VARCHAR
 |----------|-----------|---------|
 | `http_basic_auth` | `(username VARCHAR, password VARCHAR)` | `VARCHAR` — `Basic <base64>` header value |
 | `http_bearer_auth` | `(token VARCHAR)` | `VARCHAR` — `Bearer <token>` header value |
+| `http_oauth2_token` | `(token_url VARCHAR, client_id VARCHAR, client_secret VARCHAR)` | `VARCHAR` — `Bearer <access_token>` from OAuth2 Client Credentials grant |
+
+### SOAP
+
+All `soap_request` / `soap12_request` return the same STRUCT as HTTP functions.
+
+| Function | Signatures |
+|----------|-----------|
+| `soap_request` | `(url, action, body_xml)`, `(url, action, body_xml, headers MAP)`, `(url, action, body_xml, soap_header)`, `(url, action, body_xml, soap_header, headers MAP)` |
+| `soap12_request` | `(url, action, body_xml)`, `(url, action, body_xml, soap_header)`, `(url, action, body_xml, soap_header, headers MAP)` |
+| `soap_extract_body` | `(xml VARCHAR) → VARCHAR` — extracts content from `<soap:Body>` |
+| `soap_is_fault` | `(xml VARCHAR) → BOOLEAN` — checks for SOAP fault |
+| `soap_fault_string` | `(xml VARCHAR) → VARCHAR` — extracts fault string (NULL if not a fault) |
+
+### Pagination (Table Function)
+
+```sql
+-- Offset-based pagination
+SELECT * FROM http_paginate(
+    'https://api.example.com/users?page={page}&per_page=100',
+    page_param := 'page', start_page := 1, max_pages := 10
+);
+
+-- Cursor/next-link pagination
+SELECT * FROM http_paginate(
+    'https://api.example.com/users',
+    next_url_path := '$.next', max_pages := 50
+);
+-- Returns: (page INTEGER, status INTEGER, headers MAP, body VARCHAR)
+```
+
+### Rate Limiting
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `duck_net_set_rate_limit` | `(requests_per_second INTEGER)` | `VARCHAR` — confirmation message |
 
 ## Usage Examples
 
@@ -115,6 +151,51 @@ SELECT http_get(
 SELECT http_get(
     'https://api.example.com/data',
     MAP{'Authorization': http_bearer_auth('my-jwt-token')}
+);
+
+-- OAuth2 Client Credentials
+SELECT http_get(
+    'https://api.example.com/data',
+    MAP{'Authorization': http_oauth2_token(
+        'https://auth.example.com/oauth/token',
+        'client_id',
+        'client_secret'
+    )}
+);
+
+-- SOAP 1.1 request
+SELECT soap_request(
+    'https://soap.example.com/Service',
+    'http://example.com/GetAccount',
+    '<GetAccount xmlns="http://example.com/"><Id>123</Id></GetAccount>'
+);
+
+-- SOAP with WS-Security header
+SELECT soap_request(
+    'https://bank.example.com/PaymentService',
+    'urn:ProcessPayment',
+    '<ProcessPayment><Amount>1000</Amount></ProcessPayment>',
+    '<wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+       <wsse:UsernameToken>
+         <wsse:Username>svc</wsse:Username>
+         <wsse:Password>pass</wsse:Password>
+       </wsse:UsernameToken>
+     </wsse:Security>'
+);
+
+-- Parse SOAP response
+SELECT soap_extract_body(
+    (soap_request('https://...', 'urn:GetData', '<GetData/>')).body
+);
+
+-- Rate limiting (throttle to 10 req/s across all domains)
+SELECT duck_net_set_rate_limit(10);
+
+-- Paginate through an API
+SELECT page, status, body
+FROM http_paginate(
+    'https://api.example.com/items?page={page}',
+    page_param := 'page', start_page := 1, max_pages := 5
 );
 
 -- Use in queries with tables

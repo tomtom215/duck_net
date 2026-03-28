@@ -148,6 +148,8 @@ pub fn execute(
     headers: &[(String, String)],
     body: Option<&str>,
 ) -> HttpResponse {
+    // Apply rate limiting before making the request
+    crate::rate_limit::acquire_for_url(url);
     execute_with_retry(method, url, headers, body, &RetryConfig::default())
 }
 
