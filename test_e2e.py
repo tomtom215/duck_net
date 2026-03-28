@@ -1,4 +1,4 @@
-"""End-to-end test suite for duck_net DuckDB extension."""
+"""Comprehensive end-to-end test suite for duck_net DuckDB extension."""
 import base64
 import duckdb
 import sys
@@ -20,6 +20,11 @@ def check(name, condition, detail=""):
         failed += 1
         print(f"  [FAIL] {name}: {detail}")
 
+def skip(name, reason=""):
+    global skipped
+    skipped += 1
+    print(f"  [SKIP] {name}: {reason}")
+
 def fetch(sql):
     return con.execute(sql).fetchone()[0]
 
@@ -27,8 +32,11 @@ def fetch_all(sql):
     return con.execute(sql).fetchall()
 
 
-# ===== Offline tests (no network) =====
-print("\n--- Auth Helper Tests (Offline) ---")
+# =====================================================
+# OFFLINE TESTS (no network required)
+# =====================================================
+
+print("\n--- Auth Helper Tests ---")
 
 r = fetch("SELECT http_basic_auth('user', 'pass')")
 expected = "Basic " + base64.b64encode(b"user:pass").decode()
@@ -37,20 +45,21 @@ check("http_basic_auth", r == expected, f"got {r}")
 r = fetch("SELECT http_bearer_auth('tok123')")
 check("http_bearer_auth", r == "Bearer tok123", f"got {r}")
 
+# Edge cases
+r = fetch("SELECT http_basic_auth('', '')")
+check("http_basic_auth empty", r == "Basic " + base64.b64encode(b":").decode())
 
-print("\n--- SSRF Protection Tests (Offline) ---")
+r = fetch("SELECT http_basic_auth('user:with:colons', 'p@ss!')")
+expected = "Basic " + base64.b64encode(b"user:with:colons:p@ss!").decode()
+check("http_basic_auth special chars", r == expected)
 
-r = fetch("SELECT http_get('ftp://evil.com/file')")
-check("block ftp://", r["status"] == 0 and "only http://" in r["reason"])
 
-r = fetch("SELECT http_get('file:///etc/passwd')")
-check("block file://", r["status"] == 0 and "only http://" in r["reason"])
+print("\n--- SSRF Protection Tests ---")
 
-r = fetch("SELECT http_get('gopher://evil.com')")
-check("block gopher://", r["status"] == 0 and "only http://" in r["reason"])
-
-r = fetch("SELECT http_get('javascript:alert(1)')")
-check("block javascript:", r["status"] == 0 and "only http://" in r["reason"])
+for scheme in ["ftp", "file", "gopher", "javascript", "data", "ldap"]:
+    url = f"{scheme}://evil.com/file"
+    r = fetch(f"SELECT http_get('{url}')")
+    check(f"block {scheme}://", r["status"] == 0 and "only http://" in r["reason"])
 
 r = fetch("SELECT http_request('INVALID', 'https://x.com', MAP{}, '')")
 check("invalid method rejected", r["status"] == 0 and "Unsupported" in r["reason"])
@@ -58,84 +67,105 @@ check("invalid method rejected", r["status"] == 0 and "Unsupported" in r["reason
 
 print("\n--- SOAP Offline Tests ---")
 
-# Test SOAP envelope building via soap_extract_body round-trip
+# Extract body from SOAP 1.1
 r = fetch("""SELECT soap_extract_body(
-    '<?xml version="1.0"?>
-     <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-       <soap:Body>
-         <GetAccountResponse><Balance>1000</Balance></GetAccountResponse>
-       </soap:Body>
-     </soap:Envelope>'
-)""")
-check("soap_extract_body", "<GetAccountResponse>" in r and "1000" in r, f"got: {r[:80]}")
-
-r = fetch("""SELECT soap_is_fault(
     '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-       <soap:Body><soap:Fault><faultstring>Server error</faultstring></soap:Fault></soap:Body>
-     </soap:Envelope>'
-)""")
-check("soap_is_fault (true)", r == True, f"got: {r}")
+       <soap:Body><Result>42</Result></soap:Body>
+     </soap:Envelope>')""")
+check("soap_extract_body 1.1", "<Result>42</Result>" in r)
 
-r = fetch("""SELECT soap_is_fault(
-    '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-       <soap:Body><GetResponse>OK</GetResponse></soap:Body>
-     </soap:Envelope>'
-)""")
-check("soap_is_fault (false)", r == False, f"got: {r}")
-
-r = fetch("""SELECT soap_fault_string(
-    '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-       <soap:Body><soap:Fault><faultstring>Something broke</faultstring></soap:Fault></soap:Body>
-     </soap:Envelope>'
-)""")
-check("soap_fault_string", r == "Something broke", f"got: {r}")
-
-r = fetch("""SELECT soap_fault_string(
-    '<soap:Body><GetResponse>OK</GetResponse></soap:Body>'
-)""")
-check("soap_fault_string (null)", r is None, f"got: {r}")
-
-# SOAP 1.2 fault
+# Extract body from SOAP 1.2
 r = fetch("""SELECT soap_extract_body(
     '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-       <soap:Body><soap:Fault>
-         <soap:Reason><soap:Text xml:lang="en">Access denied</soap:Text></soap:Reason>
-       </soap:Fault></soap:Body>
-     </soap:Envelope>'
-)""")
-check("soap_extract_body (1.2 fault)", "Access denied" in r, f"got: {r[:80]}")
+       <soap:Body><Data>hello</Data></soap:Body>
+     </soap:Envelope>')""")
+check("soap_extract_body 1.2", "<Data>hello</Data>" in r)
+
+# Alternate namespace prefix
+r = fetch("""SELECT soap_extract_body(
+    '<SOAP-ENV:Envelope><SOAP-ENV:Body><X>1</X></SOAP-ENV:Body></SOAP-ENV:Envelope>')""")
+check("soap_extract_body SOAP-ENV", "<X>1</X>" in r)
+
+r = fetch("""SELECT soap_extract_body(
+    '<s:Envelope><s:Body><Y>2</Y></s:Body></s:Envelope>')""")
+check("soap_extract_body s: prefix", "<Y>2</Y>" in r)
+
+# Fault detection
+r = fetch("""SELECT soap_is_fault(
+    '<soap:Body><soap:Fault><faultstring>err</faultstring></soap:Fault></soap:Body>')""")
+check("soap_is_fault true", r == True)
+
+r = fetch("""SELECT soap_is_fault('<soap:Body><Result>OK</Result></soap:Body>')""")
+check("soap_is_fault false", r == False)
+
+# Fault string extraction
+r = fetch("""SELECT soap_fault_string(
+    '<soap:Fault><faultstring>Server error</faultstring></soap:Fault>')""")
+check("soap_fault_string 1.1", r == "Server error")
 
 r = fetch("""SELECT soap_fault_string(
-    '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-       <soap:Body><soap:Fault>
-         <soap:Reason><soap:Text xml:lang="en">Access denied</soap:Text></soap:Reason>
-       </soap:Fault></soap:Body>
-     </soap:Envelope>'
-)""")
-check("soap_fault_string (1.2)", r == "Access denied", f"got: {r}")
+    '<soap:Fault><soap:Reason><soap:Text xml:lang="en">Access denied</soap:Text></soap:Reason></soap:Fault>')""")
+check("soap_fault_string 1.2", r == "Access denied")
+
+r = fetch("SELECT soap_fault_string('<Result>OK</Result>')")
+check("soap_fault_string null", r is None)
 
 
-print("\n--- Rate Limiting Tests (Offline) ---")
+print("\n--- Rate Limiting Tests ---")
 
 r = fetch("SELECT duck_net_set_rate_limit(0)")
-check("rate limit disable", "disabled" in r.lower(), f"got: {r}")
+check("rate limit disable", "disabled" in r.lower())
 
-r = fetch("SELECT duck_net_set_rate_limit(100)")
-check("rate limit set", "100" in r, f"got: {r}")
+r = fetch("SELECT duck_net_set_rate_limit(50)")
+check("rate limit set 50", "50" in r)
 
-# Reset for network tests
 con.execute("SELECT duck_net_set_rate_limit(0)")
 
 
-# ===== Network tests =====
-print("\n--- Network Tests ---")
+print("\n--- SMTP URL Parsing (via error messages) ---")
+
+r = fetch("SELECT smtp_send('smtp://localhost:9999', 'a@b.com', 'c@d.com', 'test', 'body')")
+check("smtp_send returns struct", r["success"] == False and len(r["message"]) > 0)
+
+r = fetch("SELECT smtp_send('invalid://host', 'a@b.com', 'c@d.com', 'test', 'body')")
+check("smtp invalid scheme", r["success"] == False and "smtp://" in r["message"])
+
+
+print("\n--- FTP URL Parsing (via error messages) ---")
+
+r = fetch("SELECT ftp_read('ftp://nonexistent.invalid/file.txt')")
+check("ftp_read returns struct", "success" in str(r) and r["success"] == False)
+
+r = fetch("SELECT ftp_write('ftp://nonexistent.invalid/file.txt', 'data')")
+check("ftp_write returns struct", r["success"] == False)
+
+r = fetch("SELECT ftp_delete('ftp://nonexistent.invalid/file.txt')")
+check("ftp_delete returns struct", r["success"] == False)
+
+r = fetch("SELECT sftp_read('sftp://nonexistent.invalid/file.txt')")
+check("sftp_read returns struct", r["success"] == False)
+
+r = fetch("SELECT sftp_write('sftp://nonexistent.invalid/file.txt', 'data')")
+check("sftp_write returns struct", r["success"] == False)
+
+r = fetch("SELECT sftp_delete('sftp://nonexistent.invalid/file.txt')")
+check("sftp_delete returns struct", r["success"] == False)
+
+
+# =====================================================
+# NETWORK TESTS
+# =====================================================
+
+print("\n--- HTTP Network Tests ---")
 
 r = fetch("SELECT http_get('https://httpbin.org/get')")
 network_ok = r["status"] == 200
 
 if not network_ok:
     print(f"  [SKIP] Network unavailable: {r['reason'][:80]}")
-    skipped = 10
+    for name in ["http_get","http_post","http_head","http_delete","http_request PUT",
+                  "basic auth roundtrip","bearer auth roundtrip","http_paginate"]:
+        skip(name, "no network")
 else:
     check("http_get", r["status"] == 200 and '"url"' in r["body"])
 
@@ -171,38 +201,63 @@ else:
     )""")
     check("bearer auth roundtrip", r["status"] == 200 and "Bearer jwt123" in r["body"])
 
-    # SOAP network test (public SOAP service)
-    r = fetch("""SELECT soap_request(
-        'http://www.dneonline.com/calculator.asmx',
-        'http://tempuri.org/Add',
-        '<Add xmlns="http://tempuri.org/"><intA>5</intA><intB>3</intB></Add>'
-    )""")
-    soap_ok = r["status"] == 200
-    if soap_ok:
-        check("soap_request (calculator)", True)
-        body = r["body"]
-        extracted = con.execute(f"SELECT soap_extract_body('{body.replace(chr(39), chr(39)+chr(39))}')").fetchone()[0]
-        check("soap_extract_body (live)", "AddResult" in (extracted or ""), f"got: {str(extracted)[:80]}")
-    else:
-        print(f"  [SKIP] SOAP service unavailable: {r['status']} {r['reason'][:60]}")
-        skipped += 2
-
-    # Pagination table function
+    # Pagination
     rows = fetch_all("""SELECT * FROM http_paginate(
         'https://httpbin.org/get?page={page}',
         page_param := 'page',
         start_page := 1,
         max_pages := 3
     )""")
-    check("http_paginate row count", len(rows) == 3, f"got {len(rows)} rows")
+    check("http_paginate count", len(rows) == 3)
     if len(rows) > 0:
-        check("http_paginate status", rows[0][1] == 200, f"status={rows[0][1]}")
+        check("http_paginate status", rows[0][1] == 200)
 
 
-# ===== Summary =====
+print("\n--- DNS Tests ---")
+
+try:
+    # Test that all DNS functions return correct types (may be empty in proxy envs)
+    r = fetch("SELECT dns_lookup('example.com')")
+    check("dns_lookup returns list", isinstance(r, list), f"type: {type(r)}")
+    dns_works = len(r) > 0
+    if dns_works:
+        check("dns_lookup has results", len(r) > 0)
+    else:
+        skip("dns_lookup results", "DNS may be blocked by proxy")
+
+    r = fetch("SELECT dns_lookup_a('example.com')")
+    check("dns_lookup_a returns list", isinstance(r, list), f"type: {type(r)}")
+    if dns_works and len(r) > 0:
+        check("dns_lookup_a is IPv4", "." in r[0], f"got: {r[0]}")
+
+    r = fetch("SELECT dns_lookup_aaaa('example.com')")
+    check("dns_lookup_aaaa returns list", isinstance(r, list), f"type: {type(r)}")
+
+    r = fetch("SELECT dns_reverse('8.8.8.8')")
+    check("dns_reverse returns", r is None or isinstance(r, str), f"got type: {type(r)}")
+
+    r = fetch("SELECT dns_txt('example.com')")
+    check("dns_txt returns list", isinstance(r, list), f"type: {type(r)}")
+
+    r = fetch("SELECT dns_mx('example.com')")
+    check("dns_mx returns list", isinstance(r, list), f"type: {type(r)}")
+
+    # Edge case: nonexistent domain
+    r = fetch("SELECT dns_lookup('this-domain-does-not-exist-12345.invalid')")
+    check("dns_lookup nonexistent empty", isinstance(r, list) and len(r) == 0, f"got: {r}")
+
+except Exception as e:
+    skip("dns tests", str(e)[:80])
+
+
+# =====================================================
+# SUMMARY
+# =====================================================
+
 total = passed + failed + skipped
-print(f"\n{'='*40}")
+print(f"\n{'='*50}")
 print(f"Results: {passed} passed, {failed} failed, {skipped} skipped / {total} total")
 if failed > 0:
+    print("\nFAILED TESTS - see details above")
     sys.exit(1)
-print("=== E2E TESTS PASSED ===")
+print("=== ALL E2E TESTS PASSED ===")

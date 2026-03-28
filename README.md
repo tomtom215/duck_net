@@ -82,6 +82,38 @@ SELECT * FROM http_paginate(
 |----------|-----------|---------|
 | `duck_net_set_rate_limit` | `(requests_per_second INTEGER)` | `VARCHAR` — confirmation message |
 
+### DNS Lookups
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `dns_lookup` | `(hostname VARCHAR)` | `VARCHAR[]` — all IPs (v4 + v6) |
+| `dns_lookup_a` | `(hostname VARCHAR)` | `VARCHAR[]` — IPv4 only |
+| `dns_lookup_aaaa` | `(hostname VARCHAR)` | `VARCHAR[]` — IPv6 only |
+| `dns_reverse` | `(ip VARCHAR)` | `VARCHAR` — hostname (NULL if not found) |
+| `dns_txt` | `(hostname VARCHAR)` | `VARCHAR[]` — TXT records |
+| `dns_mx` | `(hostname VARCHAR)` | `VARCHAR[]` — MX records as `"priority\thost"` |
+
+### SMTP Send
+
+| Function | Signatures |
+|----------|-----------|
+| `smtp_send` | `(server, from, to, subject, body)`, `(server, from, to, subject, body, username, password)` |
+
+Returns `STRUCT(success BOOLEAN, message VARCHAR)`. Server URL: `smtp://host:port` or `smtps://host:port`.
+
+### FTP/SFTP File Operations
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `ftp_read` | `(url VARCHAR)` | `STRUCT(success BOOLEAN, content VARCHAR, size BIGINT, message VARCHAR)` |
+| `ftp_write` | `(url VARCHAR, content VARCHAR)` | `STRUCT(success BOOLEAN, bytes_written BIGINT, message VARCHAR)` |
+| `ftp_delete` | `(url VARCHAR)` | `STRUCT(success BOOLEAN, message VARCHAR)` |
+| `sftp_read` | `(url VARCHAR)`, `(url VARCHAR, key_file VARCHAR)` | `STRUCT(success BOOLEAN, content VARCHAR, size BIGINT, message VARCHAR)` |
+| `sftp_write` | `(url VARCHAR, content VARCHAR)` | `STRUCT(success BOOLEAN, bytes_written BIGINT, message VARCHAR)` |
+| `sftp_delete` | `(url VARCHAR)` | `STRUCT(success BOOLEAN, message VARCHAR)` |
+
+URL format: `ftp://[user:pass@]host[:port]/path`, `sftp://[user:pass@]host[:port]/path`
+
 ## Usage Examples
 
 ```sql
@@ -198,6 +230,40 @@ FROM http_paginate(
     page_param := 'page', start_page := 1, max_pages := 5
 );
 
+-- DNS lookups
+SELECT dns_lookup('example.com');        -- ['93.184.216.34', '2606:2800:...']
+SELECT dns_lookup_a('example.com');      -- ['93.184.216.34']
+SELECT dns_reverse('8.8.8.8');           -- 'dns.google'
+SELECT dns_txt('example.com');           -- TXT records
+SELECT dns_mx('gmail.com');              -- MX records
+
+-- SMTP send
+SELECT smtp_send(
+    'smtp://mail.example.com:587',
+    'alerts@example.com', 'ops@example.com',
+    'Alert: High Error Rate',
+    'Error rate exceeded 5% threshold.'
+);
+
+-- SMTP with authentication
+SELECT smtp_send(
+    'smtps://smtp.gmail.com:465',
+    'from@gmail.com', 'to@example.com',
+    'Subject', 'Body',
+    'from@gmail.com', 'app-password'
+);
+
+-- FTP operations
+SELECT ftp_read('ftp://user:pass@ftp.example.com/data/report.csv');
+SELECT ftp_write('ftp://user:pass@ftp.example.com/outbox/file.csv', 'col1,col2\nval1,val2');
+SELECT ftp_delete('ftp://user:pass@ftp.example.com/old/file.txt');
+
+-- SFTP operations
+SELECT sftp_read('sftp://user:pass@sftp.example.com/data/export.csv');
+SELECT sftp_read('sftp://user@host/path/file.txt', '/home/user/.ssh/id_ed25519');
+SELECT sftp_write('sftp://user:pass@host/uploads/data.csv', 'csv,data');
+SELECT sftp_delete('sftp://user:pass@host/processed/old.csv');
+
 -- Use in queries with tables
 SELECT
     url,
@@ -265,6 +331,12 @@ Minimal dependency set:
 | `libduckdb-sys` | 1.10501.0 | DuckDB C API bindings (v1.5.1) |
 | `ureq` | 3.3.0 | Sync HTTP client (rustls TLS, gzip) |
 | `base64` | 0.22.0 | Base64 encoding for HTTP Basic auth |
+| `hickory-resolver` | 0.25.0 | Async DNS resolver (A, AAAA, PTR, TXT, MX) |
+| `suppaftp` | 8.0.0 | Sync FTP/FTPS client |
+| `russh` | 0.58.0 | Async SSH client (for SFTP) |
+| `russh-sftp` | 2.1.0 | SFTP subsystem over russh |
+| `rustls` | 0.23.0 | TLS for SMTP STARTTLS |
+| `tokio` | 1.x | Async runtime (shared by DNS + SFTP) |
 
 ## Improvements Over query-farm/httpclient
 
