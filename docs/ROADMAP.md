@@ -24,11 +24,26 @@ Scalar functions for DNS resolution. Perfect fit for log enrichment and network 
 
 ### 2a. dns_lookup, dns_reverse, dns_txt, dns_mx
 
-## Priority 3: SMTP Send
+## Priority 3: FTP/SFTP File Operations
+
+Enterprise file exchange over FTP and SFTP. Complements httpfs (which covers HTTP/S3 but not FTP/SFTP). SFTP especially remains deeply entrenched in finance, healthcare, government, and supply chain for regulated file transfers.
+
+### 3a. ftp_list, sftp_list (table functions)
+### 3b. ftp_read, sftp_read (scalar functions)
+### 3c. ftp_write, sftp_write (scalar functions)
+### 3d. ftp_delete, sftp_delete (scalar functions)
+
+## Priority 4: DNS Lookups
+
+Scalar functions for DNS resolution. Perfect fit for log enrichment and network analysis.
+
+### 4a. dns_lookup, dns_reverse, dns_txt, dns_mx
+
+## Priority 5: SMTP Send
 
 Fire-and-forget email sending from SQL. Useful for alerting on query results.
 
-### 3a. smtp_send
+### 5a. smtp_send
 
 ## Rejected Protocols
 
@@ -39,4 +54,3 @@ Fire-and-forget email sending from SQL. Useful for alerting on query results.
 | MQTT Publish | Feasible but extremely niche. Who publishes MQTT from SQL? |
 | XMPP | Deeply stateful, session-oriented, streaming. Zero SQL use case. |
 | gRPC | Request-response fits, but protobuf handling is enormous complexity for marginal gain over HTTP+JSON. Revisit if demand materializes. |
-| FTP/SFTP | Dying protocol. httpfs covers HTTP file access, S3 extensions cover cloud storage. |
