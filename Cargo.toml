@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 quack_rs = { version = "0.7", package = "quack-rs" }
 libduckdb-sys = { version = "=1.10501.0", features = ["loadable-extension"] }
-ureq = "3.3"
+ureq = { version = "3.3", features = ["multipart"] }
 
 [profile.release]
 opt-level = 3

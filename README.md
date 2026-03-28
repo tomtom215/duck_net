@@ -23,6 +23,16 @@ All functions return `STRUCT(status INTEGER, reason VARCHAR, headers MAP(VARCHAR
 | `http_put` | `(url VARCHAR, body VARCHAR)`, `(url VARCHAR, headers MAP(VARCHAR, VARCHAR), body VARCHAR)` |
 | `http_patch` | `(url VARCHAR, body VARCHAR)`, `(url VARCHAR, headers MAP(VARCHAR, VARCHAR), body VARCHAR)` |
 
+### Multipart/File Upload
+
+| Function | Signatures |
+|----------|-----------|
+| `http_post_multipart` | `(url VARCHAR, form_fields MAP(VARCHAR, VARCHAR), file_fields MAP(VARCHAR, VARCHAR))`, `(url VARCHAR, headers MAP(VARCHAR, VARCHAR), form_fields MAP(VARCHAR, VARCHAR), file_fields MAP(VARCHAR, VARCHAR))` |
+
+- `form_fields`: text key-value pairs sent as form fields
+- `file_fields`: maps field names to local file paths — files are read, MIME type auto-detected, and uploaded
+- Content-Type (`multipart/form-data; boundary=...`) is set automatically
+
 ### Generic
 
 | Function | Signature |
@@ -72,6 +82,21 @@ SELECT http_request(
     'https://httpbin.org/patch',
     MAP{'Content-Type': 'application/json'},
     '{"partial": "update"}'
+);
+
+-- Multipart file upload
+SELECT http_post_multipart(
+    'https://httpbin.org/post',
+    MAP{'description': 'My upload'},     -- form fields
+    MAP{'file': '/path/to/document.pdf'}  -- file fields (field_name -> file_path)
+);
+
+-- Multipart with auth headers
+SELECT http_post_multipart(
+    'https://api.example.com/upload',
+    MAP{'Authorization': 'Bearer token123'},  -- headers
+    MAP{'title': 'Report Q4'},                -- form fields
+    MAP{'attachment': '/tmp/report.pdf'}      -- file fields
 );
 
 -- Use in queries with tables
@@ -140,6 +165,7 @@ Minimal dependency set:
 | Timeout | Hardcoded 10s | Configurable (30s default) |
 | Connection pooling | None (new client per request) | Yes (ureq Agent) |
 | TLS | OpenSSL (C dependency) | rustls (pure Rust) |
+| Multipart/file upload | No | Yes (`http_post_multipart` with auto MIME detection) |
 | Content types | Hardcoded JSON/form | User-controlled via headers |
 | Telemetry | Phones home | None |
 | Language | C++ | Rust (memory safe) |

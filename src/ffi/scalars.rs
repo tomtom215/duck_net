@@ -245,6 +245,39 @@ unsafe fn exec_generic(input: duckdb_data_chunk, output: duckdb_vector) {
     }
 }
 
+// ===== Multipart Execution =====
+
+/// http_post_multipart(url VARCHAR, form_fields MAP, file_fields MAP)
+unsafe fn exec_multipart(input: duckdb_data_chunk, output: duckdb_vector) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let mut map_offset: idx_t = 0;
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+        let form_fields = read_headers_map(input, 1, row as usize);
+        let file_fields = read_headers_map(input, 2, row as usize);
+        let resp = http::execute_multipart(url, &[], &form_fields, &file_fields);
+        write_response(output, row, &resp, &mut map_offset);
+    }
+}
+
+/// http_post_multipart(url VARCHAR, headers MAP, form_fields MAP, file_fields MAP)
+unsafe fn exec_multipart_hdrs(input: duckdb_data_chunk, output: duckdb_vector) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let mut map_offset: idx_t = 0;
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+        let headers = read_headers_map(input, 1, row as usize);
+        let form_fields = read_headers_map(input, 2, row as usize);
+        let file_fields = read_headers_map(input, 3, row as usize);
+        let resp = http::execute_multipart(url, &headers, &form_fields, &file_fields);
+        write_response(output, row, &resp, &mut map_offset);
+    }
+}
+
 // ===== Callback Wrappers =====
 // Thin extern "C" functions that delegate to the core execution functions above.
 // Uses a macro to reduce boilerplate since each just forwards to an exec_ function.
@@ -278,6 +311,23 @@ callback!(cb_put_url_body, exec_url_body, Method::Put);
 callback!(cb_put_url_hdrs_body, exec_url_headers_body, Method::Put);
 callback!(cb_patch_url_body, exec_url_body, Method::Patch);
 callback!(cb_patch_url_hdrs_body, exec_url_headers_body, Method::Patch);
+
+// Multipart: (url, form_fields, file_fields) and (url, headers, form_fields, file_fields)
+unsafe extern "C" fn cb_multipart(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    exec_multipart(input, output);
+}
+
+unsafe extern "C" fn cb_multipart_hdrs(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    exec_multipart_hdrs(input, output);
+}
 
 // Generic
 unsafe extern "C" fn cb_generic(
@@ -404,6 +454,16 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         Some(cb_patch_url_body), Some(cb_patch_url_hdrs_body),
         varchar, map, ret,
     );
+
+    // Multipart: http_post_multipart
+    {
+        let cname = CString::new("http_post_multipart").unwrap();
+        // (url, form_fields, file_fields)
+        let f1 = make_scalar(&cname, &[varchar, map, map], ret, Some(cb_multipart));
+        // (url, headers, form_fields, file_fields)
+        let f2 = make_scalar(&cname, &[varchar, map, map, map], ret, Some(cb_multipart_hdrs));
+        register_set(con, "http_post_multipart", &[f1, f2]);
+    }
 
     // Generic: http_request(method VARCHAR, url VARCHAR, headers MAP, body VARCHAR)
     {

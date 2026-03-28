@@ -133,3 +133,78 @@ fn execute_inner(
         body: resp_body,
     })
 }
+
+// ===== Multipart/Form-Data =====
+
+pub fn execute_multipart(
+    url: &str,
+    headers: &[(String, String)],
+    form_fields: &[(String, String)],
+    file_fields: &[(String, String)],
+) -> HttpResponse {
+    match execute_multipart_inner(url, headers, form_fields, file_fields) {
+        Ok(resp) => resp,
+        Err(msg) => HttpResponse {
+            status: 0,
+            reason: msg,
+            headers: vec![],
+            body: String::new(),
+        },
+    }
+}
+
+fn execute_multipart_inner(
+    url: &str,
+    headers: &[(String, String)],
+    form_fields: &[(String, String)],
+    file_fields: &[(String, String)],
+) -> Result<HttpResponse, String> {
+    use ureq::unversioned::multipart::Form;
+
+    let mut form = Form::new();
+
+    for (name, value) in form_fields {
+        form = form.text(name.as_str(), value.as_str());
+    }
+
+    for (name, path) in file_fields {
+        form = form
+            .file(name.as_str(), path.as_str())
+            .map_err(|e| format!("Failed to read file '{path}': {e}"))?;
+    }
+
+    let mut builder = AGENT.post(url);
+    for (key, value) in headers {
+        builder = builder.header(key.as_str(), value.as_str());
+    }
+
+    let mut response = builder.send(form).map_err(|e| format!("Request failed: {e}"))?;
+
+    let status = response.status().as_u16();
+    let reason = response
+        .status()
+        .canonical_reason()
+        .unwrap_or("")
+        .to_string();
+
+    let resp_headers: Vec<(String, String)> = response
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            let (name, value): (&ureq::http::HeaderName, &ureq::http::HeaderValue) = (name, value);
+            (
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+
+    let resp_body = response.body_mut().read_to_string().unwrap_or_default();
+
+    Ok(HttpResponse {
+        status,
+        reason,
+        headers: resp_headers,
+        body: resp_body,
+    })
+}
