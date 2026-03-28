@@ -10,9 +10,26 @@ description = "DuckDB extension for comprehensive HTTP/HTTPS network client oper
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-quack_rs = { version = "0.7", package = "quack-rs" }
+quack_rs = { version = "0.8", package = "quack-rs" }
 libduckdb-sys = { version = "=1.10501.0", features = ["loadable-extension"] }
-ureq = { version = "3.3", features = ["multipart"] }
+ureq = { version = "3.3", features = ["multipart", "platform-verifier"] }
+base64 = "0.22"
+
+# TLS (for SMTP STARTTLS)
+rustls = "0.23"
+webpki-roots = "1"
+
+# DNS resolution
+hickory-resolver = { version = "0.25", features = ["system-config"] }
+
+# FTP/FTPS
+suppaftp = { version = "8", features = ["rustls-ring"] }
+
+# SFTP (async, wrapped in blocking runtime)
+russh = "0.58"
+russh-sftp = "2.1"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros"] }
 
 [profile.release]
 opt-level = 3
