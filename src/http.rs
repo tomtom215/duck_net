@@ -1,11 +1,40 @@
+use std::io::Read as _;
 use std::sync::LazyLock;
 use std::time::Duration;
+
 use ureq::Agent;
+use ureq::tls::{RootCerts, TlsConfig};
+
+/// Maximum response body size: 256 MiB.
+/// Prevents OOM from unbounded response buffering (CWE-400).
+const MAX_RESPONSE_BODY_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Default global timeout per request (connect + transfer).
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
+/// Default maximum retry attempts (0 = no retries).
+const DEFAULT_MAX_RETRIES: u32 = 0;
+
+/// Default base backoff delay in milliseconds.
+const DEFAULT_RETRY_BACKOFF_MS: u64 = 1000;
+
+/// Default backoff multiplier (exponential).
+const DEFAULT_RETRY_BACKOFF_FACTOR: f64 = 2.0;
+
+/// HTTP status codes that are retryable by default.
+const DEFAULT_RETRYABLE_STATUSES: &[u16] = &[429, 500, 502, 503, 504];
 
 static AGENT: LazyLock<Agent> = LazyLock::new(|| {
+    // Use the platform's native certificate verifier so we trust the OS CA store.
+    // This is critical for environments with corporate proxies or custom CAs.
+    let tls = TlsConfig::builder()
+        .root_certs(RootCerts::PlatformVerifier)
+        .build();
+
     Agent::config_builder()
+        .tls_config(tls)
         .http_status_as_error(false)
-        .timeout_global(Some(Duration::from_secs(30)))
+        .timeout_global(Some(Duration::from_secs(DEFAULT_TIMEOUT_SECS)))
         .build()
         .into()
 });
@@ -51,20 +80,114 @@ pub struct HttpResponse {
     pub body: String,
 }
 
+/// Retry configuration for HTTP requests.
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    pub max_retries: u32,
+    pub backoff_ms: u64,
+    pub backoff_factor: f64,
+    pub retryable_statuses: Vec<u16>,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: DEFAULT_MAX_RETRIES,
+            backoff_ms: DEFAULT_RETRY_BACKOFF_MS,
+            backoff_factor: DEFAULT_RETRY_BACKOFF_FACTOR,
+            retryable_statuses: DEFAULT_RETRYABLE_STATUSES.to_vec(),
+        }
+    }
+}
+
+impl RetryConfig {
+    fn should_retry(&self, attempt: u32, status: u16) -> bool {
+        if attempt >= self.max_retries {
+            return false;
+        }
+        // Status 0 = network error, always retryable
+        status == 0 || self.retryable_statuses.contains(&status)
+    }
+
+    fn delay_for_attempt(&self, attempt: u32) -> Duration {
+        let delay_ms =
+            self.backoff_ms as f64 * self.backoff_factor.powi(attempt as i32);
+        // Cap at 60 seconds to prevent excessive blocking
+        let capped_ms = delay_ms.min(60_000.0) as u64;
+        Duration::from_millis(capped_ms)
+    }
+}
+
+/// Validate URL scheme. Only allow http:// and https:// (CWE-918 SSRF mitigation).
+fn validate_url(url: &str) -> Result<(), String> {
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(format!(
+            "Invalid URL scheme: only http:// and https:// are allowed, got: {}",
+            url.split("://").next().unwrap_or("(none)")
+        ))
+    }
+}
+
+/// Read a response body with a size limit to prevent OOM (CWE-400).
+fn read_body_limited(body: &mut ureq::Body) -> Result<String, String> {
+    let mut buf = Vec::new();
+    body.as_reader()
+        .take(MAX_RESPONSE_BODY_BYTES)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("Failed to read response body: {e}"))?;
+    String::from_utf8(buf)
+        .map_err(|e| format!("Response body is not valid UTF-8: {e}"))
+}
+
 pub fn execute(
     method: Method,
     url: &str,
     headers: &[(String, String)],
     body: Option<&str>,
 ) -> HttpResponse {
-    match execute_inner(method, url, headers, body) {
-        Ok(resp) => resp,
-        Err(e) => HttpResponse {
+    execute_with_retry(method, url, headers, body, &RetryConfig::default())
+}
+
+pub fn execute_with_retry(
+    method: Method,
+    url: &str,
+    headers: &[(String, String)],
+    body: Option<&str>,
+    retry: &RetryConfig,
+) -> HttpResponse {
+    if let Err(msg) = validate_url(url) {
+        return HttpResponse {
             status: 0,
-            reason: format!("Request failed: {e}"),
+            reason: msg,
             headers: vec![],
             body: String::new(),
-        },
+        };
+    }
+
+    let mut attempt = 0u32;
+    loop {
+        let resp = execute_inner(method, url, headers, body);
+        let result = match resp {
+            Ok(r) => r,
+            Err(e) => HttpResponse {
+                status: 0,
+                reason: format!("Request failed: {e}"),
+                headers: vec![],
+                body: String::new(),
+            },
+        };
+
+        if retry.should_retry(attempt, result.status) {
+            let delay = retry.delay_for_attempt(attempt);
+            std::thread::sleep(delay);
+            attempt += 1;
+            continue;
+        }
+
+        return result;
     }
 }
 
@@ -74,8 +197,6 @@ fn execute_inner(
     headers: &[(String, String)],
     body: Option<&str>,
 ) -> Result<HttpResponse, ureq::Error> {
-    // ureq 3.x uses typed builders: WithBody vs WithoutBody.
-    // We dispatch based on whether the method carries a body.
     let mut response = match method {
         Method::Post | Method::Put | Method::Patch => {
             let mut b = match method {
@@ -123,7 +244,8 @@ fn execute_inner(
 
     let resp_body = match method {
         Method::Head => String::new(),
-        _ => response.body_mut().read_to_string().unwrap_or_default(),
+        _ => read_body_limited(response.body_mut())
+            .unwrap_or_else(|e| format!("[body read error: {e}]")),
     };
 
     Ok(HttpResponse {
@@ -142,6 +264,15 @@ pub fn execute_multipart(
     form_fields: &[(String, String)],
     file_fields: &[(String, String)],
 ) -> HttpResponse {
+    if let Err(msg) = validate_url(url) {
+        return HttpResponse {
+            status: 0,
+            reason: msg,
+            headers: vec![],
+            body: String::new(),
+        };
+    }
+
     match execute_multipart_inner(url, headers, form_fields, file_fields) {
         Ok(resp) => resp,
         Err(msg) => HttpResponse {
@@ -199,7 +330,8 @@ fn execute_multipart_inner(
         })
         .collect();
 
-    let resp_body = response.body_mut().read_to_string().unwrap_or_default();
+    let resp_body = read_body_limited(response.body_mut())
+        .unwrap_or_else(|e| format!("[body read error: {e}]"));
 
     Ok(HttpResponse {
         status,

@@ -1,63 +1,35 @@
-use std::ffi::{c_char, CString};
+use std::ffi::c_void;
 
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
-use quack_rs::vector::complex::MapVector;
 
 use crate::http::{self, HttpResponse, Method};
 
-// ===== DuckDB Type Creation =====
+// ===== Type Builders (quack-rs 0.8.0) =====
 
-/// Creates: STRUCT(status INTEGER, reason VARCHAR, headers MAP(VARCHAR, VARCHAR), body VARCHAR)
+/// Creates the response type: STRUCT(status INTEGER, reason VARCHAR, headers MAP(VARCHAR, VARCHAR), body VARCHAR)
 ///
-/// Uses raw libduckdb-sys because quack-rs LogicalType::struct_type() only accepts TypeId,
-/// not nested LogicalType (e.g. MAP). This is a known quack-rs gap.
-unsafe fn create_response_type() -> duckdb_logical_type {
-    let status_type = duckdb_create_logical_type(DUCKDB_TYPE_DUCKDB_TYPE_INTEGER);
-    let reason_type = duckdb_create_logical_type(DUCKDB_TYPE_DUCKDB_TYPE_VARCHAR);
-    let body_type = duckdb_create_logical_type(DUCKDB_TYPE_DUCKDB_TYPE_VARCHAR);
-
-    let map_key = duckdb_create_logical_type(DUCKDB_TYPE_DUCKDB_TYPE_VARCHAR);
-    let map_val = duckdb_create_logical_type(DUCKDB_TYPE_DUCKDB_TYPE_VARCHAR);
-    let headers_type = duckdb_create_map_type(map_key, map_val);
-    duckdb_destroy_logical_type(&mut { map_key });
-    duckdb_destroy_logical_type(&mut { map_val });
-
-    let mut member_types = [status_type, reason_type, headers_type, body_type];
-    let names: [CString; 4] = [
-        CString::new("status").unwrap(),
-        CString::new("reason").unwrap(),
-        CString::new("headers").unwrap(),
-        CString::new("body").unwrap(),
-    ];
-    let mut name_ptrs: [*const c_char; 4] = [
-        names[0].as_ptr(),
-        names[1].as_ptr(),
-        names[2].as_ptr(),
-        names[3].as_ptr(),
-    ];
-
-    let struct_type = duckdb_create_struct_type(
-        member_types.as_mut_ptr(),
-        name_ptrs.as_mut_ptr(),
-        4,
+/// quack-rs 0.8.0 added `struct_type_from_logical` and `map_from_logical`,
+/// eliminating the need for raw libduckdb-sys type construction.
+fn response_type() -> LogicalType {
+    let headers_map = LogicalType::map_from_logical(
+        &LogicalType::new(TypeId::Varchar),
+        &LogicalType::new(TypeId::Varchar),
     );
-
-    for t in &mut member_types {
-        duckdb_destroy_logical_type(t);
-    }
-
-    struct_type
+    LogicalType::struct_type_from_logical(&[
+        ("status", LogicalType::new(TypeId::Integer)),
+        ("reason", LogicalType::new(TypeId::Varchar)),
+        ("headers", headers_map),
+        ("body", LogicalType::new(TypeId::Varchar)),
+    ])
 }
 
-/// Creates MAP(VARCHAR, VARCHAR) for header parameters.
-unsafe fn create_map_varchar_varchar() -> duckdb_logical_type {
-    let k = duckdb_create_logical_type(DUCKDB_TYPE_DUCKDB_TYPE_VARCHAR);
-    let v = duckdb_create_logical_type(DUCKDB_TYPE_DUCKDB_TYPE_VARCHAR);
-    let m = duckdb_create_map_type(k, v);
-    duckdb_destroy_logical_type(&mut { k });
-    duckdb_destroy_logical_type(&mut { v });
-    m
+/// MAP(VARCHAR, VARCHAR) for header/field parameters.
+fn map_varchar_varchar() -> LogicalType {
+    LogicalType::map_from_logical(
+        &LogicalType::new(TypeId::Varchar),
+        &LogicalType::new(TypeId::Varchar),
+    )
 }
 
 // ===== Input Helpers =====
@@ -70,7 +42,6 @@ unsafe fn read_headers_map(
 ) -> Vec<(String, String)> {
     let map_vec = duckdb_data_chunk_get_vector(input, col);
 
-    // Check NULL
     let validity = duckdb_vector_get_validity(map_vec);
     if !validity.is_null() && !duckdb_validity_row_is_valid(validity, row as idx_t) {
         return vec![];
@@ -106,7 +77,7 @@ unsafe fn write_varchar(vec: duckdb_vector, row: idx_t, s: &str) {
     duckdb_vector_assign_string_element_len(
         vec,
         row,
-        s.as_ptr() as *const c_char,
+        s.as_ptr() as *const std::ffi::c_char,
         s.len() as idx_t,
     );
 }
@@ -153,10 +124,34 @@ unsafe fn write_response(
     write_varchar(body_vec, row, &resp.body);
 }
 
-// ===== Core Execution Functions =====
-// These process entire chunks. Each variant reads different columns from input.
+// ===== Extra Info: Method Tag =====
+// Uses quack-rs 0.8.0 extra_info to store the HTTP method on each overload,
+// allowing a single callback function to handle all HTTP methods of the same shape.
 
-unsafe fn exec_url_only(method: Method, input: duckdb_data_chunk, output: duckdb_vector) {
+/// Retrieve the HTTP Method stored as extra_info on a scalar function.
+unsafe fn method_from_info(info: duckdb_function_info) -> Method {
+    let fi = ScalarFunctionInfo::new(info);
+    let ptr = fi.get_extra_info();
+    let tag = ptr as u8;
+    // SAFETY: tags are set by us and always valid Method discriminants
+    std::mem::transmute::<u8, Method>(tag)
+}
+
+/// Stores a Method discriminant as the extra_info pointer (no heap allocation).
+fn method_as_ptr(m: Method) -> *mut c_void {
+    (m as u8) as usize as *mut c_void
+}
+
+// ===== Unified Callbacks =====
+// One callback per parameter shape, using extra_info to determine the HTTP method.
+
+/// Callback: (url VARCHAR) -> STRUCT
+unsafe extern "C" fn cb_url_only(
+    info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let method = method_from_info(info);
     let row_count = duckdb_data_chunk_get_size(input);
     let url_reader = VectorReader::new(input, 0);
     let mut map_offset: idx_t = 0;
@@ -168,7 +163,13 @@ unsafe fn exec_url_only(method: Method, input: duckdb_data_chunk, output: duckdb
     }
 }
 
-unsafe fn exec_url_headers(method: Method, input: duckdb_data_chunk, output: duckdb_vector) {
+/// Callback: (url VARCHAR, headers MAP) -> STRUCT
+unsafe extern "C" fn cb_url_headers(
+    info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let method = method_from_info(info);
     let row_count = duckdb_data_chunk_get_size(input);
     let url_reader = VectorReader::new(input, 0);
     let mut map_offset: idx_t = 0;
@@ -181,7 +182,13 @@ unsafe fn exec_url_headers(method: Method, input: duckdb_data_chunk, output: duc
     }
 }
 
-unsafe fn exec_url_body(method: Method, input: duckdb_data_chunk, output: duckdb_vector) {
+/// Callback: (url VARCHAR, body VARCHAR) -> STRUCT
+unsafe extern "C" fn cb_url_body(
+    info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let method = method_from_info(info);
     let row_count = duckdb_data_chunk_get_size(input);
     let url_reader = VectorReader::new(input, 0);
     let body_reader = VectorReader::new(input, 1);
@@ -195,11 +202,13 @@ unsafe fn exec_url_body(method: Method, input: duckdb_data_chunk, output: duckdb
     }
 }
 
-unsafe fn exec_url_headers_body(
-    method: Method,
+/// Callback: (url VARCHAR, headers MAP, body VARCHAR) -> STRUCT
+unsafe extern "C" fn cb_url_headers_body(
+    info: duckdb_function_info,
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
+    let method = method_from_info(info);
     let row_count = duckdb_data_chunk_get_size(input);
     let url_reader = VectorReader::new(input, 0);
     let body_reader = VectorReader::new(input, 2);
@@ -214,7 +223,12 @@ unsafe fn exec_url_headers_body(
     }
 }
 
-unsafe fn exec_generic(input: duckdb_data_chunk, output: duckdb_vector) {
+/// Callback: http_request(method VARCHAR, url VARCHAR, headers MAP, body VARCHAR) -> STRUCT
+unsafe extern "C" fn cb_generic(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
     let row_count = duckdb_data_chunk_get_size(input);
     let method_reader = VectorReader::new(input, 0);
     let url_reader = VectorReader::new(input, 1);
@@ -245,10 +259,12 @@ unsafe fn exec_generic(input: duckdb_data_chunk, output: duckdb_vector) {
     }
 }
 
-// ===== Multipart Execution =====
-
-/// http_post_multipart(url VARCHAR, form_fields MAP, file_fields MAP)
-unsafe fn exec_multipart(input: duckdb_data_chunk, output: duckdb_vector) {
+/// Callback: http_post_multipart(url, form_fields MAP, file_fields MAP) -> STRUCT
+unsafe extern "C" fn cb_multipart(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
     let row_count = duckdb_data_chunk_get_size(input);
     let url_reader = VectorReader::new(input, 0);
     let mut map_offset: idx_t = 0;
@@ -262,8 +278,12 @@ unsafe fn exec_multipart(input: duckdb_data_chunk, output: duckdb_vector) {
     }
 }
 
-/// http_post_multipart(url VARCHAR, headers MAP, form_fields MAP, file_fields MAP)
-unsafe fn exec_multipart_hdrs(input: duckdb_data_chunk, output: duckdb_vector) {
+/// Callback: http_post_multipart(url, headers MAP, form_fields MAP, file_fields MAP) -> STRUCT
+unsafe extern "C" fn cb_multipart_hdrs(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
     let row_count = duckdb_data_chunk_get_size(input);
     let url_reader = VectorReader::new(input, 0);
     let mut map_offset: idx_t = 0;
@@ -278,204 +298,167 @@ unsafe fn exec_multipart_hdrs(input: duckdb_data_chunk, output: duckdb_vector) {
     }
 }
 
-// ===== Callback Wrappers =====
-// Thin extern "C" functions that delegate to the core execution functions above.
-// Uses a macro to reduce boilerplate since each just forwards to an exec_ function.
+// ===== Auth Helper Callbacks =====
 
-macro_rules! callback {
-    ($name:ident, $exec:ident, $method:expr) => {
-        unsafe extern "C" fn $name(
-            _info: duckdb_function_info,
-            input: duckdb_data_chunk,
-            output: duckdb_vector,
-        ) {
-            $exec($method, input, output);
-        }
-    };
-}
-
-// No-body methods: (url) and (url, headers)
-callback!(cb_get_url, exec_url_only, Method::Get);
-callback!(cb_get_url_hdrs, exec_url_headers, Method::Get);
-callback!(cb_delete_url, exec_url_only, Method::Delete);
-callback!(cb_delete_url_hdrs, exec_url_headers, Method::Delete);
-callback!(cb_head_url, exec_url_only, Method::Head);
-callback!(cb_head_url_hdrs, exec_url_headers, Method::Head);
-callback!(cb_options_url, exec_url_only, Method::Options);
-callback!(cb_options_url_hdrs, exec_url_headers, Method::Options);
-
-// Body methods: (url, body) and (url, headers, body)
-callback!(cb_post_url_body, exec_url_body, Method::Post);
-callback!(cb_post_url_hdrs_body, exec_url_headers_body, Method::Post);
-callback!(cb_put_url_body, exec_url_body, Method::Put);
-callback!(cb_put_url_hdrs_body, exec_url_headers_body, Method::Put);
-callback!(cb_patch_url_body, exec_url_body, Method::Patch);
-callback!(cb_patch_url_hdrs_body, exec_url_headers_body, Method::Patch);
-
-// Multipart: (url, form_fields, file_fields) and (url, headers, form_fields, file_fields)
-unsafe extern "C" fn cb_multipart(
+/// Callback: http_basic_auth(username VARCHAR, password VARCHAR) -> VARCHAR
+/// Returns "Basic <base64(username:password)>"
+unsafe extern "C" fn cb_basic_auth(
     _info: duckdb_function_info,
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    exec_multipart(input, output);
+    use base64::Engine as _;
+    let row_count = duckdb_data_chunk_get_size(input);
+    let user_reader = VectorReader::new(input, 0);
+    let pass_reader = VectorReader::new(input, 1);
+
+    for row in 0..row_count {
+        let user = user_reader.read_str(row as usize);
+        let pass = pass_reader.read_str(row as usize);
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(format!("{user}:{pass}"));
+        let header = format!("Basic {encoded}");
+        write_varchar(output, row, &header);
+    }
 }
 
-unsafe extern "C" fn cb_multipart_hdrs(
+/// Callback: http_bearer_auth(token VARCHAR) -> VARCHAR
+/// Returns "Bearer <token>"
+unsafe extern "C" fn cb_bearer_auth(
     _info: duckdb_function_info,
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    exec_multipart_hdrs(input, output);
-}
+    let row_count = duckdb_data_chunk_get_size(input);
+    let token_reader = VectorReader::new(input, 0);
 
-// Generic
-unsafe extern "C" fn cb_generic(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    exec_generic(input, output);
-}
-
-// ===== Registration Helpers =====
-
-/// Create a scalar function handle with the given name, parameters, return type, and callback.
-unsafe fn make_scalar(
-    name: &CString,
-    params: &[duckdb_logical_type],
-    ret: duckdb_logical_type,
-    func: duckdb_scalar_function_t,
-) -> duckdb_scalar_function {
-    let sf = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(sf, name.as_ptr());
-    for p in params {
-        duckdb_scalar_function_add_parameter(sf, *p);
-    }
-    duckdb_scalar_function_set_return_type(sf, ret);
-    duckdb_scalar_function_set_function(sf, func);
-    sf
-}
-
-/// Register a function set (multiple overloads under one name).
-unsafe fn register_set(con: duckdb_connection, name: &str, funcs: &[duckdb_scalar_function]) {
-    let cname = CString::new(name).unwrap();
-    let set = duckdb_create_scalar_function_set(cname.as_ptr());
-    for &f in funcs {
-        duckdb_add_scalar_function_to_set(set, f);
-    }
-    duckdb_register_scalar_function_set(con, set);
-    duckdb_destroy_scalar_function_set(&mut { set });
-    for &f in funcs {
-        duckdb_destroy_scalar_function(&mut { f });
+    for row in 0..row_count {
+        let token = token_reader.read_str(row as usize);
+        let header = format!("Bearer {token}");
+        write_varchar(output, row, &header);
     }
 }
 
-/// Register a single scalar function (no overloads).
-unsafe fn register_single(con: duckdb_connection, func: duckdb_scalar_function) {
-    duckdb_register_scalar_function(con, func);
-    duckdb_destroy_scalar_function(&mut { func });
-}
+// ===== Registration (quack-rs 0.8.0 builders) =====
+// LogicalType is RAII (Drop destroys the handle), so we create fresh instances
+// for each builder call via the helper functions above.
 
-/// Register a no-body HTTP method with two overloads: (url) and (url, headers).
+/// Register a no-body HTTP method (GET, DELETE, HEAD, OPTIONS) with two overloads.
 unsafe fn register_no_body_method(
     con: duckdb_connection,
     name: &str,
-    url_cb: duckdb_scalar_function_t,
-    url_hdrs_cb: duckdb_scalar_function_t,
-    varchar: duckdb_logical_type,
-    map: duckdb_logical_type,
-    ret: duckdb_logical_type,
-) {
-    let cname = CString::new(name).unwrap();
-    let f1 = make_scalar(&cname, &[varchar], ret, url_cb);
-    let f2 = make_scalar(&cname, &[varchar, map], ret, url_hdrs_cb);
-    register_set(con, name, &[f1, f2]);
+    method: Method,
+) -> Result<(), ExtensionError> {
+    let url_only = ScalarOverloadBuilder::new()
+        .param(TypeId::Varchar)
+        .returns_logical(response_type())
+        .function(cb_url_only)
+        .null_handling(NullHandling::SpecialNullHandling);
+    let url_only = unsafe { url_only.extra_info(method_as_ptr(method), None) };
+
+    let url_hdrs = ScalarOverloadBuilder::new()
+        .param(TypeId::Varchar)
+        .param_logical(map_varchar_varchar())
+        .returns_logical(response_type())
+        .function(cb_url_headers)
+        .null_handling(NullHandling::SpecialNullHandling);
+    let url_hdrs = unsafe { url_hdrs.extra_info(method_as_ptr(method), None) };
+
+    ScalarFunctionSetBuilder::new(name)
+        .overload(url_only)
+        .overload(url_hdrs)
+        .register(con)
 }
 
-/// Register a body HTTP method with two overloads: (url, body) and (url, headers, body).
+/// Register a body HTTP method (POST, PUT, PATCH) with two overloads.
 unsafe fn register_body_method(
     con: duckdb_connection,
     name: &str,
-    url_body_cb: duckdb_scalar_function_t,
-    url_hdrs_body_cb: duckdb_scalar_function_t,
-    varchar: duckdb_logical_type,
-    map: duckdb_logical_type,
-    ret: duckdb_logical_type,
-) {
-    let cname = CString::new(name).unwrap();
-    let f1 = make_scalar(&cname, &[varchar, varchar], ret, url_body_cb);
-    let f2 = make_scalar(&cname, &[varchar, map, varchar], ret, url_hdrs_body_cb);
-    register_set(con, name, &[f1, f2]);
+    method: Method,
+) -> Result<(), ExtensionError> {
+    let url_body = ScalarOverloadBuilder::new()
+        .param(TypeId::Varchar)
+        .param(TypeId::Varchar)
+        .returns_logical(response_type())
+        .function(cb_url_body)
+        .null_handling(NullHandling::SpecialNullHandling);
+    let url_body = unsafe { url_body.extra_info(method_as_ptr(method), None) };
+
+    let url_hdrs_body = ScalarOverloadBuilder::new()
+        .param(TypeId::Varchar)
+        .param_logical(map_varchar_varchar())
+        .param(TypeId::Varchar)
+        .returns_logical(response_type())
+        .function(cb_url_headers_body)
+        .null_handling(NullHandling::SpecialNullHandling);
+    let url_hdrs_body = unsafe { url_hdrs_body.extra_info(method_as_ptr(method), None) };
+
+    ScalarFunctionSetBuilder::new(name)
+        .overload(url_body)
+        .overload(url_hdrs_body)
+        .register(con)
 }
 
-// ===== Public Registration Entry Point =====
-
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
-    let ret = create_response_type();
-    let varchar = duckdb_create_logical_type(DUCKDB_TYPE_DUCKDB_TYPE_VARCHAR);
-    let map = create_map_varchar_varchar();
-
     // No-body methods: GET, DELETE, HEAD, OPTIONS
-    register_no_body_method(
-        con, "http_get",
-        Some(cb_get_url), Some(cb_get_url_hdrs),
-        varchar, map, ret,
-    );
-    register_no_body_method(
-        con, "http_delete",
-        Some(cb_delete_url), Some(cb_delete_url_hdrs),
-        varchar, map, ret,
-    );
-    register_no_body_method(
-        con, "http_head",
-        Some(cb_head_url), Some(cb_head_url_hdrs),
-        varchar, map, ret,
-    );
-    register_no_body_method(
-        con, "http_options",
-        Some(cb_options_url), Some(cb_options_url_hdrs),
-        varchar, map, ret,
-    );
+    register_no_body_method(con, "http_get", Method::Get)?;
+    register_no_body_method(con, "http_delete", Method::Delete)?;
+    register_no_body_method(con, "http_head", Method::Head)?;
+    register_no_body_method(con, "http_options", Method::Options)?;
 
     // Body methods: POST, PUT, PATCH
-    register_body_method(
-        con, "http_post",
-        Some(cb_post_url_body), Some(cb_post_url_hdrs_body),
-        varchar, map, ret,
-    );
-    register_body_method(
-        con, "http_put",
-        Some(cb_put_url_body), Some(cb_put_url_hdrs_body),
-        varchar, map, ret,
-    );
-    register_body_method(
-        con, "http_patch",
-        Some(cb_patch_url_body), Some(cb_patch_url_hdrs_body),
-        varchar, map, ret,
-    );
+    register_body_method(con, "http_post", Method::Post)?;
+    register_body_method(con, "http_put", Method::Put)?;
+    register_body_method(con, "http_patch", Method::Patch)?;
 
     // Multipart: http_post_multipart
-    {
-        let cname = CString::new("http_post_multipart").unwrap();
-        // (url, form_fields, file_fields)
-        let f1 = make_scalar(&cname, &[varchar, map, map], ret, Some(cb_multipart));
-        // (url, headers, form_fields, file_fields)
-        let f2 = make_scalar(&cname, &[varchar, map, map, map], ret, Some(cb_multipart_hdrs));
-        register_set(con, "http_post_multipart", &[f1, f2]);
-    }
+    ScalarFunctionSetBuilder::new("http_post_multipart")
+        .overload(
+            ScalarOverloadBuilder::new()
+                .param(TypeId::Varchar)
+                .param_logical(map_varchar_varchar())
+                .param_logical(map_varchar_varchar())
+                .returns_logical(response_type())
+                .function(cb_multipart)
+                .null_handling(NullHandling::SpecialNullHandling),
+        )
+        .overload(
+            ScalarOverloadBuilder::new()
+                .param(TypeId::Varchar)
+                .param_logical(map_varchar_varchar())
+                .param_logical(map_varchar_varchar())
+                .param_logical(map_varchar_varchar())
+                .returns_logical(response_type())
+                .function(cb_multipart_hdrs)
+                .null_handling(NullHandling::SpecialNullHandling),
+        )
+        .register(con)?;
 
-    // Generic: http_request(method VARCHAR, url VARCHAR, headers MAP, body VARCHAR)
-    {
-        let cname = CString::new("http_request").unwrap();
-        let f = make_scalar(&cname, &[varchar, varchar, map, varchar], ret, Some(cb_generic));
-        register_single(con, f);
-    }
+    // Generic: http_request(method, url, headers, body)
+    ScalarFunctionBuilder::new("http_request")
+        .param(TypeId::Varchar)
+        .param(TypeId::Varchar)
+        .param_logical(map_varchar_varchar())
+        .param(TypeId::Varchar)
+        .returns_logical(response_type())
+        .function(cb_generic)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
 
-    // Cleanup shared logical types
-    duckdb_destroy_logical_type(&mut { ret });
-    duckdb_destroy_logical_type(&mut { varchar });
-    duckdb_destroy_logical_type(&mut { map });
+    // Auth helpers: http_basic_auth(username, password) -> VARCHAR
+    ScalarFunctionBuilder::new("http_basic_auth")
+        .param(TypeId::Varchar)
+        .param(TypeId::Varchar)
+        .returns(TypeId::Varchar)
+        .function(cb_basic_auth)
+        .register(con)?;
+
+    // Auth helpers: http_bearer_auth(token) -> VARCHAR
+    ScalarFunctionBuilder::new("http_bearer_auth")
+        .param(TypeId::Varchar)
+        .returns(TypeId::Varchar)
+        .function(cb_bearer_auth)
+        .register(con)?;
 
     Ok(())
 }

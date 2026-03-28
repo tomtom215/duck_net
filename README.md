@@ -39,6 +39,13 @@ All functions return `STRUCT(status INTEGER, reason VARCHAR, headers MAP(VARCHAR
 |----------|-----------|
 | `http_request` | `(method VARCHAR, url VARCHAR, headers MAP(VARCHAR, VARCHAR), body VARCHAR)` |
 
+### Authentication Helpers
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `http_basic_auth` | `(username VARCHAR, password VARCHAR)` | `VARCHAR` — `Basic <base64>` header value |
+| `http_bearer_auth` | `(token VARCHAR)` | `VARCHAR` — `Bearer <token>` header value |
+
 ## Usage Examples
 
 ```sql
@@ -99,6 +106,17 @@ SELECT http_post_multipart(
     MAP{'attachment': '/tmp/report.pdf'}      -- file fields
 );
 
+-- Authentication helpers
+SELECT http_get(
+    'https://api.example.com/data',
+    MAP{'Authorization': http_basic_auth('user', 'pass')}
+);
+
+SELECT http_get(
+    'https://api.example.com/data',
+    MAP{'Authorization': http_bearer_auth('my-jwt-token')}
+);
+
 -- Use in queries with tables
 SELECT
     url,
@@ -144,15 +162,28 @@ duckdb -unsigned -cmd "LOAD 'target/release/libduck_net.so';"
 - **`src/ffi/mod.rs`** — Coordinator that wires registration to the DuckDB connection.
 - **`src/lib.rs`** — Extension entry point using `quack_rs::entry_point_v2!`.
 
+## Security
+
+| Protection | Implementation |
+|-----------|---------------|
+| **URL scheme validation** | Only `http://` and `https://` allowed (SSRF mitigation, CWE-918) |
+| **Response body size limit** | 256 MiB max prevents OOM from unbounded responses (CWE-400) |
+| **TLS** | rustls (pure Rust, no OpenSSL). System CA roots for certificate validation |
+| **Timeouts** | 30-second global timeout per request (connect + transfer) |
+| **Retry with backoff** | Configurable exponential backoff with 60s cap per delay (prevents thundering herd) |
+| **Connection pooling** | Single global ureq Agent reuses TCP connections (HTTP keep-alive) |
+| **No telemetry** | Zero phone-home, zero tracking |
+
 ## Dependencies
 
 Minimal dependency set:
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `quack-rs` | 0.7.1 | DuckDB extension SDK |
+| `quack-rs` | 0.8.0 | DuckDB extension SDK (zero raw C API needed) |
 | `libduckdb-sys` | 1.10501.0 | DuckDB C API bindings (v1.5.1) |
 | `ureq` | 3.3.0 | Sync HTTP client (rustls TLS, gzip) |
+| `base64` | 0.22.0 | Base64 encoding for HTTP Basic auth |
 
 ## Improvements Over query-farm/httpclient
 

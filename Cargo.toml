@@ -10,9 +10,10 @@ description = "DuckDB extension for comprehensive HTTP/HTTPS network client oper
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-quack_rs = { version = "0.7", package = "quack-rs" }
+quack_rs = { version = "0.8", package = "quack-rs" }
 libduckdb-sys = { version = "=1.10501.0", features = ["loadable-extension"] }
-ureq = { version = "3.3", features = ["multipart"] }
+ureq = { version = "3.3", features = ["multipart", "platform-verifier"] }
+base64 = "0.22"
 
 [profile.release]
 opt-level = 3
