@@ -145,8 +145,25 @@ fn send_command(stream: &mut TcpStream, args: &[&str]) -> Result<(), String> {
         .map_err(|e| format!("Redis write failed: {e}"))
 }
 
+/// Maximum recursion depth for RESP array parsing.
+/// Prevents stack overflow from malicious deeply-nested responses (CWE-674).
+const MAX_RESP_DEPTH: usize = 8;
+
+/// Maximum number of array elements in a single RESP array.
+/// Prevents memory exhaustion from extremely large arrays (CWE-400).
+const MAX_ARRAY_ELEMENTS: i64 = 100_000;
+
 /// Read a single RESP response.
 fn read_response(reader: &mut BufReader<TcpStream>) -> Result<String, String> {
+    read_response_depth(reader, 0)
+}
+
+/// Read a single RESP response with depth tracking to prevent stack overflow.
+fn read_response_depth(reader: &mut BufReader<TcpStream>, depth: usize) -> Result<String, String> {
+    if depth > MAX_RESP_DEPTH {
+        return Err(format!("RESP nesting too deep (max {MAX_RESP_DEPTH})"));
+    }
+
     let mut line = String::new();
     reader
         .read_line(&mut line)
@@ -190,9 +207,14 @@ fn read_response(reader: &mut BufReader<TcpStream>) -> Result<String, String> {
             if count < 0 {
                 return Ok("*-1".to_string()); // Null array
             }
+            if count > MAX_ARRAY_ELEMENTS {
+                return Err(format!(
+                    "Array too large: {count} elements (max {MAX_ARRAY_ELEMENTS})"
+                ));
+            }
             let mut elements = Vec::new();
             for _ in 0..count {
-                let elem = read_response(reader)?;
+                let elem = read_response_depth(reader, depth + 1)?;
                 elements.push(elem);
             }
             // Return as newline-separated values

@@ -290,7 +290,8 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
 
     // redis_del(url, key) -> STRUCT
     ScalarFunctionBuilder::new("redis_del")
-        .param(v).param(v)
+        .param(v)
+        .param(v)
         .returns_logical(redis_result_type())
         .function(cb_redis_del)
         .null_handling(NullHandling::SpecialNullHandling)
@@ -298,7 +299,9 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
 
     // redis_expire(url, key, ttl_secs) -> STRUCT
     ScalarFunctionBuilder::new("redis_expire")
-        .param(v).param(v).param(TypeId::BigInt)
+        .param(v)
+        .param(v)
+        .param(TypeId::BigInt)
         .returns_logical(redis_result_type())
         .function(cb_redis_expire)
         .null_handling(NullHandling::SpecialNullHandling)
@@ -306,7 +309,9 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
 
     // redis_hget(url, key, field) -> STRUCT
     ScalarFunctionBuilder::new("redis_hget")
-        .param(v).param(v).param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(redis_result_type())
         .function(cb_redis_hget)
         .null_handling(NullHandling::SpecialNullHandling)
@@ -314,7 +319,10 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
 
     // redis_hset(url, key, field, value) -> STRUCT
     ScalarFunctionBuilder::new("redis_hset")
-        .param(v).param(v).param(v).param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(redis_result_type())
         .function(cb_redis_hset)
         .null_handling(NullHandling::SpecialNullHandling)

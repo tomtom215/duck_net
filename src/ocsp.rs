@@ -67,6 +67,9 @@ fn err_result(msg: &str) -> OcspResult {
 }
 
 fn check_inner(host: &str, port: u16) -> Result<OcspResult, String> {
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(host)?;
+
     let addr = format!("{host}:{port}");
     let timeout = Duration::from_secs(TIMEOUT_SECS);
 
@@ -156,8 +159,8 @@ fn check_inner(host: &str, port: u16) -> Result<OcspResult, String> {
 /// Extract OCSP responder URL from Authority Information Access extension.
 fn extract_ocsp_url(cert: &X509Certificate) -> Result<String, String> {
     // AIA OID: 1.3.6.1.5.5.7.1.1
-    let aia_oid = x509_parser::oid_registry::Oid::from(&[1, 3, 6, 1, 5, 5, 7, 1, 1])
-        .expect("valid OID");
+    let aia_oid =
+        x509_parser::oid_registry::Oid::from(&[1, 3, 6, 1, 5, 5, 7, 1, 1]).expect("valid OID");
 
     for ext in cert.extensions() {
         if ext.oid == aia_oid {
@@ -170,6 +173,9 @@ fn extract_ocsp_url(cert: &X509Certificate) -> Result<String, String> {
 }
 
 /// Parse AIA extension bytes to find OCSP responder URL.
+///
+/// Uses bounds-checked access throughout to prevent panics from
+/// malformed DER data (CWE-125).
 fn extract_ocsp_url_from_aia(data: &[u8]) -> Result<String, String> {
     // Simple ASN.1 DER parser for AIA extension
     // Looking for OID 1.3.6.1.5.5.7.48.1 (OCSP) followed by a URI
@@ -177,18 +183,22 @@ fn extract_ocsp_url_from_aia(data: &[u8]) -> Result<String, String> {
 
     // Scan for the OCSP OID in the DER data
     for i in 0..data.len().saturating_sub(ocsp_oid.len()) {
-        if &data[i..i + ocsp_oid.len()] == ocsp_oid {
+        if data.get(i..i + ocsp_oid.len()) == Some(ocsp_oid) {
             // After the OID, look for a context-specific tag [6] (uniformResourceIdentifier)
             let rest = &data[i + ocsp_oid.len()..];
             for j in 0..rest.len().saturating_sub(2) {
                 if rest[j] == 0x86 {
                     // Tag [6] implicit IA5String
                     let len = rest[j + 1] as usize;
-                    if j + 2 + len <= rest.len() {
-                        let url = std::str::from_utf8(&rest[j + 2..j + 2 + len])
-                            .map_err(|_| "Invalid OCSP URL encoding")?;
-                        if url.starts_with("http://") || url.starts_with("https://") {
-                            return Ok(url.to_string());
+                    // Bounds check: ensure we don't read past the buffer
+                    if len > 2048 {
+                        continue; // Unreasonably large URL
+                    }
+                    if let Some(url_bytes) = rest.get(j + 2..j + 2 + len) {
+                        if let Ok(url) = std::str::from_utf8(url_bytes) {
+                            if url.starts_with("http://") || url.starts_with("https://") {
+                                return Ok(url.to_string());
+                            }
                         }
                     }
                 }
@@ -216,14 +226,12 @@ fn extract_ocsp_url_from_aia(data: &[u8]) -> Result<String, String> {
 ///   issuerKeyHash OCTET STRING,
 ///   serialNumber CertificateSerialNumber
 /// }
-fn build_ocsp_request(
-    issuer_name_hash: &[u8],
-    issuer_key_hash: &[u8],
-    serial: &[u8],
-) -> Vec<u8> {
+fn build_ocsp_request(issuer_name_hash: &[u8], issuer_key_hash: &[u8], serial: &[u8]) -> Vec<u8> {
     // SHA-256 AlgorithmIdentifier: SEQUENCE { OID 2.16.840.1.101.3.4.2.1, NULL }
     let sha256_alg = der_sequence(&[
-        &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01],
+        &[
+            0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
+        ],
         &[0x05, 0x00], // NULL
     ]);
 
@@ -271,7 +279,7 @@ fn der_octet_string(data: &[u8]) -> Vec<u8> {
 /// Encode an integer in ASN.1 DER format.
 fn der_integer(data: &[u8]) -> Vec<u8> {
     let mut result = vec![0x02]; // INTEGER tag
-    // Add leading zero if high bit is set
+                                 // Add leading zero if high bit is set
     if !data.is_empty() && data[0] & 0x80 != 0 {
         result.extend_from_slice(&der_length(data.len() + 1));
         result.push(0x00);
@@ -303,10 +311,7 @@ fn sha256_hash(data: &[u8]) -> Vec<u8> {
 fn send_ocsp_request(url: &str, request: &[u8]) -> Result<Vec<u8>, String> {
     use crate::http::{self, Method};
 
-    let body_b64 = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        request,
-    );
+    let body_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, request);
 
     // Use HTTP GET with base64-encoded request in URL (simpler, widely supported)
     let encoded_url = format!(
@@ -320,7 +325,10 @@ fn send_ocsp_request(url: &str, request: &[u8]) -> Result<Vec<u8>, String> {
         let resp = http::execute(
             Method::Get,
             &encoded_url,
-            &[("Accept".to_string(), "application/ocsp-response".to_string())],
+            &[(
+                "Accept".to_string(),
+                "application/ocsp-response".to_string(),
+            )],
             None,
         );
 
@@ -420,8 +428,7 @@ fn parse_ocsp_response(data: &[u8], responder_url: &str) -> Result<OcspResult, S
 
 /// Find a 2-byte sequence in data.
 fn find_bytes(data: &[u8], needle: &[u8]) -> Option<usize> {
-    data.windows(needle.len())
-        .position(|w| w == needle)
+    data.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Find a context-specific constructed tag.
@@ -440,15 +447,19 @@ fn find_enumerated(data: &[u8]) -> Option<u8> {
 }
 
 /// Extract a GeneralizedTime value after a revoked status tag.
+///
+/// Uses bounds-checked slice access to prevent panics (CWE-125).
 fn extract_generalized_time(data: &[u8]) -> Option<String> {
     // Look for GeneralizedTime tag (0x18) after 0xA1 (revoked)
     if let Some(pos) = find_tag(data, 0xA1) {
         for i in pos..data.len().saturating_sub(2) {
             if data[i] == 0x18 {
-                let len = data[i + 1] as usize;
-                if i + 2 + len <= data.len() {
-                    return std::str::from_utf8(&data[i + 2..i + 2 + len]).ok().map(|s| s.to_string());
+                let len = *data.get(i + 1)? as usize;
+                if len > 32 {
+                    continue; // Unreasonably long timestamp
                 }
+                let time_bytes = data.get(i + 2..i + 2 + len)?;
+                return std::str::from_utf8(time_bytes).ok().map(|s| s.to_string());
             }
         }
     }
@@ -456,13 +467,18 @@ fn extract_generalized_time(data: &[u8]) -> Option<String> {
 }
 
 /// Extract the Nth GeneralizedTime value from DER data.
+///
+/// Uses bounds-checked slice access to prevent panics (CWE-125).
 fn extract_nth_generalized_time(data: &[u8], n: usize) -> Option<String> {
     let mut count = 0;
     for i in 0..data.len().saturating_sub(2) {
-        if data[i] == 0x18 && (data[i + 1] as usize) < 20 {
-            let len = data[i + 1] as usize;
-            if i + 2 + len <= data.len() {
-                if let Ok(s) = std::str::from_utf8(&data[i + 2..i + 2 + len]) {
+        if data[i] == 0x18 {
+            let len = *data.get(i + 1)? as usize;
+            if len > 32 || len == 0 {
+                continue; // Unreasonable length
+            }
+            if let Some(time_bytes) = data.get(i + 2..i + 2 + len) {
+                if let Ok(s) = std::str::from_utf8(time_bytes) {
                     if count == n {
                         return Some(s.to_string());
                     }

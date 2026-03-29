@@ -185,8 +185,7 @@ pub fn etcd_get(url: &str, key: &str) -> KvResult {
     let encoded_key = b64_engine().encode(key.as_bytes());
     let body = format!("{{\"key\":\"{encoded_key}\"}}");
 
-    let headers: Vec<(String, String)> =
-        vec![("Content-Type".into(), "application/json".into())];
+    let headers: Vec<(String, String)> = vec![("Content-Type".into(), "application/json".into())];
 
     let resp = http::execute(Method::Post, &api_url, &headers, Some(&body));
 
@@ -243,8 +242,7 @@ pub fn etcd_put(url: &str, key: &str, value: &str) -> KvResult {
     let encoded_value = b64_engine().encode(value.as_bytes());
     let body = format!("{{\"key\":\"{encoded_key}\",\"value\":\"{encoded_value}\"}}");
 
-    let headers: Vec<(String, String)> =
-        vec![("Content-Type".into(), "application/json".into())];
+    let headers: Vec<(String, String)> = vec![("Content-Type".into(), "application/json".into())];
 
     let resp = http::execute(Method::Post, &api_url, &headers, Some(&body));
 

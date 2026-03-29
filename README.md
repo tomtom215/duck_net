@@ -496,31 +496,58 @@ duckdb -unsigned -cmd "LOAD 'target/release/libduck_net.so';"
 
 ## Security
 
-| Protection | Implementation |
-|-----------|---------------|
-| **URL scheme validation** | Only `http://` and `https://` allowed (SSRF mitigation, CWE-918) |
-| **Response body size limit** | 256 MiB max prevents OOM from unbounded responses (CWE-400) |
-| **TLS** | rustls (pure Rust, no OpenSSL). System CA roots for certificate validation |
-| **Timeouts** | 30-second global timeout per request (connect + transfer) |
-| **Retry with backoff** | Configurable exponential backoff with 60s cap per delay (prevents thundering herd) |
-| **Connection pooling** | Single global ureq Agent reuses TCP connections (HTTP keep-alive) |
-| **FTP connection caching** | Cached with 60-second TTL, NOOP keepalive check, max 32 connections |
-| **SFTP host key verification** | Reads `~/.ssh/known_hosts`, TOFU on first connect, rejects changed keys (CWE-295) |
-| **Credential scrubbing** | FTP/SFTP error messages replace `user:pass` with `***` (CWE-532) |
-| **SMTP injection prevention** | CRLF sanitization in headers, dot-stuffing in body (CWE-93) |
-| **HTTP proxy support** | Automatic — ureq reads `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` environment variables |
-| **SSH host key verification** | Reads `~/.ssh/known_hosts`, TOFU on first connect, rejects changed keys (CWE-295) |
-| **Redis auth + input validation** | URL-based auth, key validation, response size limits (16 MiB) |
-| **gRPC timeout + size limits** | 30s timeout, 16 MiB response limit, TLS via rustls |
-| **WebSocket scheme validation** | Only `ws://` and `wss://` allowed, response size limits (16 MiB), configurable timeouts |
-| **MQTT input validation** | Topic validation, payload size limits (256 MiB), credential support |
-| **Memcached key validation** | ASCII-only keys (1-250 chars), value size limits (1 MiB) |
-| **Elasticsearch path traversal prevention** | Index name validation rejects `..`, `/`, `\` |
-| **RADIUS authenticator verification** | Response authenticator checked per RFC 2865 to prevent spoofing |
-| **DNS-over-HTTPS** | Encrypted DNS queries over HTTPS, domain name validation |
-| **STUN transaction ID verification** | Response transaction ID matched to prevent spoofing |
-| **Host validation everywhere** | All protocols validate hostnames (alphanumeric + dots/hyphens/colons) |
-| **No telemetry** | Zero phone-home, zero tracking |
+See [SECURITY.md](SECURITY.md) for the full security architecture document.
+
+### Security Highlights
+
+| Category | Protection | CWE |
+|----------|-----------|-----|
+| **SSRF protection** | All 49+ protocols validate destination IPs against private/reserved ranges before connecting | CWE-918 |
+| **Credential management** | In-memory secrets manager with zeroization; credentials never in SQL query text | CWE-316, CWE-532 |
+| **DuckDB secrets compat** | For S3/HTTP/GCS, use DuckDB native `CREATE SECRET`; duck_net covers SMTP, SSH, LDAP, Redis, etc. | - |
+| **Response size limits** | HTTP 256 MiB, gRPC/WebSocket/Redis/NATS 16 MiB, IMAP 10 MiB | CWE-400 |
+| **Input validation** | URL length (64KB max), hostname format, port range, path traversal prevention | CWE-22, CWE-400 |
+| **SSH command injection** | Shell metacharacters blocked in strict mode (default) | CWE-78 |
+| **SMTP injection** | CRLF sanitization in headers, dot-stuffing in body | CWE-93 |
+| **LDAP filter injection** | RFC 4515 escaping for filter values | CWE-90 |
+| **XML injection** | CalDAV timestamp validation prevents XML attribute injection | CWE-91 |
+| **JSON injection** | NATS credentials JSON-escaped per RFC 8259 | CWE-116 |
+| **Recursive parsing limits** | Redis RESP depth-limited (8 levels), element-limited (100K) | CWE-674 |
+| **OCSP bounds checking** | All DER parsing uses bounds-checked slice access | CWE-125 |
+| **Cryptographic randomness** | All protocols use OS CSPRNG via `getrandom` (not time-based PRNG) | CWE-338 |
+| **TLS** | rustls (pure Rust, no OpenSSL); webpki-roots CA bundle; no plaintext fallback | CWE-295 |
+| **Timeouts** | All operations have enforced timeouts (5-30s) to prevent hanging queries | CWE-400 |
+| **Credential scrubbing** | URLs and error messages redact passwords, tokens, API keys | CWE-532 |
+| **Host key verification** | SSH/SFTP verify against `~/.ssh/known_hosts` (TOFU on first connect) | CWE-295 |
+| **RADIUS authenticator** | Response authenticator verified per RFC 2865 to prevent spoofing | - |
+| **STUN transaction ID** | Response transaction ID matched to prevent spoofing | - |
+| **No telemetry** | Zero phone-home, zero tracking, zero analytics | - |
+
+### Secrets-Aware Functions
+
+| Function | Description |
+|----------|-------------|
+| `duck_net_add_secret(name, type, config_json)` | Store credentials in memory |
+| `duck_net_clear_secret(name)` | Remove and zeroize a secret |
+| `duck_net_clear_all_secrets()` | Remove all secrets |
+| `duck_net_secrets()` | Table function listing all stored secrets (redacted) |
+| `duck_net_security_status()` | JSON audit of current security configuration |
+| `smtp_send_secret(secret, from, to, subject, body)` | SMTP with stored credentials |
+| `ssh_exec_secret(secret, host, command)` | SSH with stored key/password |
+| `s3_get_secret(secret, bucket, key)` | S3 GET with stored credentials |
+| `s3_put_secret(secret, bucket, key, body)` | S3 PUT with stored credentials |
+| `s3_list_secret(secret, bucket, prefix)` | S3 LIST with stored credentials |
+| `http_get_secret(secret, url)` | HTTP GET with stored auth |
+| `http_post_secret(secret, url, body)` | HTTP POST with stored auth |
+| `vault_read_secret(secret, url, path)` | Vault with stored token |
+| `consul_get_secret(secret, url, key)` | Consul with stored token |
+| `influxdb_query_secret(secret, url, org, query)` | InfluxDB with stored token |
+| `snmp_get_secret(secret, host, oid)` | SNMP with stored community string |
+| `radius_auth_secret(secret, host, user, pass)` | RADIUS with stored shared secret |
+| `imap_fetch_secret(secret, url, mailbox, uid)` | IMAP with stored credentials |
+| `redis_get_secret(secret, key)` | Redis with stored password |
+| `redis_set_secret(secret, key, value)` | Redis with stored password |
+| `ldap_search_secret(secret, url, base, filter, attrs)` | LDAP with stored bind credentials |
 
 ## Dependencies
 
@@ -542,6 +569,7 @@ Minimal dependency set:
 | `h2` | 0.4.0 | HTTP/2 transport for gRPC |
 | `tokio-rustls` | 0.26.0 | Async TLS connector for gRPC |
 | `md5` | 0.7.0 | RADIUS password hashing (RFC 2865) |
+| `getrandom` | 0.3.0 | Cryptographic random number generation (OS CSPRNG) |
 
 ## Improvements Over query-farm/httpclient
 

@@ -143,7 +143,7 @@ async fn search_async(
             let se = SearchEntry::construct(e);
             LdapEntry {
                 dn: se.dn,
-                attributes: se.attrs.into_iter().map(|(k, v)| (k, v)).collect(),
+                attributes: se.attrs.into_iter().collect(),
             }
         })
         .collect();
@@ -243,7 +243,12 @@ pub struct LdapWriteResult {
 }
 
 /// Validate common parameters for LDAP write operations.
-fn validate_write_params(url: &str, bind_dn: &str, password: &str, entry_dn: &str) -> Option<LdapWriteResult> {
+fn validate_write_params(
+    url: &str,
+    bind_dn: &str,
+    password: &str,
+    entry_dn: &str,
+) -> Option<LdapWriteResult> {
     if bind_dn.is_empty() {
         return Some(LdapWriteResult {
             success: false,
@@ -410,7 +415,16 @@ pub fn add(
     };
 
     runtime::block_on(async {
-        add_async(&host, port, use_tls, bind_dn, password, entry_dn, &parsed_attrs).await
+        add_async(
+            &host,
+            port,
+            use_tls,
+            bind_dn,
+            password,
+            entry_dn,
+            &parsed_attrs,
+        )
+        .await
     })
 }
 
@@ -428,7 +442,10 @@ async fn add_async(
 
     // SSRF protection (CWE-918)
     if let Err(e) = crate::security::validate_no_ssrf_host(host) {
-        return LdapWriteResult { success: false, message: e };
+        return LdapWriteResult {
+            success: false,
+            message: e,
+        };
     }
 
     let url = if use_tls {
@@ -543,7 +560,16 @@ pub fn modify(
     };
 
     runtime::block_on(async {
-        modify_async(&host, port, use_tls, bind_dn, password, entry_dn, &parsed_mods).await
+        modify_async(
+            &host,
+            port,
+            use_tls,
+            bind_dn,
+            password,
+            entry_dn,
+            &parsed_mods,
+        )
+        .await
     })
 }
 
@@ -561,7 +587,10 @@ async fn modify_async(
 
     // SSRF protection (CWE-918)
     if let Err(e) = crate::security::validate_no_ssrf_host(host) {
-        return LdapWriteResult { success: false, message: e };
+        return LdapWriteResult {
+            success: false,
+            message: e,
+        };
     }
 
     let url = if use_tls {
@@ -645,12 +674,7 @@ async fn modify_async(
 }
 
 /// Delete an entry from the LDAP directory.
-pub fn delete(
-    url: &str,
-    bind_dn: &str,
-    password: &str,
-    entry_dn: &str,
-) -> LdapWriteResult {
+pub fn delete(url: &str, bind_dn: &str, password: &str, entry_dn: &str) -> LdapWriteResult {
     if let Some(err) = validate_write_params(url, bind_dn, password, entry_dn) {
         return err;
     }
@@ -682,7 +706,10 @@ async fn delete_async(
 
     // SSRF protection (CWE-918)
     if let Err(e) = crate::security::validate_no_ssrf_host(host) {
-        return LdapWriteResult { success: false, message: e };
+        return LdapWriteResult {
+            success: false,
+            message: e,
+        };
     }
 
     let url = if use_tls {

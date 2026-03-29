@@ -40,9 +40,9 @@ fn is_valid_host(host: &str) -> bool {
 /// Parse ZeroMQ TCP endpoint: `tcp://host:port`.
 /// Returns (host, port).
 fn parse_zmq_endpoint(endpoint: &str) -> Result<(String, u16), String> {
-    let rest = endpoint
-        .strip_prefix("tcp://")
-        .ok_or_else(|| format!("Invalid ZMQ endpoint: must start with tcp:// (got '{endpoint}')"))?;
+    let rest = endpoint.strip_prefix("tcp://").ok_or_else(|| {
+        format!("Invalid ZMQ endpoint: must start with tcp:// (got '{endpoint}')")
+    })?;
 
     let colon = rest
         .rfind(':')
@@ -400,6 +400,9 @@ pub fn request(endpoint: &str, message: &str) -> ZmqResult {
 
 fn request_inner(endpoint: &str, message: &str) -> Result<(String, String), String> {
     let (host, port) = parse_zmq_endpoint(endpoint)?;
+
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
 
     let addr = format!("{host}:{port}");
     let mut stream = TcpStream::connect_timeout(

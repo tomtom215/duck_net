@@ -150,10 +150,7 @@ pub fn add_secret(name: &str, secret_type: &str, config_json: &str) -> Result<St
     let values = parse_json_object(config_json)?;
 
     // Validate total size
-    let total_bytes: usize = values
-        .iter()
-        .map(|(k, v)| k.len() + v.len())
-        .sum();
+    let total_bytes: usize = values.iter().map(|(k, v)| k.len() + v.len()).sum();
     if total_bytes > MAX_SECRET_BYTES {
         return Err(format!(
             "Secret configuration too large: {} bytes (max {})",
@@ -257,12 +254,7 @@ pub fn list_secrets() -> Vec<(String, String, usize)> {
 /// Returns None if the secret or key doesn't exist.
 pub fn get_value(secret_name: &str, key: &str) -> Option<String> {
     let store = SECRETS.lock().unwrap();
-    store
-        .as_ref()?
-        .get(secret_name)?
-        .values
-        .get(key)
-        .cloned()
+    store.as_ref()?.get(secret_name)?.values.get(key).cloned()
 }
 
 /// Get the type of a named secret.
@@ -283,9 +275,9 @@ pub fn get_redacted(secret_name: &str) -> Option<HashMap<String, String>> {
     let secret = store.as_ref()?.get(secret_name)?;
     let mut redacted = HashMap::new();
     for (k, v) in &secret.values {
-        let is_sensitive = SENSITIVE_KEYS.iter().any(|sk| {
-            k.to_lowercase().contains(sk)
-        });
+        let is_sensitive = SENSITIVE_KEYS
+            .iter()
+            .any(|sk| k.to_lowercase().contains(sk));
         if is_sensitive {
             redacted.insert(k.clone(), "********".to_string());
         } else {
@@ -345,15 +337,19 @@ pub fn resolve_http(secret_name: &str) -> Result<Vec<(String, String)>, String> 
 
     let mut headers = Vec::new();
 
-    if let Some(token) = secret.values.get("bearer_token").or(secret.values.get("token")) {
+    if let Some(token) = secret
+        .values
+        .get("bearer_token")
+        .or(secret.values.get("token"))
+    {
         headers.push(("Authorization".to_string(), format!("Bearer {}", token)));
     }
 
     if let Some(user) = secret.values.get("username") {
         if let Some(pass) = secret.values.get("password") {
             use base64::Engine as _;
-            let encoded = base64::engine::general_purpose::STANDARD
-                .encode(format!("{}:{}", user, pass));
+            let encoded =
+                base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", user, pass));
             headers.push(("Authorization".to_string(), format!("Basic {}", encoded)));
         }
     }
@@ -401,9 +397,7 @@ pub fn resolve_token(secret_name: &str) -> Result<String, String> {
 /// Resolve SSH credentials from a named secret.
 /// Returns (username, auth) where auth is either a key_file path or password.
 
-pub fn resolve_ssh(
-    secret_name: &str,
-) -> Result<(String, Option<String>, Option<String>), String> {
+pub fn resolve_ssh(secret_name: &str) -> Result<(String, Option<String>, Option<String>), String> {
     let store = SECRETS.lock().unwrap();
     let map = store.as_ref().ok_or("Secrets store not initialized")?;
     let secret = map
@@ -509,12 +503,7 @@ fn parse_json_object(json: &str) -> Result<HashMap<String, String>, String> {
 
         match chars.next() {
             Some(':') => {}
-            other => {
-                return Err(format!(
-                    "Expected ':' after key '{}', got {:?}",
-                    key, other
-                ))
-            }
+            other => return Err(format!("Expected ':' after key '{}', got {:?}", key, other)),
         }
 
         skip_ws(&mut chars);

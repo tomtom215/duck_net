@@ -67,10 +67,9 @@ pub fn exec(host: &str, port: u16, user: &str, key_file: &str, command: &str) ->
     }
 
     // Validate command for injection attacks (CWE-78)
-    if let Err(e) = crate::security::validate_ssh_command(
-        command,
-        crate::security::ssh_strict_commands(),
-    ) {
+    if let Err(e) =
+        crate::security::validate_ssh_command(command, crate::security::ssh_strict_commands())
+    {
         return SshExecResult {
             success: false,
             exit_code: -1,
@@ -118,10 +117,9 @@ pub fn exec_password(
     }
 
     // Validate command for injection attacks (CWE-78)
-    if let Err(e) = crate::security::validate_ssh_command(
-        command,
-        crate::security::ssh_strict_commands(),
-    ) {
+    if let Err(e) =
+        crate::security::validate_ssh_command(command, crate::security::ssh_strict_commands())
+    {
         return SshExecResult {
             success: false,
             exit_code: -1,

@@ -341,9 +341,15 @@ unsafe extern "C" fn cb_s3_put_secret(
         let body = body_reader.read_str(row as usize);
 
         let result = match secrets::resolve_s3(secret_name) {
-            Ok((endpoint, access_key, secret_key, region)) => {
-                crate::s3::s3_put(&endpoint, bucket, key, body, &access_key, &secret_key, &region)
-            }
+            Ok((endpoint, access_key, secret_key, region)) => crate::s3::s3_put(
+                &endpoint,
+                bucket,
+                key,
+                body,
+                &access_key,
+                &secret_key,
+                &region,
+            ),
             Err(e) => crate::s3::S3Result {
                 success: false,
                 body: String::new(),
@@ -707,12 +713,7 @@ unsafe extern "C" fn cb_http_get_secret(
         let url = url_reader.read_str(row as usize);
 
         let resp = match secrets::resolve_http(secret_name) {
-            Ok(headers) => crate::http::execute(
-                crate::http::Method::Get,
-                url,
-                &headers,
-                None,
-            ),
+            Ok(headers) => crate::http::execute(crate::http::Method::Get, url, &headers, None),
             Err(e) => crate::http::HttpResponse {
                 status: 0,
                 reason: e,
@@ -742,12 +743,9 @@ unsafe extern "C" fn cb_http_post_secret(
         let body = body_reader.read_str(row as usize);
 
         let resp = match secrets::resolve_http(secret_name) {
-            Ok(headers) => crate::http::execute(
-                crate::http::Method::Post,
-                url,
-                &headers,
-                Some(body),
-            ),
+            Ok(headers) => {
+                crate::http::execute(crate::http::Method::Post, url, &headers, Some(body))
+            }
             Err(e) => crate::http::HttpResponse {
                 status: 0,
                 reason: e,
@@ -869,7 +867,10 @@ unsafe extern "C" fn cb_imap_fetch_secret(
             Ok(_) => (
                 false,
                 String::new(),
-                format!("Secret '{}' must have 'username' and 'password'", secret_name),
+                format!(
+                    "Secret '{}' must have 'username' and 'password'",
+                    secret_name
+                ),
             ),
             Err(e) => (false, String::new(), e),
         };
@@ -878,6 +879,172 @@ unsafe extern "C" fn cb_imap_fetch_secret(
         *sd.add(row as usize) = success;
         write_varchar(body_vec, row, &body);
         write_varchar(message_vec, row, &message);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Secrets-Aware Redis Overload
+// ---------------------------------------------------------------------------
+
+/// redis_get_secret(secret_name, key) -> STRUCT(success, value)
+unsafe extern "C" fn cb_redis_get_secret(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let secret_reader = VectorReader::new(input, 0);
+    let key_reader = VectorReader::new(input, 1);
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let value_vec = duckdb_struct_vector_get_child(output, 1);
+
+    for row in 0..row_count {
+        let secret_name = secret_reader.read_str(row as usize);
+        let key = key_reader.read_str(row as usize);
+
+        let result = match build_redis_url(secret_name) {
+            Ok(url) => crate::redis_client::get(&url, key),
+            Err(e) => crate::redis_client::RedisResult {
+                success: false,
+                value: e,
+            },
+        };
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_varchar(value_vec, row, &result.value);
+    }
+}
+
+/// redis_set_secret(secret_name, key, value) -> STRUCT(success, value)
+unsafe extern "C" fn cb_redis_set_secret(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let secret_reader = VectorReader::new(input, 0);
+    let key_reader = VectorReader::new(input, 1);
+    let val_reader = VectorReader::new(input, 2);
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let value_vec = duckdb_struct_vector_get_child(output, 1);
+
+    for row in 0..row_count {
+        let secret_name = secret_reader.read_str(row as usize);
+        let key = key_reader.read_str(row as usize);
+        let value = val_reader.read_str(row as usize);
+
+        let result = match build_redis_url(secret_name) {
+            Ok(url) => crate::redis_client::set(&url, key, value),
+            Err(e) => crate::redis_client::RedisResult {
+                success: false,
+                value: e,
+            },
+        };
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_varchar(value_vec, row, &result.value);
+    }
+}
+
+/// Build a Redis URL from a named secret.
+fn build_redis_url(secret_name: &str) -> Result<String, String> {
+    let host = secrets::get_value(secret_name, "host")
+        .ok_or_else(|| format!("Secret '{}' missing 'host'", secret_name))?;
+    let port = secrets::get_value(secret_name, "port").unwrap_or_else(|| "6379".to_string());
+    let password = secrets::get_value(secret_name, "password");
+    let db = secrets::get_value(secret_name, "db");
+
+    let mut url = String::from("redis://");
+    if let Some(pass) = password {
+        url.push_str(&pass);
+        url.push('@');
+    }
+    url.push_str(&host);
+    url.push(':');
+    url.push_str(&port);
+    if let Some(db_num) = db {
+        url.push('/');
+        url.push_str(&db_num);
+    }
+    Ok(url)
+}
+
+// ---------------------------------------------------------------------------
+// Secrets-Aware LDAP Overload
+// ---------------------------------------------------------------------------
+
+/// ldap_search_secret(secret_name, url, base_dn, filter, attributes) -> VARCHAR
+unsafe extern "C" fn cb_ldap_search_secret(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let secret_reader = VectorReader::new(input, 0);
+    let url_reader = VectorReader::new(input, 1);
+    let base_reader = VectorReader::new(input, 2);
+    let filter_reader = VectorReader::new(input, 3);
+    let attrs_reader = VectorReader::new(input, 4);
+
+    for row in 0..row_count {
+        let secret_name = secret_reader.read_str(row as usize);
+        let url = url_reader.read_str(row as usize);
+        let base_dn = base_reader.read_str(row as usize);
+        let filter = filter_reader.read_str(row as usize);
+        let attrs_str = attrs_reader.read_str(row as usize);
+
+        let msg = match secrets::resolve_credentials(secret_name) {
+            Ok((Some(user), Some(pass))) => {
+                // First bind, then search
+                let bind_result = crate::ldap::bind(url, &user, &pass);
+                if !bind_result.success {
+                    security::scrub_error(&bind_result.message)
+                } else {
+                    let attr_vec: Vec<&str> = attrs_str.split(',').map(|s| s.trim()).collect();
+                    let result = crate::ldap::search(url, base_dn, filter, &attr_vec);
+                    if result.success {
+                        // Format entries as JSON
+                        let entries_json: Vec<String> = result
+                            .entries
+                            .iter()
+                            .map(|e| {
+                                let attrs: Vec<String> = e
+                                    .attributes
+                                    .iter()
+                                    .map(|(k, vals)| {
+                                        let v_json = vals
+                                            .iter()
+                                            .map(|v| format!("\"{}\"", security::json_escape(v)))
+                                            .collect::<Vec<_>>()
+                                            .join(",");
+                                        format!("\"{}\":[{}]", security::json_escape(k), v_json)
+                                    })
+                                    .collect();
+                                format!(
+                                    "{{\"dn\":\"{}\",{}}}",
+                                    security::json_escape(&e.dn),
+                                    attrs.join(",")
+                                )
+                            })
+                            .collect();
+                        format!("[{}]", entries_json.join(","))
+                    } else {
+                        security::scrub_error(&result.message)
+                    }
+                }
+            }
+            Ok(_) => format!(
+                "Secret '{}' must have 'username' and 'password'",
+                secret_name
+            ),
+            Err(e) => e,
+        };
+
+        write_varchar(output, row, &msg);
     }
 }
 
@@ -1218,6 +1385,42 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
             ("message", LogicalType::new(TypeId::Varchar)),
         ]))
         .function(cb_imap_fetch_secret)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // Redis with secrets (password from secret store)
+    ScalarFunctionBuilder::new("redis_get_secret")
+        .param(v) // secret_name
+        .param(v) // key
+        .returns_logical(LogicalType::struct_type_from_logical(&[
+            ("success", LogicalType::new(TypeId::Boolean)),
+            ("value", LogicalType::new(TypeId::Varchar)),
+        ]))
+        .function(cb_redis_get_secret)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    ScalarFunctionBuilder::new("redis_set_secret")
+        .param(v) // secret_name
+        .param(v) // key
+        .param(v) // value
+        .returns_logical(LogicalType::struct_type_from_logical(&[
+            ("success", LogicalType::new(TypeId::Boolean)),
+            ("value", LogicalType::new(TypeId::Varchar)),
+        ]))
+        .function(cb_redis_set_secret)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // LDAP with secrets (bind credentials from secret store)
+    ScalarFunctionBuilder::new("ldap_search_secret")
+        .param(v) // secret_name
+        .param(v) // url
+        .param(v) // base_dn
+        .param(v) // filter
+        .param(v) // attributes (comma-separated)
+        .returns(TypeId::Varchar)
+        .function(cb_ldap_search_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 

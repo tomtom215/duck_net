@@ -32,6 +32,22 @@ async fn publish_async(
 ) -> AmqpPublishResult {
     use lapin::{options::*, BasicProperties, Connection, ConnectionProperties};
 
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf(url) {
+        return AmqpPublishResult {
+            success: false,
+            message: e,
+        };
+    }
+
+    // Validate URL length (CWE-400)
+    if let Err(e) = crate::security::validate_url_length(url) {
+        return AmqpPublishResult {
+            success: false,
+            message: e,
+        };
+    }
+
     let conn = match Connection::connect(url, ConnectionProperties::default()).await {
         Ok(c) => c,
         Err(e) => {

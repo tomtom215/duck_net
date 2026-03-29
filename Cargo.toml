@@ -60,6 +60,9 @@ tokio-rustls = "0.26"
 # RADIUS authentication hashing
 md5 = "0.7"
 
+# Cryptographic random number generation
+getrandom = "0.3"
+
 [profile.release]
 opt-level = 3
 lto = true

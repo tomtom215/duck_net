@@ -34,6 +34,12 @@ pub fn options_ping(host: &str, port: u16) -> SipResult {
 }
 
 fn options_ping_inner(host: &str, port: u16) -> Result<SipResult, String> {
+    // Validate host
+    crate::security::validate_host(host)?;
+
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(host)?;
+
     let port = if port == 0 { SIP_DEFAULT_PORT } else { port };
     let addr = format!("{host}:{port}");
 
@@ -122,25 +128,7 @@ fn extract_sip_header(response: &str, header: &str) -> String {
     String::new()
 }
 
-/// Generate a random hex string (using system time as entropy source).
+/// Generate a random hex string using cryptographically secure OS entropy.
 fn rand_hex(bytes: usize) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    std::time::SystemTime::now().hash(&mut hasher);
-    std::thread::current().id().hash(&mut hasher);
-
-    let mut result = String::with_capacity(bytes * 2);
-    let mut h = hasher.finish();
-    for _ in 0..bytes {
-        result.push_str(&format!("{:02x}", (h & 0xFF) as u8));
-        h >>= 8;
-        if h == 0 {
-            let mut hasher2 = DefaultHasher::new();
-            result.hash(&mut hasher2);
-            h = hasher2.finish();
-        }
-    }
-    result
+    crate::security::random_hex(bytes)
 }

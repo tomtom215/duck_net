@@ -74,14 +74,9 @@ fn url_encode_path(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 2);
     for byte in s.bytes() {
         match byte {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'.'
-            | b'_'
-            | b'~'
-            | b'/' => out.push(byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(byte as char)
+            }
             _ => {
                 out.push('%');
                 out.push_str(&format!("{byte:02X}"));
@@ -97,13 +92,9 @@ fn url_encode_value(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 2);
     for byte in s.bytes() {
         match byte {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'.'
-            | b'_'
-            | b'~' => out.push(byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char)
+            }
             _ => {
                 out.push('%');
                 out.push_str(&format!("{byte:02X}"));
@@ -204,10 +195,20 @@ pub fn s3_get(
     }
     // Validate credential lengths (CWE-400)
     if let Err(e) = crate::security::validate_credential_length("access_key", access_key, 256) {
-        return S3Result { success: false, body: String::new(), status: 0, message: e };
+        return S3Result {
+            success: false,
+            body: String::new(),
+            status: 0,
+            message: e,
+        };
     }
     if let Err(e) = crate::security::validate_credential_length("secret_key", secret_key, 256) {
-        return S3Result { success: false, body: String::new(), status: 0, message: e };
+        return S3Result {
+            success: false,
+            body: String::new(),
+            status: 0,
+            message: e,
+        };
     }
 
     let base = endpoint.trim_end_matches('/');
@@ -215,8 +216,7 @@ pub fn s3_get(
     let url = format!("{base}/{bucket}/{encoded_key}");
     let host = extract_host(endpoint);
 
-    let signed = match aws_sigv4::sign("GET", &url, &[], "", access_key, secret_key, region, "s3")
-    {
+    let signed = match aws_sigv4::sign("GET", &url, &[], "", access_key, secret_key, region, "s3") {
         Ok(s) => s,
         Err(e) => {
             return S3Result {
@@ -278,10 +278,20 @@ pub fn s3_put(
     }
     // Validate credential lengths (CWE-400)
     if let Err(e) = crate::security::validate_credential_length("access_key", access_key, 256) {
-        return S3Result { success: false, body: String::new(), status: 0, message: e };
+        return S3Result {
+            success: false,
+            body: String::new(),
+            status: 0,
+            message: e,
+        };
     }
     if let Err(e) = crate::security::validate_credential_length("secret_key", secret_key, 256) {
-        return S3Result { success: false, body: String::new(), status: 0, message: e };
+        return S3Result {
+            success: false,
+            body: String::new(),
+            status: 0,
+            message: e,
+        };
     }
     if let Err(e) = validate_bucket(bucket) {
         return S3Result {
@@ -317,18 +327,18 @@ pub fn s3_put(
     let url = format!("{base}/{bucket}/{encoded_key}");
     let host = extract_host(endpoint);
 
-    let signed =
-        match aws_sigv4::sign("PUT", &url, &[], body, access_key, secret_key, region, "s3") {
-            Ok(s) => s,
-            Err(e) => {
-                return S3Result {
-                    success: false,
-                    body: String::new(),
-                    status: 0,
-                    message: format!("SigV4 signing failed: {e}"),
-                };
-            }
-        };
+    let signed = match aws_sigv4::sign("PUT", &url, &[], body, access_key, secret_key, region, "s3")
+    {
+        Ok(s) => s,
+        Err(e) => {
+            return S3Result {
+                success: false,
+                body: String::new(),
+                status: 0,
+                message: format!("SigV4 signing failed: {e}"),
+            };
+        }
+    };
 
     let headers = build_s3_headers(&signed, &host);
     let resp = http::execute(Method::Put, &url, &headers, Some(body));
@@ -377,10 +387,18 @@ pub fn s3_list(
     }
     // Validate credential lengths (CWE-400)
     if let Err(e) = crate::security::validate_credential_length("access_key", access_key, 256) {
-        return S3ListResult { success: false, keys: Vec::new(), message: e };
+        return S3ListResult {
+            success: false,
+            keys: Vec::new(),
+            message: e,
+        };
     }
     if let Err(e) = crate::security::validate_credential_length("secret_key", secret_key, 256) {
-        return S3ListResult { success: false, keys: Vec::new(), message: e };
+        return S3ListResult {
+            success: false,
+            keys: Vec::new(),
+            message: e,
+        };
     }
     if let Err(e) = validate_bucket(bucket) {
         return S3ListResult {
@@ -395,8 +413,7 @@ pub fn s3_list(
     let url = format!("{base}/{bucket}?list-type=2&prefix={encoded_prefix}");
     let host = extract_host(endpoint);
 
-    let signed = match aws_sigv4::sign("GET", &url, &[], "", access_key, secret_key, region, "s3")
-    {
+    let signed = match aws_sigv4::sign("GET", &url, &[], "", access_key, secret_key, region, "s3") {
         Ok(s) => s,
         Err(e) => {
             return S3ListResult {

@@ -48,9 +48,12 @@ fn is_valid_subject(subject: &str) -> bool {
 /// Parse NATS URL: nats://[user:pass@]host[:port]
 /// Returns (host, port, username, password).
 fn parse_nats_url(url: &str) -> Result<(String, u16, Option<String>, Option<String>), String> {
-    let rest = url
-        .strip_prefix("nats://")
-        .ok_or_else(|| format!("Invalid NATS URL scheme (expected nats://): {}", scrub_url(url)))?;
+    let rest = url.strip_prefix("nats://").ok_or_else(|| {
+        format!(
+            "Invalid NATS URL scheme (expected nats://): {}",
+            scrub_url(url)
+        )
+    })?;
 
     let (auth, hostport) = if let Some(at) = rest.rfind('@') {
         (Some(&rest[..at]), &rest[at + 1..])
@@ -113,28 +116,28 @@ fn read_line(reader: &mut BufReader<TcpStream>) -> Result<String, String> {
         return Err("NATS response exceeded maximum size".to_string());
     }
 
-    Ok(line.trim_end_matches(|c| c == '\r' || c == '\n').to_string())
+    Ok(line.trim_end_matches(['\r', '\n']).to_string())
 }
 
 /// Build the CONNECT JSON payload.
-fn build_connect_json(
-    username: Option<&str>,
-    password: Option<&str>,
-) -> String {
+///
+/// Uses proper JSON escaping for user/pass to prevent JSON injection (CWE-116).
+fn build_connect_json(username: Option<&str>, password: Option<&str>) -> String {
     match (username, password) {
         (Some(user), Some(pass)) => {
+            let user_escaped = crate::security::json_escape(user);
+            let pass_escaped = crate::security::json_escape(pass);
             format!(
-                "CONNECT {{\"verbose\":false,\"pedantic\":false,\"name\":\"duck_net\",\"user\":\"{user}\",\"pass\":\"{pass}\"}}\r\n"
+                "CONNECT {{\"verbose\":false,\"pedantic\":false,\"name\":\"duck_net\",\"user\":\"{user_escaped}\",\"pass\":\"{pass_escaped}\"}}\r\n"
             )
         }
         (Some(user), None) => {
+            let user_escaped = crate::security::json_escape(user);
             format!(
-                "CONNECT {{\"verbose\":false,\"pedantic\":false,\"name\":\"duck_net\",\"user\":\"{user}\"}}\r\n"
+                "CONNECT {{\"verbose\":false,\"pedantic\":false,\"name\":\"duck_net\",\"user\":\"{user_escaped}\"}}\r\n"
             )
         }
-        _ => {
-            "CONNECT {\"verbose\":false,\"pedantic\":false,\"name\":\"duck_net\"}\r\n".to_string()
-        }
+        _ => "CONNECT {\"verbose\":false,\"pedantic\":false,\"name\":\"duck_net\"}\r\n".to_string(),
     }
 }
 
@@ -237,11 +240,20 @@ fn publish_inner(url: &str, subject: &str, payload: &str) -> Result<String, Stri
         .set_write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
 
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| format!("Clone failed: {e}"))?);
+    let mut reader = BufReader::new(
+        stream
+            .try_clone()
+            .map_err(|e| format!("Clone failed: {e}"))?,
+    );
     let mut writer = stream;
 
     // 1. Handshake: INFO -> CONNECT -> PING/PONG
-    handshake(&mut reader, &mut writer, username.as_deref(), password.as_deref())?;
+    handshake(
+        &mut reader,
+        &mut writer,
+        username.as_deref(),
+        password.as_deref(),
+    )?;
 
     // 2. Send PUB
     let pub_cmd = format!("PUB {subject} {}\r\n{payload}\r\n", payload.len());
@@ -342,7 +354,11 @@ fn request_inner(
         .set_write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
 
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| format!("Clone failed: {e}"))?);
+    let mut reader = BufReader::new(
+        stream
+            .try_clone()
+            .map_err(|e| format!("Clone failed: {e}"))?,
+    );
     let mut writer = stream;
 
     // Use IO_TIMEOUT for handshake reads
@@ -354,7 +370,12 @@ fn request_inner(
     // (reader owns its own clone, so we set timeout via the writer's peer)
 
     // 1. Handshake: INFO -> CONNECT -> PING/PONG
-    handshake(&mut reader, &mut writer, username.as_deref(), password.as_deref())?;
+    handshake(
+        &mut reader,
+        &mut writer,
+        username.as_deref(),
+        password.as_deref(),
+    )?;
 
     // 2. Generate unique reply inbox
     let timestamp = std::time::SystemTime::now()

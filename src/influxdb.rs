@@ -74,7 +74,10 @@ pub fn query(url: &str, org: &str, token: &str, flux_query: &str) -> InfluxResul
 
     let headers = [
         ("Authorization".to_string(), format!("Token {token}")),
-        ("Content-Type".to_string(), "application/vnd.flux".to_string()),
+        (
+            "Content-Type".to_string(),
+            "application/vnd.flux".to_string(),
+        ),
         ("Accept".to_string(), "application/csv".to_string()),
     ];
 
@@ -105,13 +108,7 @@ pub fn query(url: &str, org: &str, token: &str, flux_query: &str) -> InfluxResul
 ///
 /// Security: validates URL scheme, enforces max body size of 256 MiB,
 /// uses existing HTTP client with SSRF protection, timeouts, and size limits.
-pub fn write(
-    url: &str,
-    org: &str,
-    bucket: &str,
-    token: &str,
-    line_protocol: &str,
-) -> InfluxResult {
+pub fn write(url: &str, org: &str, bucket: &str, token: &str, line_protocol: &str) -> InfluxResult {
     if let Err(e) = validate_url(url) {
         return InfluxResult {
             success: false,

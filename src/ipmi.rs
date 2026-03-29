@@ -78,7 +78,7 @@ fn build_ipmi_request(netfn: u8, cmd: u8, data: &[u8]) -> Vec<u8> {
 
     // --- IPMI Message ---
     let target_addr: u8 = 0x20; // BMC slave address
-    let netfn_lun: u8 = (netfn << 2) | 0x00; // LUN = 0
+    let netfn_lun: u8 = netfn << 2; // LUN = 0
 
     packet.push(target_addr);
     packet.push(netfn_lun);
@@ -122,7 +122,10 @@ fn parse_ipmi_response(buf: &[u8]) -> Result<(u8, Vec<u8>), String> {
         return Err(format!("Invalid RMCP version: 0x{:02X}", buf[0]));
     }
     if buf[3] != 0x07 {
-        return Err(format!("Invalid RMCP class: 0x{:02X} (expected 0x07)", buf[3]));
+        return Err(format!(
+            "Invalid RMCP class: 0x{:02X} (expected 0x07)",
+            buf[3]
+        ));
     }
 
     // IPMI session header starts at offset 4
@@ -247,8 +250,7 @@ pub fn get_device_id(host: &str) -> IpmiSensorResult {
     let ipmi_ver_major = (data[4] >> 4) & 0x0F;
     let ipmi_ver_minor = data[4] & 0x0F;
     let ipmi_version = format!("{ipmi_ver_major}.{ipmi_ver_minor}");
-    let manufacturer_id =
-        (data[6] as u32) | ((data[7] as u32) << 8) | ((data[8] as u32) << 16);
+    let manufacturer_id = (data[6] as u32) | ((data[7] as u32) << 8) | ((data[8] as u32) << 16);
     let product_id = (data[9] as u16) | ((data[10] as u16) << 8);
 
     IpmiSensorResult {

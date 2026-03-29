@@ -299,14 +299,8 @@ pub fn ptp_probe(server: &str, count: u8) -> Result<PtpProbeResult, String> {
 
     // Compute statistics
     let avg_offset_ns = offsets.iter().sum::<f64>() / offsets.len() as f64;
-    let min_delay_ns = delays
-        .iter()
-        .copied()
-        .fold(f64::MAX, f64::min);
-    let max_delay_ns = delays
-        .iter()
-        .copied()
-        .fold(f64::MIN, f64::max);
+    let min_delay_ns = delays.iter().copied().fold(f64::MAX, f64::min);
+    let max_delay_ns = delays.iter().copied().fold(f64::MIN, f64::max);
 
     // Standard deviation of offsets
     let variance = if offsets.len() > 1 {
