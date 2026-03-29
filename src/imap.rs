@@ -200,7 +200,7 @@ fn fetch_message_inner(
 
 enum ImapStream {
     Plain(BufReader<TcpStream>),
-    Tls(BufReader<StreamOwned<ClientConnection, TcpStream>>),
+    Tls(Box<BufReader<StreamOwned<ClientConnection, TcpStream>>>),
 }
 
 struct ImapSession {
@@ -238,7 +238,7 @@ impl ImapSession {
             let conn = ClientConnection::new(Arc::new(config), server_name)
                 .map_err(|e| format!("TLS setup failed: {e}"))?;
             let tls_stream = StreamOwned::new(conn, tcp);
-            ImapStream::Tls(BufReader::new(tls_stream))
+            ImapStream::Tls(Box::new(BufReader::new(tls_stream)))
         } else {
             ImapStream::Plain(BufReader::new(tcp))
         };

@@ -224,6 +224,7 @@ pub fn multi_request(url: &str, messages: &[String], timeout_secs: u32) -> WsMul
 }
 
 /// Default timeout variant for multi-message requests.
+#[allow(dead_code)]
 pub fn multi_request_default_timeout(url: &str, messages: &[String]) -> WsMultiResult {
     multi_request(url, messages, DEFAULT_TIMEOUT_SECS as u32)
 }

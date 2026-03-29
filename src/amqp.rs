@@ -3,6 +3,12 @@
 
 use crate::runtime;
 
+/// Maximum message size: 16 MiB (CWE-400).
+const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
+
+/// Maximum exchange/routing_key name length.
+const MAX_NAME_LENGTH: usize = 255;
+
 pub struct AmqpPublishResult {
     pub success: bool,
     pub message: String,
@@ -45,6 +51,37 @@ async fn publish_async(
         return AmqpPublishResult {
             success: false,
             message: e,
+        };
+    }
+
+    // Validate exchange and routing_key names (CWE-20)
+    if exchange.len() > MAX_NAME_LENGTH {
+        return AmqpPublishResult {
+            success: false,
+            message: format!(
+                "Exchange name too long: {} chars (max {MAX_NAME_LENGTH})",
+                exchange.len()
+            ),
+        };
+    }
+    if routing_key.len() > MAX_NAME_LENGTH {
+        return AmqpPublishResult {
+            success: false,
+            message: format!(
+                "Routing key too long: {} chars (max {MAX_NAME_LENGTH})",
+                routing_key.len()
+            ),
+        };
+    }
+
+    // Validate message size (CWE-400)
+    if message.len() > MAX_MESSAGE_SIZE {
+        return AmqpPublishResult {
+            success: false,
+            message: format!(
+                "Message too large: {} bytes (max {MAX_MESSAGE_SIZE})",
+                message.len()
+            ),
         };
     }
 

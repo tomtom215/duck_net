@@ -56,6 +56,7 @@ pub fn build_url(
 }
 
 /// Execute an OData query and return the response.
+#[allow(clippy::too_many_arguments)]
 pub fn query(
     base_url: &str,
     filter: Option<&str>,
@@ -136,6 +137,7 @@ impl ODataPaginateState {
 }
 
 /// Fetch the next page of OData results.
+#[allow(clippy::too_many_arguments)]
 pub fn fetch_next_page(
     base_url: &str,
     filter: Option<&str>,

@@ -58,13 +58,12 @@ fn ipmi_checksum(data: &[u8]) -> u8 {
 
 /// Build a complete RMCP + IPMI v1.5 (unauthenticated) request packet.
 fn build_ipmi_request(netfn: u8, cmd: u8, data: &[u8]) -> Vec<u8> {
-    let mut packet = Vec::new();
-
-    // --- RMCP Header (4 bytes) ---
-    packet.push(0x06); // Version
-    packet.push(0x00); // Reserved
-    packet.push(0xFF); // Sequence number
-    packet.push(0x07); // Class: IPMI
+    let mut packet = vec![
+        0x06, // RMCP Version
+        0x00, // Reserved
+        0xFF, // Sequence number
+        0x07, // Class: IPMI
+    ];
 
     // --- IPMI Session Header (unauthenticated, v1.5) ---
     packet.push(0x00); // Auth Type: None
@@ -181,6 +180,8 @@ fn send_ipmi(host: &str, netfn: u8, cmd: u8, data: &[u8]) -> Result<(u8, Vec<u8>
     if !is_valid_host(host) {
         return Err(format!("Invalid host: {host}"));
     }
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(host)?;
 
     let addr = format!("{host}:{IPMI_PORT}");
 

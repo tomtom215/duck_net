@@ -14,8 +14,9 @@ const IO_TIMEOUT_SECS: u64 = 10;
 /// Maximum topic length per MQTT spec.
 const MAX_TOPIC_LENGTH: usize = 65535;
 
-/// Maximum payload size: 256 MiB per MQTT spec.
-const MAX_PAYLOAD_SIZE: usize = 256 * 1024 * 1024;
+/// Maximum payload size: 16 MiB.
+/// MQTT spec allows 256 MiB but we cap at 16 MiB to prevent OOM (CWE-400).
+const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 
 pub struct MqttResult {
     pub success: bool,

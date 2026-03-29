@@ -81,6 +81,9 @@ fn parse_server(server: &str) -> (String, u16) {
 }
 
 fn lookup_inner(host: &str, port: u16) -> Result<StunResult, String> {
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(host)?;
+
     let socket =
         UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
@@ -278,20 +281,7 @@ fn parse_mapped_address(data: &[u8]) -> Option<(String, u16)> {
     }
 }
 
-/// Generate a random 12-byte transaction ID.
+/// Generate a random 12-byte transaction ID using cryptographically secure OS entropy.
 fn random_transaction_id() -> [u8; 12] {
-    let mut id = [0u8; 12];
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-
-    let mut state = now.as_nanos() as u64 ^ (std::process::id() as u64);
-    for byte in id.iter_mut() {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        *byte = (state & 0xFF) as u8;
-    }
-
-    id
+    crate::security::random_bytes::<12>()
 }

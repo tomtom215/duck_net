@@ -3,6 +3,11 @@
 
 use crate::runtime;
 
+/// Maximum key size: 1 MiB (CWE-400).
+const MAX_KEY_SIZE: usize = 1024 * 1024;
+/// Maximum value size: 16 MiB (CWE-400).
+const MAX_VALUE_SIZE: usize = 16 * 1024 * 1024;
+
 pub struct KafkaProduceResult {
     pub success: bool,
     pub partition: i32,
@@ -70,6 +75,29 @@ async fn produce_async(
             partition: -1,
             offset: -1,
             message: "Topic name must not contain null bytes".to_string(),
+        };
+    }
+
+    // Validate key/value sizes (CWE-400)
+    if let Some(k) = key {
+        if k.len() > MAX_KEY_SIZE {
+            return KafkaProduceResult {
+                success: false,
+                partition: -1,
+                offset: -1,
+                message: format!("Key too large: {} bytes (max {MAX_KEY_SIZE})", k.len()),
+            };
+        }
+    }
+    if value.len() > MAX_VALUE_SIZE {
+        return KafkaProduceResult {
+            success: false,
+            partition: -1,
+            offset: -1,
+            message: format!(
+                "Value too large: {} bytes (max {MAX_VALUE_SIZE})",
+                value.len()
+            ),
         };
     }
 

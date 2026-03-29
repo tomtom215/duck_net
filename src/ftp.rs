@@ -110,6 +110,8 @@ fn connect_and_login(url: &str) -> Result<FtpConn, String> {
 
     // SSRF protection: block connections to private/reserved IPs (CWE-918)
     crate::security::validate_no_ssrf_host(&host)?;
+    // Path traversal prevention (CWE-22)
+    crate::security::validate_path_no_traversal(&path)?;
 
     let username = user.unwrap_or_else(|| "anonymous".to_string());
     let password = pass.unwrap_or_else(|| "duck_net@".to_string());

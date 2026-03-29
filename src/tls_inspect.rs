@@ -26,6 +26,11 @@ pub struct TlsCertInfo {
 
 /// Inspect the TLS certificate of a host.
 pub fn inspect(host: &str, port: u16) -> Result<TlsCertInfo, String> {
+    // Input validation
+    crate::security::validate_host(host)?;
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(host)?;
+
     let addr = format!("{host}:{port}");
     let timeout = Duration::from_secs(TIMEOUT_SECS);
 

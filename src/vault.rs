@@ -163,6 +163,10 @@ fn extract_raw_value<'a>(json: &'a str, key: &str) -> Option<&'a str> {
         let after_colon = rest[1..].trim_start();
         let value_start = json.len() - after_colon.len();
 
+        // Maximum nesting depth to prevent stack-exhaustion from
+        // deeply nested JSON (CWE-674).
+        const MAX_JSON_DEPTH: i32 = 128;
+
         return match after_colon.as_bytes().first()? {
             b'{' | b'[' => {
                 // Find matching close bracket / brace
@@ -185,6 +189,9 @@ fn extract_raw_value<'a>(json: &'a str, key: &str) -> Option<&'a str> {
                         in_string = true;
                     } else if bytes[i] == open {
                         depth += 1;
+                        if depth > MAX_JSON_DEPTH {
+                            return None;
+                        }
                     } else if bytes[i] == close {
                         depth -= 1;
                         if depth == 0 {
