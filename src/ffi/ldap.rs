@@ -182,6 +182,94 @@ unsafe extern "C" fn cb_ldap_bind(
     }
 }
 
+/// ldap_add(url, bind_dn, password, entry_dn, attributes) -> STRUCT(success, message)
+unsafe extern "C" fn cb_ldap_add(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let dn_reader = VectorReader::new(input, 1);
+    let pass_reader = VectorReader::new(input, 2);
+    let entry_dn_reader = VectorReader::new(input, 3);
+    let attrs_reader = VectorReader::new(input, 4);
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let message_vec = duckdb_struct_vector_get_child(output, 1);
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+        let dn = dn_reader.read_str(row as usize);
+        let pass = pass_reader.read_str(row as usize);
+        let entry_dn = entry_dn_reader.read_str(row as usize);
+        let attrs = attrs_reader.read_str(row as usize);
+        let result = ldap::add(url, dn, pass, entry_dn, attrs);
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_varchar(message_vec, row, &result.message);
+    }
+}
+
+/// ldap_modify(url, bind_dn, password, entry_dn, modifications) -> STRUCT(success, message)
+unsafe extern "C" fn cb_ldap_modify(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let dn_reader = VectorReader::new(input, 1);
+    let pass_reader = VectorReader::new(input, 2);
+    let entry_dn_reader = VectorReader::new(input, 3);
+    let mods_reader = VectorReader::new(input, 4);
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let message_vec = duckdb_struct_vector_get_child(output, 1);
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+        let dn = dn_reader.read_str(row as usize);
+        let pass = pass_reader.read_str(row as usize);
+        let entry_dn = entry_dn_reader.read_str(row as usize);
+        let mods = mods_reader.read_str(row as usize);
+        let result = ldap::modify(url, dn, pass, entry_dn, mods);
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_varchar(message_vec, row, &result.message);
+    }
+}
+
+/// ldap_delete(url, bind_dn, password, entry_dn) -> STRUCT(success, message)
+unsafe extern "C" fn cb_ldap_delete(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let dn_reader = VectorReader::new(input, 1);
+    let pass_reader = VectorReader::new(input, 2);
+    let entry_dn_reader = VectorReader::new(input, 3);
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let message_vec = duckdb_struct_vector_get_child(output, 1);
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+        let dn = dn_reader.read_str(row as usize);
+        let pass = pass_reader.read_str(row as usize);
+        let entry_dn = entry_dn_reader.read_str(row as usize);
+        let result = ldap::delete(url, dn, pass, entry_dn);
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_varchar(message_vec, row, &result.message);
+    }
+}
+
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
@@ -203,6 +291,41 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(v)
         .returns_logical(ldap_bind_result_type())
         .function(cb_ldap_bind)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // ldap_add(url, bind_dn, password, entry_dn, attributes) -> STRUCT(success, message)
+    ScalarFunctionBuilder::new("ldap_add")
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .returns_logical(ldap_bind_result_type())
+        .function(cb_ldap_add)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // ldap_modify(url, bind_dn, password, entry_dn, modifications) -> STRUCT(success, message)
+    ScalarFunctionBuilder::new("ldap_modify")
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .returns_logical(ldap_bind_result_type())
+        .function(cb_ldap_modify)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // ldap_delete(url, bind_dn, password, entry_dn) -> STRUCT(success, message)
+    ScalarFunctionBuilder::new("ldap_delete")
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .returns_logical(ldap_bind_result_type())
+        .function(cb_ldap_delete)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 

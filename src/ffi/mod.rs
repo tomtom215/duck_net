@@ -5,6 +5,7 @@ mod amqp;
 mod aws_sigv4;
 mod bgp;
 mod caldav;
+mod consul;
 pub(crate) mod dns;
 mod doh;
 mod elasticsearch;
@@ -12,18 +13,24 @@ mod ftp;
 mod graphql;
 mod grpc;
 mod imap;
+mod influxdb;
+mod ipmi;
 mod jsonrpc;
 mod kafka;
 mod ldap;
 mod mdns;
 mod memcached;
 mod mqtt;
+mod nats;
 mod ntp;
+mod ocsp;
 mod odata;
 mod ping;
 mod prometheus;
+mod ptp;
 mod radius;
 mod redis_client;
+mod s3;
 pub(crate) mod scalars;
 mod sip;
 mod smtp;
@@ -34,9 +41,11 @@ mod stun;
 mod syslog;
 mod table;
 mod tls_inspect;
+mod vault;
 mod webdav;
 mod websocket;
 mod whois;
+mod zeromq;
 
 use quack_rs::prelude::*;
 
@@ -94,6 +103,31 @@ pub fn register_all(con: &Connection) -> Result<(), ExtensionError> {
         mdns::register_all(raw_con)?;
         stun::register_all(raw_con)?;
         bgp::register_all(raw_con)?;
+
+        // Precision Time
+        ptp::register_all(raw_con)?;
+
+        // Certificate revocation: OCSP
+        ocsp::register_all(raw_con)?;
+
+        // S3-compatible storage
+        s3::register_all(raw_con)?;
+
+        // Time-series: InfluxDB
+        influxdb::register_all(raw_con)?;
+
+        // Service discovery & config: Consul/etcd
+        consul::register_all(raw_con)?;
+
+        // Cloud-native messaging: NATS, ZeroMQ
+        nats::register_all(raw_con)?;
+        zeromq::register_all(raw_con)?;
+
+        // Secrets: Vault
+        vault::register_all(raw_con)?;
+
+        // Hardware: IPMI
+        ipmi::register_all(raw_con)?;
     }
     Ok(())
 }
