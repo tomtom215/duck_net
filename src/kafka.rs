@@ -19,6 +19,13 @@ pub struct KafkaProduceResult {
 ///
 /// `brokers` is a comma-separated list of broker addresses (e.g., "localhost:9092").
 pub fn produce(brokers: &str, topic: &str, key: Option<&str>, value: &str) -> KafkaProduceResult {
+    // Warn about plaintext Kafka connections (CWE-319)
+    crate::security_warnings::warn_plaintext(
+        "Kafka",
+        "PLAINTEXT_KAFKA",
+        "Kafka with SASL/TLS via a dedicated Kafka extension",
+    );
+
     runtime::block_on(async { produce_async(brokers, topic, key, value).await })
 }
 

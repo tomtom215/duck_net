@@ -1,0 +1,17 @@
+[book]
+title = "duck_net Documentation"
+authors = ["Tom F."]
+description = "Comprehensive documentation for duck_net - 49+ network protocols as DuckDB SQL functions"
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/tomtom215/duck_net"
+edit-url-template = "https://github.com/tomtom215/duck_net/edit/main/docs/{path}"
+
+[output.html.search]
+enable = true
+limit-results = 30
+use-hierarchical-headings = true

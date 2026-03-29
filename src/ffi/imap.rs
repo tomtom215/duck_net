@@ -7,6 +7,7 @@ use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::imap;
+use crate::imap_write;
 
 use super::scalars::write_varchar;
 
@@ -249,7 +250,7 @@ unsafe extern "C" fn cb_imap_move(
         let uid = *uid_data.add(row as usize);
         let dest = dest_reader.read_str(row as usize);
 
-        let result = imap::move_message(url, user, pass, mailbox, uid, dest);
+        let result = imap_write::move_message(url, user, pass, mailbox, uid, dest);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;
@@ -280,7 +281,7 @@ unsafe extern "C" fn cb_imap_delete(
         let mailbox = mailbox_reader.read_str(row as usize);
         let uid = *uid_data.add(row as usize);
 
-        let result = imap::delete_message(url, user, pass, mailbox, uid);
+        let result = imap_write::delete_message(url, user, pass, mailbox, uid);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;
@@ -313,7 +314,7 @@ unsafe extern "C" fn cb_imap_flag(
         let uid = *uid_data.add(row as usize);
         let flags = flags_reader.read_str(row as usize);
 
-        let result = imap::flag_message(url, user, pass, mailbox, uid, flags);
+        let result = imap_write::flag_message(url, user, pass, mailbox, uid, flags);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;

@@ -52,6 +52,11 @@ pub struct FtpEntry {
 pub fn parse_url(
     url: &str,
 ) -> Result<(String, u16, Option<String>, Option<String>, String), String> {
+    // Warn about plaintext FTP connections (CWE-319)
+    if url.starts_with("ftp://") {
+        crate::security_warnings::warn_plaintext("FTP", "PLAINTEXT_FTP", "ftps:// (FTP over TLS)");
+    }
+
     let rest = url
         .strip_prefix("ftp://")
         .or_else(|| url.strip_prefix("ftps://"))

@@ -1,0 +1,87 @@
+# Secrets Management
+
+duck_net provides an in-memory secrets manager that keeps credentials out of SQL query text and log files.
+
+## Overview
+
+```sql
+-- Store a secret
+SELECT duck_net_add_secret('name', 'type', '{"key": "value", ...}');
+
+-- Use a secret with protocol functions
+SELECT smtp_send_secret('name', 'from@example.com', 'to@example.com', 'Subject', 'Body');
+
+-- List secrets (values are redacted)
+FROM duck_net_secrets();
+
+-- View a specific secret (sensitive values redacted)
+SELECT duck_net_secret_redacted('name');
+
+-- Get a specific value from a secret
+SELECT duck_net_secret('name', 'key');
+
+-- Remove a secret (zeroized in memory)
+SELECT duck_net_clear_secret('name');
+
+-- Remove all secrets
+SELECT duck_net_clear_all_secrets();
+```
+
+## Supported Secret Types
+
+| Type | Protocol | Required Keys | Optional Keys |
+|------|----------|--------------|---------------|
+| `smtp` | Email sending | `host` | `port`, `username`, `password`, `use_tls` |
+| `imap` | Email reading | `username`, `password` | — |
+| `ssh` | Remote execution | `key_file` or `password` | `username` |
+| `ftp` | File transfer | — | `username`, `password` |
+| `sftp` | Secure file transfer | `key_file` or `password` | `username` |
+| `ldap` | Directory services | `username`, `password` | — |
+| `redis` | Cache/KV store | `host` | `port`, `password`, `db` |
+| `s3` | Object storage | `key_id`, `secret` | `region`, `endpoint`, `session_token` |
+| `http` | HTTP APIs | `bearer_token` or `username`+`password` | — |
+| `vault` | HashiCorp Vault | `token` | — |
+| `consul` | Service discovery | `token` | — |
+| `influxdb` | Time series | `token` | — |
+| `elasticsearch` | Search | `token` or `username`+`password` | — |
+| `snmp` | Network management | `community` | — |
+| `radius` | Authentication | `shared_secret` | — |
+| `kafka` | Messaging | — | `username`, `password` |
+| `nats` | Messaging | — | `token`, `username`, `password` |
+| `mqtt` | IoT messaging | — | `username`, `password` |
+| `grpc` | RPC | — | `token` |
+| `websocket` | Real-time | — | `token` |
+| `memcached` | Caching | — | `host`, `port` |
+
+## Secret-Aware Functions
+
+Each protocol has a `_secret` variant that uses stored credentials:
+
+```sql
+-- S3 with secrets
+SELECT s3_get_secret('my_s3', 'bucket', 'key');
+SELECT s3_put_secret('my_s3', 'bucket', 'key', 'data');
+SELECT s3_list_secret('my_s3', 'bucket', 'prefix');
+
+-- HTTP with secrets
+SELECT http_get_secret('my_api', 'https://api.example.com/data');
+SELECT http_post_secret('my_api', 'https://api.example.com/data', '{"key": "value"}');
+
+-- SSH with secrets
+SELECT ssh_exec_secret('my_server', 'hostname', 'uptime');
+
+-- Redis with secrets
+SELECT redis_get_secret('my_redis', 'cache_key');
+SELECT redis_set_secret('my_redis', 'cache_key', 'value');
+
+-- LDAP with secrets
+SELECT ldap_search_secret('my_ldap', 'ldaps://ldap.example.com', 'dc=example,dc=com', '(cn=*)', 'cn,mail');
+```
+
+## Security Properties
+
+- **In-memory only**: Secrets are never written to disk
+- **Zeroization**: Secret values are overwritten with zeros before deallocation (CWE-316)
+- **Bounded storage**: Maximum 1,024 secrets, 64 KiB per secret
+- **Redacted display**: Sensitive keys (`password`, `secret`, `token`, etc.) are always redacted
+- **Name validation**: Secret names must be alphanumeric with underscores, hyphens, and dots

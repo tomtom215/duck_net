@@ -251,6 +251,11 @@ pub fn read(url: &str, token: &str, path: &str) -> VaultResult {
         return vault_err(e);
     }
 
+    // Warn if Vault token is sent over plaintext HTTP (CWE-523)
+    if url.starts_with("http://") {
+        crate::security_warnings::warn_token_over_plaintext("Vault", "TOKEN_OVER_HTTP_VAULT");
+    }
+
     let api_url = format!("{}/v1/{}", url.trim_end_matches('/'), path);
 
     let headers = vec![("X-Vault-Token".to_string(), token.to_string())];

@@ -33,7 +33,7 @@ pub struct ImapFetchResult {
 }
 
 /// Parse an IMAP URL into (host, port, use_tls).
-fn parse_imap_url(url: &str) -> Result<(String, u16, bool), String> {
+pub(crate) fn parse_imap_url(url: &str) -> Result<(String, u16, bool), String> {
     let lower = url.to_ascii_lowercase();
     let (use_tls, rest) = if lower.strip_prefix("imaps://").is_some() {
         (true, &url[8..])
@@ -198,18 +198,18 @@ fn fetch_message_inner(
 
 // ===== IMAP Session =====
 
-enum ImapStream {
+pub(crate) enum ImapStream {
     Plain(BufReader<TcpStream>),
     Tls(Box<BufReader<StreamOwned<ClientConnection, TcpStream>>>),
 }
 
-struct ImapSession {
-    stream: ImapStream,
-    tag_counter: u32,
+pub(crate) struct ImapSession {
+    pub(crate) stream: ImapStream,
+    pub(crate) tag_counter: u32,
 }
 
 impl ImapSession {
-    fn connect(host: &str, port: u16, use_tls: bool) -> Result<Self, String> {
+    pub(crate) fn connect(host: &str, port: u16, use_tls: bool) -> Result<Self, String> {
         // SSRF protection: block connections to private/reserved IPs (CWE-918)
         crate::security::validate_no_ssrf_host(host)?;
 
@@ -249,7 +249,7 @@ impl ImapSession {
         })
     }
 
-    fn read_response(&mut self, expected_tag: &str) -> Result<String, String> {
+    pub(crate) fn read_response(&mut self, expected_tag: &str) -> Result<String, String> {
         let mut response = String::new();
         let mut total_bytes = 0;
 
@@ -288,7 +288,7 @@ impl ImapSession {
         Ok(response)
     }
 
-    fn command(&mut self, cmd: &str) -> Result<String, String> {
+    pub(crate) fn command(&mut self, cmd: &str) -> Result<String, String> {
         self.tag_counter += 1;
         let tag = format!("A{:04}", self.tag_counter);
         let full_cmd = format!("{tag} {cmd}\r\n");
@@ -315,7 +315,7 @@ impl ImapSession {
     }
 }
 
-fn imap_escape(s: &str) -> String {
+pub(crate) fn imap_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
@@ -412,199 +412,4 @@ fn extract_fetch_body(resp: &str) -> String {
         }
     }
     resp.to_string()
-}
-
-// ===== IMAP Write Operations =====
-
-pub struct ImapWriteResult {
-    pub success: bool,
-    pub message: String,
-}
-
-/// Validate flags string for IMAP STORE commands.
-/// Rejects null bytes, CRLF injection, and overly long values.
-fn validate_flags(flags: &str) -> Result<(), String> {
-    if flags.is_empty() {
-        return Err("Flags must not be empty".to_string());
-    }
-    if flags.len() > 1024 {
-        return Err("Flags string too long (max 1024 characters)".to_string());
-    }
-    if flags.contains('\0') {
-        return Err("Flags must not contain null bytes".to_string());
-    }
-    if flags.contains('\r') || flags.contains('\n') {
-        return Err("Flags must not contain CR or LF characters".to_string());
-    }
-    Ok(())
-}
-
-/// Move a message from one mailbox to another.
-/// Tries the MOVE command first, falls back to COPY + STORE + EXPUNGE.
-pub fn move_message(
-    url: &str,
-    username: &str,
-    password: &str,
-    mailbox: &str,
-    uid: i64,
-    dest_mailbox: &str,
-) -> ImapWriteResult {
-    match move_message_inner(url, username, password, mailbox, uid, dest_mailbox) {
-        Ok(msg) => ImapWriteResult {
-            success: true,
-            message: msg,
-        },
-        Err(e) => ImapWriteResult {
-            success: false,
-            message: e,
-        },
-    }
-}
-
-fn move_message_inner(
-    url: &str,
-    username: &str,
-    password: &str,
-    mailbox: &str,
-    uid: i64,
-    dest_mailbox: &str,
-) -> Result<String, String> {
-    if uid <= 0 {
-        return Err("UID must be greater than 0".to_string());
-    }
-    if mailbox.is_empty() {
-        return Err("Mailbox must not be empty".to_string());
-    }
-    if dest_mailbox.is_empty() {
-        return Err("Destination mailbox must not be empty".to_string());
-    }
-
-    let (host, port, use_tls) = parse_imap_url(url)?;
-    let mut session = ImapSession::connect(&host, port, use_tls)?;
-    session.read_response("*")?;
-    session.command(&format!(
-        "LOGIN \"{}\" \"{}\"",
-        imap_escape(username),
-        imap_escape(password)
-    ))?;
-    session.command(&format!("SELECT \"{}\"", imap_escape(mailbox)))?;
-
-    // Try MOVE first
-    let move_result = session.command(&format!("MOVE {uid} \"{}\"", imap_escape(dest_mailbox)));
-
-    if move_result.is_err() {
-        // Fall back to COPY + STORE \Deleted + EXPUNGE
-        session.command(&format!("COPY {uid} \"{}\"", imap_escape(dest_mailbox)))?;
-        session.command(&format!("STORE {uid} +FLAGS (\\Deleted)"))?;
-        session.command("EXPUNGE")?;
-    }
-
-    session.command("LOGOUT").ok();
-    Ok(format!("Message {uid} moved to {dest_mailbox}"))
-}
-
-/// Delete a message by marking it as \Deleted and expunging.
-pub fn delete_message(
-    url: &str,
-    username: &str,
-    password: &str,
-    mailbox: &str,
-    uid: i64,
-) -> ImapWriteResult {
-    match delete_message_inner(url, username, password, mailbox, uid) {
-        Ok(msg) => ImapWriteResult {
-            success: true,
-            message: msg,
-        },
-        Err(e) => ImapWriteResult {
-            success: false,
-            message: e,
-        },
-    }
-}
-
-fn delete_message_inner(
-    url: &str,
-    username: &str,
-    password: &str,
-    mailbox: &str,
-    uid: i64,
-) -> Result<String, String> {
-    if uid <= 0 {
-        return Err("UID must be greater than 0".to_string());
-    }
-    if mailbox.is_empty() {
-        return Err("Mailbox must not be empty".to_string());
-    }
-
-    let (host, port, use_tls) = parse_imap_url(url)?;
-    let mut session = ImapSession::connect(&host, port, use_tls)?;
-    session.read_response("*")?;
-    session.command(&format!(
-        "LOGIN \"{}\" \"{}\"",
-        imap_escape(username),
-        imap_escape(password)
-    ))?;
-    session.command(&format!("SELECT \"{}\"", imap_escape(mailbox)))?;
-
-    session.command(&format!("STORE {uid} +FLAGS (\\Deleted)"))?;
-    session.command("EXPUNGE")?;
-
-    session.command("LOGOUT").ok();
-    Ok(format!("Message {uid} deleted"))
-}
-
-/// Set flags on a message.
-/// The `flags` parameter is a space-separated list of IMAP flags,
-/// e.g. `\Seen \Flagged` or custom flags.
-pub fn flag_message(
-    url: &str,
-    username: &str,
-    password: &str,
-    mailbox: &str,
-    uid: i64,
-    flags: &str,
-) -> ImapWriteResult {
-    match flag_message_inner(url, username, password, mailbox, uid, flags) {
-        Ok(msg) => ImapWriteResult {
-            success: true,
-            message: msg,
-        },
-        Err(e) => ImapWriteResult {
-            success: false,
-            message: e,
-        },
-    }
-}
-
-fn flag_message_inner(
-    url: &str,
-    username: &str,
-    password: &str,
-    mailbox: &str,
-    uid: i64,
-    flags: &str,
-) -> Result<String, String> {
-    if uid <= 0 {
-        return Err("UID must be greater than 0".to_string());
-    }
-    if mailbox.is_empty() {
-        return Err("Mailbox must not be empty".to_string());
-    }
-    validate_flags(flags)?;
-
-    let (host, port, use_tls) = parse_imap_url(url)?;
-    let mut session = ImapSession::connect(&host, port, use_tls)?;
-    session.read_response("*")?;
-    session.command(&format!(
-        "LOGIN \"{}\" \"{}\"",
-        imap_escape(username),
-        imap_escape(password)
-    ))?;
-    session.command(&format!("SELECT \"{}\"", imap_escape(mailbox)))?;
-
-    session.command(&format!("STORE {uid} +FLAGS ({flags})"))?;
-
-    session.command("LOGOUT").ok();
-    Ok(format!("Flags ({flags}) set on message {uid}"))
 }

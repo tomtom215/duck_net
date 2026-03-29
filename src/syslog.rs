@@ -62,6 +62,13 @@ pub fn send(
     app_name: &str,
     message: &str,
 ) -> SyslogResult {
+    // Warn about plaintext UDP syslog (CWE-319)
+    crate::security_warnings::warn_plaintext(
+        "Syslog",
+        "PLAINTEXT_SYSLOG",
+        "TLS syslog (RFC 5425) via a syslog relay",
+    );
+
     let port = if port == 0 { SYSLOG_DEFAULT_PORT } else { port };
 
     // Validate inputs

@@ -63,6 +63,11 @@ pub fn consul_get(url: &str, key: &str, token: &str) -> KvResult {
         return fail(e);
     }
 
+    // Warn if token is sent over plaintext HTTP (CWE-523)
+    if !token.is_empty() && url.starts_with("http://") {
+        crate::security_warnings::warn_token_over_plaintext("Consul", "TOKEN_OVER_HTTP_CONSUL");
+    }
+
     let api_url = format!("{}/v1/kv/{}?raw", url.trim_end_matches('/'), key);
 
     let mut headers: Vec<(String, String)> = Vec::new();

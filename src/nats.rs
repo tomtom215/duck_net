@@ -188,6 +188,15 @@ fn handshake(
 /// Security: validates host, subject, and payload size. Enforces timeouts.
 /// Credentials are scrubbed from error messages (CWE-532).
 pub fn publish(url: &str, subject: &str, payload: &str) -> NatsResult {
+    // Warn about plaintext NATS connections (CWE-319)
+    if !url.starts_with("nats+tls://") && !url.starts_with("tls://") {
+        crate::security_warnings::warn_plaintext(
+            "NATS",
+            "PLAINTEXT_NATS",
+            "nats+tls:// or tls:// (NATS over TLS)",
+        );
+    }
+
     if !is_valid_subject(subject) {
         return NatsResult {
             success: false,
