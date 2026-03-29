@@ -105,7 +105,23 @@ pub fn send(
     }
 }
 
+/// Validate syslog host: alphanumeric, dots, hyphens, colons (IPv6), brackets.
+fn is_valid_host(host: &str) -> bool {
+    if host.is_empty() || host.len() > 253 {
+        return false;
+    }
+    host.chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+}
+
 fn send_udp(host: &str, port: u16, data: &[u8]) -> Result<(), String> {
+    // Validate host input
+    if !is_valid_host(host) {
+        return Err(format!("Invalid syslog host: {host}"));
+    }
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(host)?;
+
     let socket =
         UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     let addr = format!("{host}:{port}");

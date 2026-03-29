@@ -56,6 +56,10 @@ fn parse_host(host_str: &str) -> Result<(String, u16), String> {
 /// Connect to Memcached with proper timeouts.
 fn connect(host_str: &str) -> Result<BufReader<TcpStream>, String> {
     let (host, port) = parse_host(host_str)?;
+
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
+
     let addr = format!("{host}:{port}");
 
     let stream = TcpStream::connect_timeout(

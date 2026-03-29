@@ -84,6 +84,15 @@ async fn search_async(
         format!("ldap://{}:{}", host, port)
     };
 
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return LdapSearchResult {
+            success: false,
+            entries: vec![],
+            message: e,
+        };
+    }
+
     let (conn, mut ldap) = match LdapConnAsync::new(&url).await {
         Ok(v) => v,
         Err(e) => {
@@ -172,6 +181,14 @@ async fn bind_async(
     password: &str,
 ) -> LdapBindResult {
     use ldap3::LdapConnAsync;
+
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return LdapBindResult {
+            success: false,
+            message: e,
+        };
+    }
 
     let url = if use_tls {
         format!("ldaps://{}:{}", host, port)
@@ -409,6 +426,11 @@ async fn add_async(
     use ldap3::LdapConnAsync;
     use std::collections::HashSet;
 
+    // SSRF protection (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return LdapWriteResult { success: false, message: e };
+    }
+
     let url = if use_tls {
         format!("ldaps://{}:{}", host, port)
     } else {
@@ -537,6 +559,11 @@ async fn modify_async(
     use ldap3::{LdapConnAsync, Mod};
     use std::collections::HashSet;
 
+    // SSRF protection (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return LdapWriteResult { success: false, message: e };
+    }
+
     let url = if use_tls {
         format!("ldaps://{}:{}", host, port)
     } else {
@@ -652,6 +679,11 @@ async fn delete_async(
     entry_dn: &str,
 ) -> LdapWriteResult {
     use ldap3::LdapConnAsync;
+
+    // SSRF protection (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return LdapWriteResult { success: false, message: e };
+    }
 
     let url = if use_tls {
         format!("ldaps://{}:{}", host, port)

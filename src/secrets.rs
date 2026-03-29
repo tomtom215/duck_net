@@ -188,11 +188,13 @@ pub fn add_secret(name: &str, secret_type: &str, config_json: &str) -> Result<St
 }
 
 /// Remove a secret from the store.
+/// Zeroizes the secret values in memory before dropping (CWE-316).
 pub fn clear_secret(name: &str) -> Result<String, String> {
     let mut store = SECRETS.lock().unwrap();
     let map = store.as_mut().ok_or("Secrets store not initialized")?;
 
-    if map.remove(name).is_some() {
+    if let Some(mut secret) = map.remove(name) {
+        zeroize_secret(&mut secret);
         Ok(format!("Secret '{}' removed", name))
     } else {
         Err(format!("Secret '{}' not found", name))
@@ -200,15 +202,37 @@ pub fn clear_secret(name: &str) -> Result<String, String> {
 }
 
 /// Remove all secrets from the store.
+/// Zeroizes all secret values in memory before dropping (CWE-316).
 pub fn clear_all_secrets() -> String {
     let mut store = SECRETS.lock().unwrap();
     if let Some(map) = store.as_mut() {
         let count = map.len();
+        for (_, secret) in map.iter_mut() {
+            zeroize_secret(secret);
+        }
         map.clear();
         format!("Cleared {} secrets", count)
     } else {
         "Secrets store not initialized".to_string()
     }
+}
+
+/// Overwrite sensitive values in memory with zeros before dropping (CWE-316).
+/// This is a best-effort defense against memory inspection attacks.
+fn zeroize_secret(secret: &mut StoredSecret) {
+    for value in secret.values.values_mut() {
+        // SAFETY: overwrite the string's buffer with zeros
+        // This prevents the secret from lingering in freed memory.
+        let bytes = unsafe { value.as_bytes_mut() };
+        for b in bytes.iter_mut() {
+            // Use volatile write to prevent the compiler from optimizing this away
+            unsafe {
+                std::ptr::write_volatile(b as *mut u8, 0);
+            }
+        }
+    }
+    secret.secret_type.clear();
+    secret.values.clear();
 }
 
 /// List secret names and types (never exposes values).
@@ -419,6 +443,43 @@ pub fn resolve_shared_secret(secret_name: &str) -> Result<String, String> {
     get_value(secret_name, "shared_secret")
         .or_else(|| get_value(secret_name, "secret"))
         .ok_or_else(|| format!("Secret '{}' missing 'shared_secret'", secret_name))
+}
+
+// ---------------------------------------------------------------------------
+// DuckDB Secrets Manager Integration
+// ---------------------------------------------------------------------------
+
+/// DuckDB secret type names that map to DuckDB's native CREATE SECRET types.
+/// For S3/HTTP/GCS protocols, users should prefer DuckDB's native secrets:
+///
+/// ```sql
+/// -- DuckDB native S3 secret (preferred for S3 operations)
+/// CREATE SECRET my_s3 (TYPE s3, KEY_ID 'AKIA...', SECRET '...', REGION 'us-east-1');
+///
+/// -- DuckDB native HTTP secret (preferred for HTTP auth)
+/// CREATE SECRET my_http (TYPE http, BEARER_TOKEN 'token...');
+///
+/// -- duck_net secrets for protocols DuckDB doesn't natively support
+/// SELECT duck_net_add_secret('my_smtp', 'smtp', '{"host":"smtp.example.com","username":"u","password":"p"}');
+/// SELECT duck_net_add_secret('my_redis', 'redis', '{"password":"secret"}');
+/// ```
+///
+/// duck_net's S3 functions accept the same key names as DuckDB's native S3 secrets
+/// (KEY_ID, SECRET, REGION, ENDPOINT) so credentials can be managed consistently.
+pub mod duckdb_compat {
+    /// Key name mapping: DuckDB native S3 secret field names.
+    /// These match the CREATE SECRET (TYPE s3, ...) parameter names.
+    pub const S3_KEY_ID: &str = "key_id";
+    pub const S3_SECRET: &str = "secret";
+    pub const S3_REGION: &str = "region";
+    pub const S3_ENDPOINT: &str = "endpoint";
+    pub const S3_SESSION_TOKEN: &str = "session_token";
+    pub const S3_USE_SSL: &str = "use_ssl";
+    pub const S3_URL_STYLE: &str = "url_style";
+
+    /// Key name mapping: DuckDB native HTTP secret field names.
+    pub const HTTP_BEARER_TOKEN: &str = "bearer_token";
+    pub const HTTP_EXTRA_HEADERS: &str = "extra_http_headers";
 }
 
 // ---------------------------------------------------------------------------

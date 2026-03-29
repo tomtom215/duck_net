@@ -71,6 +71,17 @@ pub fn validate_no_ssrf(url: &str) -> Result<(), String> {
     // Extract hostname from URL
     let host = extract_hostname(url).ok_or_else(|| "Cannot extract hostname from URL".to_string())?;
 
+    validate_no_ssrf_host(&host)
+}
+
+/// Validate that a raw hostname does not resolve to a private/reserved IP.
+/// Use this for non-URL protocols (Redis, MQTT, LDAP, etc.) that take a
+/// hostname directly rather than a full URL.
+pub fn validate_no_ssrf_host(host: &str) -> Result<(), String> {
+    if !ssrf_protection_enabled() {
+        return Ok(());
+    }
+
     // Try to resolve the hostname
     let addr_str = if host.contains(':') {
         host.to_string() // Already has port or is IPv6
@@ -80,7 +91,15 @@ pub fn validate_no_ssrf(url: &str) -> Result<(), String> {
 
     match addr_str.to_socket_addrs() {
         Ok(addrs) => {
-            for addr in addrs {
+            let addrs: Vec<_> = addrs.collect();
+            if addrs.is_empty() {
+                return Err(format!(
+                    "SSRF protection: hostname '{}' resolved to no addresses. \
+                     Use duck_net_set_ssrf_protection(false) to disable for local development.",
+                    host
+                ));
+            }
+            for addr in &addrs {
                 if is_private_ip(&addr.ip()) {
                     return Err(format!(
                         "SSRF protection: hostname '{}' resolves to private/reserved IP {}. \
@@ -93,31 +112,64 @@ pub fn validate_no_ssrf(url: &str) -> Result<(), String> {
             Ok(())
         }
         Err(_) => {
-            // If DNS resolution fails, allow the request to proceed
-            // (the HTTP client will fail with a clearer error).
-            Ok(())
+            // Block on DNS resolution failure to prevent DNS rebinding attacks.
+            // If this is a legitimate host, retrying will succeed.
+            Err(format!(
+                "SSRF protection: cannot resolve hostname '{}'. \
+                 Use duck_net_set_ssrf_protection(false) to disable for local development.",
+                host
+            ))
         }
     }
 }
 
 /// Extract the hostname portion from a URL.
 fn extract_hostname(url: &str) -> Option<String> {
-    // Strip scheme
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .or_else(|| url.strip_prefix("ftp://"))
-        .or_else(|| url.strip_prefix("ftps://"))
-        .or_else(|| url.strip_prefix("sftp://"))
-        .or_else(|| url.strip_prefix("mqtt://"))
-        .or_else(|| url.strip_prefix("tcp://"))
-        .or_else(|| url.strip_prefix("ldap://"))
-        .or_else(|| url.strip_prefix("ldaps://"))
-        .or_else(|| url.strip_prefix("imap://"))
-        .or_else(|| url.strip_prefix("imaps://"))
-        .or_else(|| url.strip_prefix("smtp://"))
-        .or_else(|| url.strip_prefix("smtps://"))
-        .or_else(|| url.strip_prefix("redis://"))?;
+    // Strip scheme (case-insensitive via lowercase check)
+    let lower = url.to_ascii_lowercase();
+    let rest = if lower.starts_with("https://") {
+        &url[8..]
+    } else if lower.starts_with("http://") {
+        &url[7..]
+    } else if lower.starts_with("ftps://") {
+        &url[7..]
+    } else if lower.starts_with("ftp://") {
+        &url[6..]
+    } else if lower.starts_with("sftp://") {
+        &url[7..]
+    } else if lower.starts_with("mqtt://") || lower.starts_with("mqtts://") {
+        &url[url.find("://").unwrap() + 3..]
+    } else if lower.starts_with("tcp://") {
+        &url[6..]
+    } else if lower.starts_with("ldaps://") {
+        &url[8..]
+    } else if lower.starts_with("ldap://") {
+        &url[7..]
+    } else if lower.starts_with("imaps://") {
+        &url[8..]
+    } else if lower.starts_with("imap://") {
+        &url[7..]
+    } else if lower.starts_with("smtps://") {
+        &url[8..]
+    } else if lower.starts_with("smtp://") {
+        &url[7..]
+    } else if lower.starts_with("redis://") {
+        &url[8..]
+    } else if lower.starts_with("grpcs://") {
+        &url[8..]
+    } else if lower.starts_with("grpc://") {
+        &url[7..]
+    } else if lower.starts_with("wss://") {
+        &url[6..]
+    } else if lower.starts_with("ws://") {
+        &url[5..]
+    } else if lower.starts_with("nats://") {
+        &url[7..]
+    } else if lower.starts_with("amqp://") || lower.starts_with("amqps://") {
+        &url[url.find("://").unwrap() + 3..]
+    } else {
+        return None;
+    };
 
     // Strip userinfo
     let after_auth = if let Some(at) = rest.find('@') {
@@ -293,7 +345,9 @@ pub fn validate_ssh_command(command: &str, strict: bool) -> Result<(), String> {
 }
 
 /// Global flag for SSH strict command validation.
-static SSH_STRICT_COMMANDS: AtomicBool = AtomicBool::new(false);
+/// Defaults to true (security-by-default): rejects shell metacharacters.
+/// Set to false only for trusted environments that require complex commands.
+static SSH_STRICT_COMMANDS: AtomicBool = AtomicBool::new(true);
 
 pub fn set_ssh_strict_commands(strict: bool) {
     SSH_STRICT_COMMANDS.store(strict, Ordering::Relaxed);

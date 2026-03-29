@@ -212,6 +212,9 @@ struct ImapSession {
 
 impl ImapSession {
     fn connect(host: &str, port: u16, use_tls: bool) -> Result<Self, String> {
+        // SSRF protection: block connections to private/reserved IPs (CWE-918)
+        crate::security::validate_no_ssrf_host(host)?;
+
         let addr = format!("{host}:{port}");
         let timeout = Duration::from_secs(TIMEOUT_SECS);
 
