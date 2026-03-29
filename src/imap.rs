@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -101,8 +104,11 @@ fn list_messages_inner(
     session.read_response("*")?;
 
     // Login
-    session.command(&format!("LOGIN \"{}\" \"{}\"",
-        imap_escape(username), imap_escape(password)))?;
+    session.command(&format!(
+        "LOGIN \"{}\" \"{}\"",
+        imap_escape(username),
+        imap_escape(password)
+    ))?;
 
     // Select mailbox
     session.command(&format!("SELECT \"{}\"", imap_escape(mailbox)))?;
@@ -177,8 +183,11 @@ fn fetch_message_inner(
     let mut session = ImapSession::connect(&host, port, use_tls)?;
 
     session.read_response("*")?;
-    session.command(&format!("LOGIN \"{}\" \"{}\"",
-        imap_escape(username), imap_escape(password)))?;
+    session.command(&format!(
+        "LOGIN \"{}\" \"{}\"",
+        imap_escape(username),
+        imap_escape(password)
+    ))?;
     session.command(&format!("SELECT \"{}\"", imap_escape(mailbox)))?;
 
     let resp = session.command(&format!("FETCH {uid} BODY[]"))?;
@@ -373,9 +382,7 @@ fn extract_header_value(chunk: &str, header: &str) -> String {
             return rest.to_string();
         }
         // Case-insensitive
-        if trimmed.len() >= needle.len()
-            && trimmed[..needle.len()].eq_ignore_ascii_case(&needle)
-        {
+        if trimmed.len() >= needle.len() && trimmed[..needle.len()].eq_ignore_ascii_case(&needle) {
             return trimmed[needle.len()..].to_string();
         }
     }

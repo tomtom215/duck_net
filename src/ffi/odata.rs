@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::ffi::CStr;
 
 use libduckdb_sys::*;
@@ -5,7 +8,9 @@ use quack_rs::prelude::*;
 
 use crate::odata;
 
-use super::scalars::{map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar};
+use super::scalars::{
+    map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar,
+};
 
 // ===== odata_query scalar function =====
 
@@ -120,11 +125,17 @@ unsafe extern "C" fn odata_paginate_init(info: duckdb_init_info) {
 unsafe extern "C" fn odata_paginate_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
     let bind_data = match FfiBindData::<ODataPaginateBindData>::get_from_function(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
     let init_data = match FfiInitData::<ODataPaginateInitData>::get_mut(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
 
     match odata::fetch_next_page(

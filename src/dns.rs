@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::net::IpAddr;
 use std::sync::LazyLock;
 

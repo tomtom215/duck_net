@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::net::UdpSocket;
 use std::time::Duration;
 
@@ -15,17 +18,21 @@ pub struct SnmpResult {
 pub fn get(host: &str, oid: &str, community: &str) -> Result<SnmpResult, String> {
     let request = build_get_request(oid, community)?;
     let response = send_udp(host, SNMP_PORT, &request)?;
-    parse_response(&response)
-        .and_then(|results| {
-            results
-                .into_iter()
-                .next()
-                .ok_or_else(|| "No values in SNMP response".to_string())
-        })
+    parse_response(&response).and_then(|results| {
+        results
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No values in SNMP response".to_string())
+    })
 }
 
 /// Perform an SNMP WALK (repeated GET-NEXT) starting from an OID.
-pub fn walk(host: &str, oid: &str, community: &str, max_entries: usize) -> Result<Vec<SnmpResult>, String> {
+pub fn walk(
+    host: &str,
+    oid: &str,
+    community: &str,
+    max_entries: usize,
+) -> Result<Vec<SnmpResult>, String> {
     let base_oid = oid;
     let mut current_oid = oid.to_string();
     let mut results = Vec::new();
@@ -51,8 +58,8 @@ pub fn walk(host: &str, oid: &str, community: &str, max_entries: usize) -> Resul
 }
 
 fn send_udp(host: &str, port: u16, data: &[u8]) -> Result<Vec<u8>, String> {
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+    let socket =
+        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
@@ -385,32 +392,14 @@ fn decode_value(tag: u8, data: &[u8]) -> (String, String) {
                 (hex_string(data), "IpAddress".to_string())
             }
         }
-        0x41 => (
-            decode_integer(data).to_string(),
-            "Counter32".to_string(),
-        ),
-        0x42 => (
-            decode_integer(data).to_string(),
-            "Gauge32".to_string(),
-        ),
-        0x43 => (
-            decode_integer(data).to_string(),
-            "TimeTicks".to_string(),
-        ),
+        0x41 => (decode_integer(data).to_string(), "Counter32".to_string()),
+        0x42 => (decode_integer(data).to_string(), "Gauge32".to_string()),
+        0x43 => (decode_integer(data).to_string(), "TimeTicks".to_string()),
         0x44 => (hex_string(data), "Opaque".to_string()),
-        0x46 => (
-            decode_integer(data).to_string(),
-            "Counter64".to_string(),
-        ),
+        0x46 => (decode_integer(data).to_string(), "Counter64".to_string()),
         0x80 => ("noSuchObject".to_string(), "noSuchObject".to_string()),
-        0x81 => (
-            "noSuchInstance".to_string(),
-            "noSuchInstance".to_string(),
-        ),
-        0x82 => (
-            "endOfMibView".to_string(),
-            "endOfMibView".to_string(),
-        ),
+        0x81 => ("noSuchInstance".to_string(), "noSuchInstance".to_string()),
+        0x82 => ("endOfMibView".to_string(), "endOfMibView".to_string()),
         _ => (hex_string(data), format!("UNKNOWN(0x{tag:02X})")),
     }
 }

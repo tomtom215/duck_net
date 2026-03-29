@@ -102,17 +102,46 @@ Fire-and-forget email sending from SQL. Useful for alerting on query results.
 
 ### 4a. smtp_send
 
+## v0.3.0 — Shipped
+
+13 new protocol modules closing identified security and infrastructure gaps. All protocols implement strict input validation, timeouts, and size limits.
+
+### New Tier 1: High Impact
+
+| Module | Functions | Description |
+|--------|-----------|-------------|
+| **SSH/SCP** | `ssh_exec(host, user, key, command)`, `ssh_exec_password` | Remote command execution via SSH. Host key verification via known_hosts (TOFU). Uses existing `russh` dependency |
+| **Redis** | `redis_get`, `redis_set`, `redis_keys` | Cache/config lookups from SQL. Raw RESP protocol — zero external Redis dependencies |
+| **gRPC** | `grpc_call(url, service, method, json_payload)` | Unary gRPC over HTTP/2 (h2 crate). JSON-in/JSON-out sidesteps protobuf complexity |
+| **WebSocket (one-shot)** | `ws_request(url, message, [timeout])` | Send one message, wait for one response, close. Health checks and simple RPC-over-WS |
+
+### New Tier 2: Infrastructure
+
+| Module | Functions | Description |
+|--------|-----------|-------------|
+| **MQTT Publish** | `mqtt_publish(broker, topic, payload)` | Fire-and-forget at QoS 0. Raw MQTT 3.1.1 — zero external MQTT dependencies. IoT data pipelines feeding DuckDB |
+| **Memcached** | `memcached_get`, `memcached_set` | ASCII protocol over TCP. Simpler than Redis, still common in production |
+| **Prometheus** | `prometheus_query`, `prometheus_query_range` | Pull metrics into SQL for ad-hoc analysis. Dedicated functions handle the Prometheus response format |
+| **Elasticsearch** | `es_search`, `es_count`, `es_cat` | Structured helpers for _search, _count, _cat endpoints with index name validation |
+
+### New Tier 3: Niche but Clean Fits
+
+| Module | Functions | Description |
+|--------|-----------|-------------|
+| **RADIUS** | `radius_auth(host, secret, username, password)` | Auth testing for network infrastructure. RFC 2865 with response authenticator verification |
+| **DNS-over-HTTPS** | `doh_lookup(resolver_url, domain, type)` | Privacy-aware DNS over encrypted HTTPS. Default: Cloudflare |
+| **mDNS/Bonjour** | `mdns_discover(service_type)` (table) | Local network service discovery via multicast DNS (RFC 6762) |
+| **STUN** | `stun_lookup(server)` | Public IP/port discovery. One UDP round-trip (RFC 5389) |
+| **BGP Looking Glass** | `bgp_route(prefix)`, `bgp_prefix_overview`, `bgp_asn_info` | Network routing analysis via RIPE RIS public API |
+
 ## Rejected Protocols
 
 | Protocol | Reason |
 |----------|--------|
-| WebSockets | Push-based streaming. No natural mapping to DuckDB functions. "Connect-send-receive-disconnect" is just worse HTTP. |
-| MQTT Subscribe | Push-based streaming. Same fundamental mismatch as WebSockets. |
-| MQTT Publish | Feasible but extremely niche. Who publishes MQTT from SQL? |
+| MQTT Subscribe | Push-based streaming. Fundamental mismatch with DuckDB's pull model. |
 | XMPP | Deeply stateful, session-oriented, streaming. Zero SQL use case. |
-| gRPC | Request-response fits, but protobuf handling is enormous complexity for marginal gain over HTTP+JSON. Revisit if demand materializes. |
 | QUIC / HTTP/3 | Transport-layer protocol. DuckDB doesn't control socket-level details; ureq handles connections. No user-facing benefit. |
-| Raw TCP/UDP | Too low-level for SQL. Specific protocols (WHOIS, NTP, SIP, SNMP) already use raw sockets internally. |
+| Raw TCP/UDP | Too low-level for SQL. Specific protocols (WHOIS, NTP, SIP, SNMP, RADIUS, STUN, mDNS) already use raw sockets internally. |
 
 ## Implementation Guides
 

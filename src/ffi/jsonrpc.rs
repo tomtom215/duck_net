@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
@@ -21,7 +24,11 @@ unsafe extern "C" fn cb_jsonrpc_call_3(
         let url = url_reader.read_str(row as usize);
         let method = method_reader.read_str(row as usize);
         let params = params_reader.read_str(row as usize);
-        let params_opt = if params.is_empty() { None } else { Some(params) };
+        let params_opt = if params.is_empty() {
+            None
+        } else {
+            Some(params)
+        };
         let resp = jsonrpc::call(url, method, params_opt, &[]);
         write_response(output, row, &resp, &mut map_offset);
     }
@@ -44,7 +51,11 @@ unsafe extern "C" fn cb_jsonrpc_call_4(
         let method = method_reader.read_str(row as usize);
         let params = params_reader.read_str(row as usize);
         let headers = read_headers_map(input, 3, row as usize);
-        let params_opt = if params.is_empty() { None } else { Some(params) };
+        let params_opt = if params.is_empty() {
+            None
+        } else {
+            Some(params)
+        };
         let resp = jsonrpc::call(url, method, params_opt, &headers);
         write_response(output, row, &resp, &mut map_offset);
     }

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use crate::runtime;
 
 pub struct KafkaProduceResult {
@@ -10,12 +13,7 @@ pub struct KafkaProduceResult {
 /// Produce a message to a Kafka topic.
 ///
 /// `brokers` is a comma-separated list of broker addresses (e.g., "localhost:9092").
-pub fn produce(
-    brokers: &str,
-    topic: &str,
-    key: Option<&str>,
-    value: &str,
-) -> KafkaProduceResult {
+pub fn produce(brokers: &str, topic: &str, key: Option<&str>, value: &str) -> KafkaProduceResult {
     runtime::block_on(async { produce_async(brokers, topic, key, value).await })
 }
 
@@ -80,7 +78,10 @@ async fn produce_async(
     };
 
     match partition_client
-        .produce(vec![record], rskafka::client::partition::Compression::NoCompression)
+        .produce(
+            vec![record],
+            rskafka::client::partition::Compression::NoCompression,
+        )
         .await
     {
         Ok(offsets) => {

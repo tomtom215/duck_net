@@ -1,9 +1,14 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::webdav;
 
-use super::scalars::{map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar};
+use super::scalars::{
+    map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar,
+};
 
 // ===== webdav_list table function =====
 
@@ -22,7 +27,10 @@ unsafe extern "C" fn webdav_list_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
     let url_val = bind.get_parameter(0);
     let url_cstr = duckdb_get_varchar(url_val);
-    let url = std::ffi::CStr::from_ptr(url_cstr).to_str().unwrap_or("").to_string();
+    let url = std::ffi::CStr::from_ptr(url_cstr)
+        .to_str()
+        .unwrap_or("")
+        .to_string();
     duckdb_free(url_cstr as *mut _);
     duckdb_destroy_value(&mut { url_val });
 
@@ -56,11 +64,17 @@ unsafe extern "C" fn webdav_list_init(info: duckdb_init_info) {
 unsafe extern "C" fn webdav_list_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
     let bind_data = match FfiBindData::<WebDavListBindData>::get_from_function(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
     let init_data = match FfiInitData::<WebDavListInitData>::get_mut(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
 
     if init_data.entries.is_empty() && init_data.idx == 0 {

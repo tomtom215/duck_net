@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::ffi::CStr;
 
 use libduckdb_sys::*;
@@ -37,17 +40,28 @@ unsafe extern "C" fn caldav_events_bind(info: duckdb_bind_info) {
     bind.add_result_column("etag", TypeId::Varchar);
     bind.add_result_column("data", TypeId::Varchar);
 
-    FfiBindData::<CalDavEventsBindData>::set(info, CalDavEventsBindData {
-        url, headers: vec![], time_start, time_end,
-    });
+    FfiBindData::<CalDavEventsBindData>::set(
+        info,
+        CalDavEventsBindData {
+            url,
+            headers: vec![],
+            time_start,
+            time_end,
+        },
+    );
 }
 
 unsafe fn read_named_str(info: duckdb_bind_info, name: &str) -> Option<String> {
     let bind = BindInfo::new(info);
     let val = bind.get_named_parameter(name);
-    if val.is_null() { return None; }
+    if val.is_null() {
+        return None;
+    }
     let cstr = duckdb_get_varchar(val);
-    if cstr.is_null() { duckdb_destroy_value(&mut { val }); return None; }
+    if cstr.is_null() {
+        duckdb_destroy_value(&mut { val });
+        return None;
+    }
     let s = CStr::from_ptr(cstr).to_str().ok().map(|s| s.to_string());
     duckdb_free(cstr as *mut _);
     duckdb_destroy_value(&mut { val });
@@ -55,26 +69,39 @@ unsafe fn read_named_str(info: duckdb_bind_info, name: &str) -> Option<String> {
 }
 
 unsafe extern "C" fn caldav_events_init(info: duckdb_init_info) {
-    FfiInitData::<CalDavEventsInitData>::set(info, CalDavEventsInitData {
-        events: vec![], idx: 0, fetched: false,
-    });
+    FfiInitData::<CalDavEventsInitData>::set(
+        info,
+        CalDavEventsInitData {
+            events: vec![],
+            idx: 0,
+            fetched: false,
+        },
+    );
 }
 
 unsafe extern "C" fn caldav_events_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
     let bind_data = match FfiBindData::<CalDavEventsBindData>::get_from_function(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
     let init_data = match FfiInitData::<CalDavEventsInitData>::get_mut(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
 
     if !init_data.fetched {
         init_data.fetched = true;
         match caldav::list_events(
-            &bind_data.url, &bind_data.headers,
-            bind_data.time_start.as_deref(), bind_data.time_end.as_deref(),
+            &bind_data.url,
+            &bind_data.headers,
+            bind_data.time_start.as_deref(),
+            bind_data.time_end.as_deref(),
         ) {
             Ok(events) => init_data.events = events,
             Err(e) => {
@@ -130,23 +157,40 @@ unsafe extern "C" fn carddav_contacts_bind(info: duckdb_bind_info) {
     bind.add_result_column("etag", TypeId::Varchar);
     bind.add_result_column("data", TypeId::Varchar);
 
-    FfiBindData::<CardDavContactsBindData>::set(info, CardDavContactsBindData { url, headers: vec![] });
+    FfiBindData::<CardDavContactsBindData>::set(
+        info,
+        CardDavContactsBindData {
+            url,
+            headers: vec![],
+        },
+    );
 }
 
 unsafe extern "C" fn carddav_contacts_init(info: duckdb_init_info) {
-    FfiInitData::<CardDavContactsInitData>::set(info, CardDavContactsInitData {
-        contacts: vec![], idx: 0, fetched: false,
-    });
+    FfiInitData::<CardDavContactsInitData>::set(
+        info,
+        CardDavContactsInitData {
+            contacts: vec![],
+            idx: 0,
+            fetched: false,
+        },
+    );
 }
 
 unsafe extern "C" fn carddav_contacts_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
     let bind_data = match FfiBindData::<CardDavContactsBindData>::get_from_function(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
     let init_data = match FfiInitData::<CardDavContactsInitData>::get_mut(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
 
     if !init_data.fetched {

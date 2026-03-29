@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::ffi::CStr;
 
 use libduckdb_sys::*;
@@ -86,7 +89,15 @@ unsafe extern "C" fn snmp_walk_bind(info: duckdb_bind_info) {
     bind.add_result_column("value", TypeId::Varchar);
     bind.add_result_column("value_type", TypeId::Varchar);
 
-    FfiBindData::<SnmpWalkBindData>::set(info, SnmpWalkBindData { host, oid, community, max_entries });
+    FfiBindData::<SnmpWalkBindData>::set(
+        info,
+        SnmpWalkBindData {
+            host,
+            oid,
+            community,
+            max_entries,
+        },
+    );
 }
 
 unsafe fn read_bind_str(bind: &BindInfo, idx: u64) -> String {
@@ -99,22 +110,40 @@ unsafe fn read_bind_str(bind: &BindInfo, idx: u64) -> String {
 }
 
 unsafe extern "C" fn snmp_walk_init(info: duckdb_init_info) {
-    FfiInitData::<SnmpWalkInitData>::set(info, SnmpWalkInitData { results: vec![], idx: 0, fetched: false });
+    FfiInitData::<SnmpWalkInitData>::set(
+        info,
+        SnmpWalkInitData {
+            results: vec![],
+            idx: 0,
+            fetched: false,
+        },
+    );
 }
 
 unsafe extern "C" fn snmp_walk_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
     let bind_data = match FfiBindData::<SnmpWalkBindData>::get_from_function(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
     let init_data = match FfiInitData::<SnmpWalkInitData>::get_mut(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
 
     if !init_data.fetched {
         init_data.fetched = true;
-        match snmp::walk(&bind_data.host, &bind_data.oid, &bind_data.community, bind_data.max_entries) {
+        match snmp::walk(
+            &bind_data.host,
+            &bind_data.oid,
+            &bind_data.community,
+            bind_data.max_entries,
+        ) {
             Ok(results) => init_data.results = results,
             Err(e) => {
                 let fi = FunctionInfo::new(info);

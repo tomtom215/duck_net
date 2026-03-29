@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use crate::http::{self, HttpResponse, Method};
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -60,9 +63,8 @@ pub fn xmlrpc_call(
 }
 
 fn build_xmlrpc_body(method: &str, params: &[&str]) -> String {
-    let mut xml = format!(
-        "<?xml version=\"1.0\"?>\n<methodCall>\n  <methodName>{method}</methodName>\n"
-    );
+    let mut xml =
+        format!("<?xml version=\"1.0\"?>\n<methodCall>\n  <methodName>{method}</methodName>\n");
     if !params.is_empty() {
         xml.push_str("  <params>\n");
         for p in params {

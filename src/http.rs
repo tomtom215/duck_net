@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::io::Read as _;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -197,9 +200,7 @@ pub fn execute_raw_method(
     }
 
     // Build an http::Request with the custom method and pass it to Agent::run()
-    let mut builder = ureq::http::Request::builder()
-        .method(method_str)
-        .uri(url);
+    let mut builder = ureq::http::Request::builder().method(method_str).uri(url);
 
     for (key, value) in headers {
         builder = builder.header(key.as_str(), value.as_str());

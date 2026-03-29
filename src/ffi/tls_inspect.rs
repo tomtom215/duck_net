@@ -1,10 +1,13 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::tls_inspect;
 
-use super::scalars::write_varchar;
 use super::dns::write_string_list;
+use super::scalars::write_varchar;
 
 fn tls_cert_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

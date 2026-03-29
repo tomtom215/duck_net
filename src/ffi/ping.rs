@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::ffi::CStr;
 
 use libduckdb_sys::*;
@@ -113,17 +116,30 @@ unsafe extern "C" fn traceroute_bind(info: duckdb_bind_info) {
 }
 
 unsafe extern "C" fn traceroute_init(info: duckdb_init_info) {
-    FfiInitData::<TracerouteInitData>::set(info, TracerouteInitData { hops: vec![], idx: 0, fetched: false });
+    FfiInitData::<TracerouteInitData>::set(
+        info,
+        TracerouteInitData {
+            hops: vec![],
+            idx: 0,
+            fetched: false,
+        },
+    );
 }
 
 unsafe extern "C" fn traceroute_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
     let bind_data = match FfiBindData::<TracerouteBindData>::get_from_function(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
     let init_data = match FfiInitData::<TracerouteInitData>::get_mut(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
 
     if !init_data.fetched {

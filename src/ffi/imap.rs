@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::ffi::CStr;
 
 use libduckdb_sys::*;
@@ -77,9 +80,14 @@ unsafe fn read_bind_varchar(bind: &BindInfo, idx: u64) -> String {
 unsafe fn read_named_varchar_imap(info: duckdb_bind_info, name: &str) -> Option<String> {
     let bind = BindInfo::new(info);
     let val = bind.get_named_parameter(name);
-    if val.is_null() { return None; }
+    if val.is_null() {
+        return None;
+    }
     let cstr = duckdb_get_varchar(val);
-    if cstr.is_null() { duckdb_destroy_value(&mut { val }); return None; }
+    if cstr.is_null() {
+        duckdb_destroy_value(&mut { val });
+        return None;
+    }
     let s = CStr::from_ptr(cstr).to_str().ok().map(|s| s.to_string());
     duckdb_free(cstr as *mut _);
     duckdb_destroy_value(&mut { val });
@@ -89,7 +97,9 @@ unsafe fn read_named_varchar_imap(info: duckdb_bind_info, name: &str) -> Option<
 unsafe fn read_named_bigint_imap(info: duckdb_bind_info, name: &str) -> Option<i64> {
     let bind = BindInfo::new(info);
     let val = bind.get_named_parameter(name);
-    if val.is_null() { return None; }
+    if val.is_null() {
+        return None;
+    }
     let n = duckdb_get_int64(val);
     duckdb_destroy_value(&mut { val });
     Some(n)
@@ -98,25 +108,39 @@ unsafe fn read_named_bigint_imap(info: duckdb_bind_info, name: &str) -> Option<i
 unsafe extern "C" fn imap_list_init(info: duckdb_init_info) {
     FfiInitData::<ImapListInitData>::set(
         info,
-        ImapListInitData { messages: vec![], idx: 0, fetched: false },
+        ImapListInitData {
+            messages: vec![],
+            idx: 0,
+            fetched: false,
+        },
     );
 }
 
 unsafe extern "C" fn imap_list_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
     let bind_data = match FfiBindData::<ImapListBindData>::get_from_function(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
     let init_data = match FfiInitData::<ImapListInitData>::get_mut(info) {
         Some(d) => d,
-        None => { duckdb_data_chunk_set_size(output, 0); return; }
+        None => {
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
     };
 
     if !init_data.fetched {
         init_data.fetched = true;
         let result = imap::list_messages(
-            &bind_data.url, &bind_data.username, &bind_data.password,
-            &bind_data.mailbox, &bind_data.search, bind_data.limit,
+            &bind_data.url,
+            &bind_data.username,
+            &bind_data.password,
+            &bind_data.mailbox,
+            &bind_data.search,
+            bind_data.limit,
         );
         if !result.success {
             let fi = FunctionInfo::new(info);

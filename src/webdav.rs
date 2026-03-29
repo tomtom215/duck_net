@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use crate::http::{self, HttpResponse, Method};
 
 /// A file/directory entry returned by WebDAV PROPFIND.
@@ -11,7 +14,11 @@ pub struct WebDavEntry {
 }
 
 /// List directory contents via WebDAV PROPFIND.
-pub fn list(url: &str, headers: &[(String, String)], depth: &str) -> Result<Vec<WebDavEntry>, String> {
+pub fn list(
+    url: &str,
+    headers: &[(String, String)],
+    depth: &str,
+) -> Result<Vec<WebDavEntry>, String> {
     let propfind_body = r#"<?xml version="1.0" encoding="UTF-8"?>
 <d:propfind xmlns:d="DAV:">
   <d:prop>
@@ -30,10 +37,7 @@ pub fn list(url: &str, headers: &[(String, String)], depth: &str) -> Result<Vec<
     let resp = execute_propfind(url, &all_headers, propfind_body);
 
     if resp.status != 207 && resp.status != 200 {
-        return Err(format!(
-            "PROPFIND failed: {} {}",
-            resp.status, resp.reason
-        ));
+        return Err(format!("PROPFIND failed: {} {}", resp.status, resp.reason));
     }
 
     Ok(parse_multistatus(&resp.body))
@@ -83,8 +87,7 @@ fn parse_multistatus(xml: &str) -> Vec<WebDavEntry> {
 
     for chunk in response_chunks {
         let href = extract_xml_text(&chunk, "href").unwrap_or_default();
-        let name = extract_xml_text(&chunk, "displayname")
-            .unwrap_or_else(|| href_to_name(&href));
+        let name = extract_xml_text(&chunk, "displayname").unwrap_or_else(|| href_to_name(&href));
         let content_type = extract_xml_text(&chunk, "getcontenttype").unwrap_or_default();
         let size_str = extract_xml_text(&chunk, "getcontentlength").unwrap_or_default();
         let size = size_str.parse::<i64>().unwrap_or(0);
@@ -175,9 +178,5 @@ fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
 /// Extract a filename from an href path.
 fn href_to_name(href: &str) -> String {
     let trimmed = href.trim_end_matches('/');
-    trimmed
-        .rsplit('/')
-        .next()
-        .unwrap_or(trimmed)
-        .to_string()
+    trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
 }
