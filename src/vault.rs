@@ -181,16 +181,14 @@ fn extract_raw_value<'a>(json: &'a str, key: &str) -> Option<&'a str> {
                         if bytes[i] == b'"' {
                             in_string = false;
                         }
-                    } else {
-                        if bytes[i] == b'"' {
-                            in_string = true;
-                        } else if bytes[i] == open {
-                            depth += 1;
-                        } else if bytes[i] == close {
-                            depth -= 1;
-                            if depth == 0 {
-                                return Some(&json[value_start..value_start + i + 1]);
-                            }
+                    } else if bytes[i] == b'"' {
+                        in_string = true;
+                    } else if bytes[i] == open {
+                        depth += 1;
+                    } else if bytes[i] == close {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(&json[value_start..value_start + i + 1]);
                         }
                     }
                     i += 1;
@@ -248,10 +246,7 @@ pub fn read(url: &str, token: &str, path: &str) -> VaultResult {
 
     let api_url = format!("{}/v1/{}", url.trim_end_matches('/'), path);
 
-    let headers = vec![(
-        "X-Vault-Token".to_string(),
-        token.to_string(),
-    )];
+    let headers = vec![("X-Vault-Token".to_string(), token.to_string())];
 
     let resp = http::execute(Method::Get, &api_url, &headers, None);
 
@@ -368,10 +363,7 @@ pub fn list(url: &str, token: &str, path: &str) -> VaultResult {
 
     let api_url = format!("{}/v1/{}", url.trim_end_matches('/'), path);
 
-    let headers = vec![(
-        "X-Vault-Token".to_string(),
-        token.to_string(),
-    )];
+    let headers = vec![("X-Vault-Token".to_string(), token.to_string())];
 
     // Vault's LIST method is not in the standard Method enum.  Use the raw
     // method helper which accepts an arbitrary method string.

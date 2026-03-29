@@ -35,14 +35,12 @@ pub struct ImapFetchResult {
 /// Parse an IMAP URL into (host, port, use_tls).
 fn parse_imap_url(url: &str) -> Result<(String, u16, bool), String> {
     let lower = url.to_ascii_lowercase();
-    let (use_tls, rest) = if let Some(_) = lower.strip_prefix("imaps://") {
+    let (use_tls, rest) = if lower.strip_prefix("imaps://").is_some() {
         (true, &url[8..])
-    } else if let Some(_) = lower.strip_prefix("imap://") {
+    } else if lower.strip_prefix("imap://").is_some() {
         (false, &url[7..])
     } else {
-        return Err(format!(
-            "Invalid IMAP URL scheme: expected imap:// or imaps://"
-        ));
+        return Err("Invalid IMAP URL scheme: expected imap:// or imaps://".to_string());
     };
 
     let host_port = rest.split('/').next().unwrap_or(rest);
@@ -492,17 +490,11 @@ fn move_message_inner(
     session.command(&format!("SELECT \"{}\"", imap_escape(mailbox)))?;
 
     // Try MOVE first
-    let move_result = session.command(&format!(
-        "MOVE {uid} \"{}\"",
-        imap_escape(dest_mailbox)
-    ));
+    let move_result = session.command(&format!("MOVE {uid} \"{}\"", imap_escape(dest_mailbox)));
 
     if move_result.is_err() {
         // Fall back to COPY + STORE \Deleted + EXPUNGE
-        session.command(&format!(
-            "COPY {uid} \"{}\"",
-            imap_escape(dest_mailbox)
-        ))?;
+        session.command(&format!("COPY {uid} \"{}\"", imap_escape(dest_mailbox)))?;
         session.command(&format!("STORE {uid} +FLAGS (\\Deleted)"))?;
         session.command("EXPUNGE")?;
     }

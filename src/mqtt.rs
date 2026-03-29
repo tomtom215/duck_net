@@ -322,10 +322,7 @@ fn read_puback(stream: &mut TcpStream, expected_id: u16) -> Result<(), String> {
 
     // Byte 0: packet type 0x40 (PUBACK)
     if buf[0] != 0x40 {
-        return Err(format!(
-            "Expected PUBACK, got packet type 0x{:02x}",
-            buf[0]
-        ));
+        return Err(format!("Expected PUBACK, got packet type 0x{:02x}", buf[0]));
     }
 
     // Byte 1: remaining length (should be 2)

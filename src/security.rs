@@ -41,7 +41,8 @@ fn is_private_ip(ip: &IpAddr) -> bool {
                 || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64 // 100.64.0.0/10 (CGN)
                 || v4.octets()[0] == 198 && (v4.octets()[1] & 0xFE) == 18 // 198.18.0.0/15 (benchmark)
                 || v4.is_documentation()   // 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
-                || v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0 // 192.0.0.0/24 (IETF)
+                || v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0
+            // 192.0.0.0/24 (IETF)
         }
         IpAddr::V6(v6) => {
             v6.is_loopback()     // ::1
@@ -51,7 +52,7 @@ fn is_private_ip(ip: &IpAddr) -> bool {
                 // Link-local (fe80::/10)
                 || (v6.segments()[0] & 0xFFC0) == 0xFE80
                 // IPv4-mapped addresses: check the embedded IPv4
-                || v6.to_ipv4_mapped().map_or(false, |v4| {
+                || v6.to_ipv4_mapped().is_some_and(|v4| {
                     is_private_ip(&IpAddr::V4(v4))
                 })
         }
@@ -69,7 +70,8 @@ pub fn validate_no_ssrf(url: &str) -> Result<(), String> {
     }
 
     // Extract hostname from URL
-    let host = extract_hostname(url).ok_or_else(|| "Cannot extract hostname from URL".to_string())?;
+    let host =
+        extract_hostname(url).ok_or_else(|| "Cannot extract hostname from URL".to_string())?;
 
     validate_no_ssrf_host(&host)
 }
@@ -273,18 +275,14 @@ pub fn validate_path_no_traversal(path: &str) -> Result<(), String> {
     // Check for directory traversal via path components
     for component in path.split('/') {
         if component == ".." {
-            return Err(
-                "Path traversal detected: '..' components are not allowed".to_string(),
-            );
+            return Err("Path traversal detected: '..' components are not allowed".to_string());
         }
     }
 
     // Also check backslash-separated paths (Windows-style)
     for component in path.split('\\') {
         if component == ".." {
-            return Err(
-                "Path traversal detected: '..' components are not allowed".to_string(),
-            );
+            return Err("Path traversal detected: '..' components are not allowed".to_string());
         }
     }
 
@@ -372,6 +370,190 @@ pub fn validate_credential_length(name: &str, value: &str, max_len: usize) -> Re
     }
     if value.contains('\0') {
         return Err(format!("{} must not contain null bytes", name));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// URL Length Validation (CWE-400)
+// ---------------------------------------------------------------------------
+
+/// Maximum URL length accepted by duck_net functions.
+pub const MAX_URL_LENGTH: usize = 65_536;
+
+/// Validate that a URL does not exceed the maximum length.
+pub fn validate_url_length(url: &str) -> Result<(), String> {
+    if url.len() > MAX_URL_LENGTH {
+        return Err(format!(
+            "URL exceeds maximum length of {} characters",
+            MAX_URL_LENGTH
+        ));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Port Validation
+// ---------------------------------------------------------------------------
+
+/// Validate that a port number is in a valid range (1-65535).
+#[allow(dead_code)]
+pub fn validate_port(port: u16) -> Result<(), String> {
+    if port == 0 {
+        return Err("Port must be between 1 and 65535".to_string());
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// LDAP Filter Escaping (CWE-90, RFC 4515)
+// ---------------------------------------------------------------------------
+
+/// Escape special characters in LDAP filter values per RFC 4515.
+///
+/// Characters that MUST be escaped: `*`, `(`, `)`, `\`, NUL.
+/// This prevents LDAP injection attacks (CWE-90).
+#[allow(dead_code)]
+pub fn ldap_escape_filter_value(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len() + 16);
+    for byte in value.bytes() {
+        match byte {
+            b'*' => escaped.push_str("\\2a"),
+            b'(' => escaped.push_str("\\28"),
+            b')' => escaped.push_str("\\29"),
+            b'\\' => escaped.push_str("\\5c"),
+            0x00 => escaped.push_str("\\00"),
+            _ => escaped.push(byte as char),
+        }
+    }
+    escaped
+}
+
+// ---------------------------------------------------------------------------
+// JSON String Escaping (CWE-116)
+// ---------------------------------------------------------------------------
+
+/// Escape a string for safe inclusion in a JSON string value.
+/// Handles all control characters per RFC 8259.
+pub fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 16);
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\x08' => out.push_str("\\b"),
+            '\x0C' => out.push_str("\\f"),
+            c if c < '\x20' => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// CalDAV/XML Timestamp Validation (CWE-91)
+// ---------------------------------------------------------------------------
+
+/// Validate an iCalendar timestamp format (ISO 8601 / RFC 3339 subset).
+///
+/// Accepts formats like: `20230101T000000Z` or `2023-01-01T00:00:00Z`.
+/// Rejects values containing XML-unsafe characters to prevent XML injection.
+pub fn validate_ical_timestamp(value: &str) -> Result<(), String> {
+    if value.is_empty() || value.len() > 32 {
+        return Err("Timestamp must be 1-32 characters".to_string());
+    }
+    // Only allow digits, T, Z, :, -, + (ISO 8601 characters)
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, 'T' | 'Z' | ':' | '-' | '+' | '.'))
+    {
+        return Err(format!(
+            "Invalid timestamp format: only ISO 8601 characters allowed, got '{}'",
+            value
+        ));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Cryptographic Random Bytes
+// ---------------------------------------------------------------------------
+
+/// Generate cryptographically secure random bytes using the OS entropy source.
+///
+/// Uses `getrandom` which calls the OS CSPRNG (e.g., /dev/urandom, CryptGenRandom).
+/// Falls back to a time-based seed ONLY if the OS source is unavailable
+/// (should never happen on modern systems).
+pub fn random_bytes<const N: usize>() -> [u8; N] {
+    let mut buf = [0u8; N];
+    if getrandom::fill(&mut buf).is_err() {
+        // Fallback: should never happen on supported platforms, but
+        // better than panicking in a database extension.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let mut state = now.as_nanos() as u64 ^ (std::process::id() as u64);
+        for byte in buf.iter_mut() {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            *byte = (state & 0xFF) as u8;
+        }
+    }
+    buf
+}
+
+/// Generate a random hex string of the specified byte length.
+///
+/// Uses cryptographically secure random bytes from the OS.
+pub fn random_hex(byte_count: usize) -> String {
+    let bytes = random_bytes_vec(byte_count);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Generate a Vec of cryptographically secure random bytes.
+fn random_bytes_vec(n: usize) -> Vec<u8> {
+    let mut buf = vec![0u8; n];
+    if getrandom::fill(&mut buf).is_err() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let mut state = now.as_nanos() as u64 ^ (std::process::id() as u64);
+        for byte in buf.iter_mut() {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            *byte = (state & 0xFF) as u8;
+        }
+    }
+    buf
+}
+
+// ---------------------------------------------------------------------------
+// Host Validation (shared across protocols)
+// ---------------------------------------------------------------------------
+
+/// Validate a hostname or IP address for safe use in network connections.
+///
+/// Allows: alphanumeric, dots, hyphens, colons (IPv6), brackets (IPv6).
+/// Rejects: empty, too long (>253), or containing other characters.
+pub fn validate_host(host: &str) -> Result<(), String> {
+    if host.is_empty() {
+        return Err("Hostname must not be empty".to_string());
+    }
+    if host.len() > 253 {
+        return Err("Hostname too long (max 253 characters)".to_string());
+    }
+    if !host
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+    {
+        return Err(format!("Hostname contains invalid characters: '{}'", host));
     }
     Ok(())
 }

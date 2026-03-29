@@ -85,19 +85,33 @@ pub fn discover(url: &str, headers: &[(String, String)]) -> Result<Vec<String>, 
 }
 
 fn build_calendar_query(start: Option<&str>, end: Option<&str>) -> String {
+    // Validate timestamp inputs to prevent XML injection (CWE-91)
     let time_range = match (start, end) {
-        (Some(s), Some(e)) => format!(
-            "\n    <c:filter>\n      <c:comp-filter name=\"VCALENDAR\">\n        \
-             <c:comp-filter name=\"VEVENT\">\n          \
-             <c:time-range start=\"{s}\" end=\"{e}\"/>\n        \
-             </c:comp-filter>\n      </c:comp-filter>\n    </c:filter>"
-        ),
-        (Some(s), None) => format!(
-            "\n    <c:filter>\n      <c:comp-filter name=\"VCALENDAR\">\n        \
-             <c:comp-filter name=\"VEVENT\">\n          \
-             <c:time-range start=\"{s}\"/>\n        \
-             </c:comp-filter>\n      </c:comp-filter>\n    </c:filter>"
-        ),
+        (Some(s), Some(e)) => {
+            if let Err(err) = crate::security::validate_ical_timestamp(s) {
+                return format!("<!-- ERROR: invalid start timestamp: {err} -->");
+            }
+            if let Err(err) = crate::security::validate_ical_timestamp(e) {
+                return format!("<!-- ERROR: invalid end timestamp: {err} -->");
+            }
+            format!(
+                "\n    <c:filter>\n      <c:comp-filter name=\"VCALENDAR\">\n        \
+                 <c:comp-filter name=\"VEVENT\">\n          \
+                 <c:time-range start=\"{s}\" end=\"{e}\"/>\n        \
+                 </c:comp-filter>\n      </c:comp-filter>\n    </c:filter>"
+            )
+        }
+        (Some(s), None) => {
+            if let Err(err) = crate::security::validate_ical_timestamp(s) {
+                return format!("<!-- ERROR: invalid start timestamp: {err} -->");
+            }
+            format!(
+                "\n    <c:filter>\n      <c:comp-filter name=\"VCALENDAR\">\n        \
+                 <c:comp-filter name=\"VEVENT\">\n          \
+                 <c:time-range start=\"{s}\"/>\n        \
+                 </c:comp-filter>\n      </c:comp-filter>\n    </c:filter>"
+            )
+        }
         _ => String::from(
             "\n    <c:filter>\n      <c:comp-filter name=\"VCALENDAR\"/>\n    </c:filter>",
         ),

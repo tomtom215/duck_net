@@ -27,10 +27,12 @@ fn validate_url(url: &str) -> Result<(), String> {
     }
 
     // Convert ws:// to http:// for SSRF hostname checking
-    let http_url = if url.starts_with("wss://") {
-        format!("https://{}", &url[6..])
+    let http_url = if let Some(rest) = url.strip_prefix("wss://") {
+        format!("https://{rest}")
+    } else if let Some(rest) = url.strip_prefix("ws://") {
+        format!("http://{rest}")
     } else {
-        format!("http://{}", &url[5..])
+        url.to_string()
     };
     crate::security::validate_no_ssrf(&http_url)?;
 
@@ -267,14 +269,11 @@ fn multi_request_inner(
         // Check deadline before sending
         if std::time::Instant::now() > deadline {
             let _ = socket.close(None);
-            return Err((
-                responses,
-                format!("Timed out before sending message {i}"),
-            ));
+            return Err((responses, format!("Timed out before sending message {i}")));
         }
 
         // Send the message
-        if let Err(e) = socket.send(Message::Text(msg.clone().into())) {
+        if let Err(e) = socket.send(Message::Text(msg.clone())) {
             let _ = socket.close(None);
             return Err((
                 responses,
@@ -298,10 +297,7 @@ fn multi_request_inner(
                         let _ = socket.close(None);
                         return Err((
                             responses,
-                            format!(
-                                "Response to message {i} too large: {} bytes",
-                                text.len()
-                            ),
+                            format!("Response to message {i} too large: {} bytes", text.len()),
                         ));
                     }
                     break text;
@@ -311,10 +307,7 @@ fn multi_request_inner(
                         let _ = socket.close(None);
                         return Err((
                             responses,
-                            format!(
-                                "Response to message {i} too large: {} bytes",
-                                data.len()
-                            ),
+                            format!("Response to message {i} too large: {} bytes", data.len()),
                         ));
                     }
                     break String::from_utf8_lossy(&data).to_string();

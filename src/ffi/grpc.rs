@@ -22,7 +22,10 @@ fn grpc_result_type() -> LogicalType {
 fn grpc_reflection_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),
-        ("services", LogicalType::list_from_logical(&LogicalType::new(TypeId::Varchar))),
+        (
+            "services",
+            LogicalType::list_from_logical(&LogicalType::new(TypeId::Varchar)),
+        ),
         ("message", LogicalType::new(TypeId::Varchar)),
     ])
 }

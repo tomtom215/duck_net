@@ -134,6 +134,57 @@ Fire-and-forget email sending from SQL. Useful for alerting on query results.
 | **STUN** | `stun_lookup(server)` | Public IP/port discovery. One UDP round-trip (RFC 5389) |
 | **BGP Looking Glass** | `bgp_route(prefix)`, `bgp_prefix_overview`, `bgp_asn_info` | Network routing analysis via RIPE RIS public API |
 
+## v0.3.1 — Security Audit & Hardening
+
+Comprehensive security audit and hardening pass across all 49+ protocol implementations.
+
+### Security Fixes
+
+| Issue | Fix | CWE |
+|-------|-----|-----|
+| **Weak PRNG in RADIUS/SIP** | Replaced time-based xorshift with OS CSPRNG (`getrandom`) | CWE-338 |
+| **CalDAV XML injection** | ISO 8601 timestamp validation before XML interpolation | CWE-91 |
+| **NATS JSON injection** | Proper RFC 8259 JSON escaping for credentials in CONNECT payload | CWE-116 |
+| **Redis stack overflow** | Depth-limited RESP array parsing (max 8 levels, 100K elements) | CWE-674 |
+| **OCSP buffer overread** | Bounds-checked slice access in all DER/ASN.1 parsing | CWE-125 |
+| **Missing SSRF in AMQP** | Added `validate_no_ssrf()` to AMQP connection | CWE-918 |
+| **Missing SSRF in Kafka** | Added per-broker SSRF validation | CWE-918 |
+| **Missing SSRF in ZeroMQ** | Added `validate_no_ssrf_host()` to ZMQ connections | CWE-918 |
+| **Missing SSRF in SIP** | Added SSRF + host validation to SIP OPTIONS | CWE-918 |
+| **Missing SSRF in OCSP** | Added SSRF validation before TLS connection | CWE-918 |
+| **Missing SSRF in RADIUS** | Added SSRF validation before UDP connection | CWE-918 |
+| **SNMP community length** | Added max 255 character limit with null byte rejection | CWE-400 |
+| **Kafka topic validation** | Added name length limit (1-249) and null byte check | - |
+
+### New Security Features
+
+| Feature | Description |
+|---------|-------------|
+| **LDAP filter escaping** | `security::ldap_escape_filter_value()` per RFC 4515 |
+| **URL length validation** | `security::validate_url_length()` — max 64KB |
+| **Port validation** | `security::validate_port()` — 1-65535 |
+| **Host validation** | `security::validate_host()` — shared across protocols |
+| **JSON escaping** | `security::json_escape()` — RFC 8259 compliant |
+| **Cryptographic RNG** | `security::random_bytes()` / `random_hex()` — OS CSPRNG |
+
+### Secrets Manager Expansion
+
+New secrets-aware protocol functions:
+
+| Function | Description |
+|----------|-------------|
+| `redis_get_secret(secret, key)` | Redis GET with stored password |
+| `redis_set_secret(secret, key, value)` | Redis SET with stored password |
+| `ldap_search_secret(secret, url, base, filter, attrs)` | LDAP search with stored bind credentials |
+
+### DuckDB Secrets Manager Compatibility
+
+duck_net's secrets manager uses the same key names as DuckDB's native `CREATE SECRET`:
+- S3: `KEY_ID`, `SECRET`, `REGION`, `ENDPOINT`
+- HTTP: `BEARER_TOKEN`, `EXTRA_HTTP_HEADERS`
+
+For S3/HTTP/GCS, users should prefer DuckDB's native secrets. duck_net covers protocols DuckDB doesn't natively support.
+
 ## Rejected Protocols
 
 | Protocol | Reason |

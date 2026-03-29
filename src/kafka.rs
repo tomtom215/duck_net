@@ -42,6 +42,37 @@ async fn produce_async(
         };
     }
 
+    // SSRF protection: validate all broker hosts (CWE-918)
+    for broker in &broker_list {
+        let host = broker.split(':').next().unwrap_or(broker);
+        if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+            return KafkaProduceResult {
+                success: false,
+                partition: -1,
+                offset: -1,
+                message: e,
+            };
+        }
+    }
+
+    // Validate topic name
+    if topic.is_empty() || topic.len() > 249 {
+        return KafkaProduceResult {
+            success: false,
+            partition: -1,
+            offset: -1,
+            message: "Topic name must be 1-249 characters".to_string(),
+        };
+    }
+    if topic.contains('\0') {
+        return KafkaProduceResult {
+            success: false,
+            partition: -1,
+            offset: -1,
+            message: "Topic name must not contain null bytes".to_string(),
+        };
+    }
+
     let client = match ClientBuilder::new(broker_list).build().await {
         Ok(c) => c,
         Err(e) => {

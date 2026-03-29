@@ -87,6 +87,16 @@ pub fn auth(host: &str, port: u16, secret: &str, username: &str, password: &str)
         };
     }
 
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return RadiusResult {
+            success: false,
+            code: -1,
+            code_name: String::new(),
+            message: e,
+        };
+    }
+
     match auth_inner(host, port, secret, username, password) {
         Ok(r) => r,
         Err(e) => RadiusResult {
@@ -118,11 +128,11 @@ fn auth_inner(
 
     let addr = format!("{host}:{port}");
 
-    // Generate random authenticator (16 bytes)
-    let authenticator = random_bytes::<16>();
+    // Generate cryptographically secure random authenticator (16 bytes)
+    let authenticator = crate::security::random_bytes::<16>();
 
     // Generate random identifier
-    let identifier = random_bytes::<1>()[0];
+    let identifier = crate::security::random_bytes::<1>()[0];
 
     // Build Access-Request packet
     let mut attributes = Vec::new();
@@ -258,27 +268,4 @@ fn add_attribute(buf: &mut Vec<u8>, attr_type: u8, value: &[u8]) {
     buf.push(attr_type);
     buf.push(length as u8);
     buf.extend_from_slice(value);
-}
-
-/// Generate random bytes using system time + process info as entropy source.
-/// Not cryptographically secure, but sufficient for RADIUS authenticators
-/// where the shared secret provides the actual security.
-fn random_bytes<const N: usize>() -> [u8; N] {
-    let mut bytes = [0u8; N];
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let seed = now.as_nanos() as u64;
-    let pid = std::process::id() as u64;
-
-    // Simple xorshift-based PRNG seeded with time + pid
-    let mut state = seed ^ (pid << 32) ^ (pid >> 32);
-    for byte in bytes.iter_mut() {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        *byte = (state & 0xFF) as u8;
-    }
-
-    bytes
 }

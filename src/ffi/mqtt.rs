@@ -61,7 +61,8 @@ unsafe extern "C" fn cb_mqtt_publish_qos1(
         let topic = topic_reader.read_str(row as usize);
         let payload = payload_reader.read_str(row as usize);
 
-        let retain_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 3)) as *const bool;
+        let retain_data =
+            duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 3)) as *const bool;
         let retain = *retain_data.add(row as usize);
 
         let result = mqtt::publish_qos1(broker, topic, payload, retain);
@@ -86,7 +87,10 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
 
     // mqtt_publish_qos1(broker, topic, payload, retain) -> STRUCT
     ScalarFunctionBuilder::new("mqtt_publish_qos1")
-        .param(v).param(v).param(v).param(TypeId::Boolean)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(TypeId::Boolean)
         .returns_logical(mqtt_result_type())
         .function(cb_mqtt_publish_qos1)
         .null_handling(NullHandling::SpecialNullHandling)

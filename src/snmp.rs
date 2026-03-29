@@ -16,6 +16,7 @@ pub struct SnmpResult {
 
 /// Perform an SNMP GET request (SNMPv2c).
 pub fn get(host: &str, oid: &str, community: &str) -> Result<SnmpResult, String> {
+    validate_community(community)?;
     let request = build_get_request(oid, community)?;
     let response = send_udp(host, SNMP_PORT, &request)?;
     parse_response(&response).and_then(|results| {
@@ -26,6 +27,20 @@ pub fn get(host: &str, oid: &str, community: &str) -> Result<SnmpResult, String>
     })
 }
 
+/// Validate SNMP community string length and content.
+fn validate_community(community: &str) -> Result<(), String> {
+    if community.is_empty() {
+        return Err("Community string must not be empty".to_string());
+    }
+    if community.len() > 255 {
+        return Err("Community string too long (max 255 characters)".to_string());
+    }
+    if community.contains('\0') {
+        return Err("Community string must not contain null bytes".to_string());
+    }
+    Ok(())
+}
+
 /// Perform an SNMP WALK (repeated GET-NEXT) starting from an OID.
 pub fn walk(
     host: &str,
@@ -33,6 +48,7 @@ pub fn walk(
     community: &str,
     max_entries: usize,
 ) -> Result<Vec<SnmpResult>, String> {
+    validate_community(community)?;
     let base_oid = oid;
     let mut current_oid = oid.to_string();
     let mut results = Vec::new();
@@ -156,7 +172,7 @@ fn encode_integer(value: i64) -> Vec<u8> {
             v >>= 8;
         }
         // Add leading zero if high bit set
-        if bytes.last().map_or(false, |b| b & 0x80 != 0) {
+        if bytes.last().is_some_and(|b| b & 0x80 != 0) {
             bytes.push(0);
         }
         bytes.reverse();
