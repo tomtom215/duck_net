@@ -541,95 +541,73 @@ fn vault_result_type() -> LogicalType {
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
-    // duck_net_secrets() table function - lists all secrets (redacted)
+    // duck_net_secrets() table function
     TableFunctionBuilder::new("duck_net_secrets")
         .bind(secrets_list_bind)
         .init(secrets_list_init)
         .scan(secrets_list_scan)
         .register(con)?;
 
-    // S3 with secrets
+    let redis_kv_type = || {
+        LogicalType::struct_type_from_logical(&[
+            ("success", LogicalType::new(TypeId::Boolean)),
+            ("value", LogicalType::new(TypeId::Varchar)),
+        ])
+    };
+
+    // S3
     ScalarFunctionBuilder::new("s3_get_secret")
-        .param(v) // secret_name
-        .param(v) // bucket
-        .param(v) // key
+        .param(v).param(v).param(v)
         .returns_logical(s3_result_type())
         .function(cb_s3_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
     ScalarFunctionBuilder::new("s3_put_secret")
-        .param(v) // secret_name
-        .param(v) // bucket
-        .param(v) // key
-        .param(v) // body
+        .param(v).param(v).param(v).param(v)
         .returns_logical(s3_result_type())
         .function(cb_s3_put_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
     ScalarFunctionBuilder::new("s3_list_secret")
-        .param(v) // secret_name
-        .param(v) // bucket
-        .param(v) // prefix
+        .param(v).param(v).param(v)
         .returns_logical(s3_list_result_type())
         .function(cb_s3_list_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 
-    // SMTP with secrets
+    // SMTP
     ScalarFunctionBuilder::new("smtp_send_secret")
-        .param(v) // secret_name
-        .param(v) // from
-        .param(v) // to
-        .param(v) // subject
-        .param(v) // body
+        .param(v).param(v).param(v).param(v).param(v)
         .returns_logical(smtp_secret_result_type())
         .function(cb_smtp_send_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 
-    // Vault with secrets
+    // Vault
     ScalarFunctionBuilder::new("vault_read_secret")
-        .param(v) // secret_name (for vault token)
-        .param(v) // vault_url
-        .param(v) // path
+        .param(v).param(v).param(v)
         .returns_logical(vault_result_type())
         .function(cb_vault_read_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 
-    // Redis with secrets (password from secret store)
+    // Redis
     ScalarFunctionBuilder::new("redis_get_secret")
-        .param(v) // secret_name
-        .param(v) // key
-        .returns_logical(LogicalType::struct_type_from_logical(&[
-            ("success", LogicalType::new(TypeId::Boolean)),
-            ("value", LogicalType::new(TypeId::Varchar)),
-        ]))
+        .param(v).param(v)
+        .returns_logical(redis_kv_type())
         .function(cb_redis_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
     ScalarFunctionBuilder::new("redis_set_secret")
-        .param(v) // secret_name
-        .param(v) // key
-        .param(v) // value
-        .returns_logical(LogicalType::struct_type_from_logical(&[
-            ("success", LogicalType::new(TypeId::Boolean)),
-            ("value", LogicalType::new(TypeId::Varchar)),
-        ]))
+        .param(v).param(v).param(v)
+        .returns_logical(redis_kv_type())
         .function(cb_redis_set_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 
-    // LDAP with secrets (bind credentials from secret store)
+    // LDAP
     ScalarFunctionBuilder::new("ldap_search_secret")
-        .param(v) // secret_name
-        .param(v) // url
-        .param(v) // base_dn
-        .param(v) // filter
-        .param(v) // attributes (comma-separated)
+        .param(v).param(v).param(v).param(v).param(v)
         .returns(TypeId::Varchar)
         .function(cb_ldap_search_secret)
         .null_handling(NullHandling::SpecialNullHandling)
