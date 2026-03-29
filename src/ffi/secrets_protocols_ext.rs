@@ -104,81 +104,6 @@ fn build_redis_url(secret_name: &str) -> Result<String, String> {
 }
 
 // ---------------------------------------------------------------------------
-// Secrets-Aware LDAP Overload
-// ---------------------------------------------------------------------------
-
-/// ldap_search_secret(secret_name, url, base_dn, filter, attributes) -> VARCHAR
-unsafe extern "C" fn cb_ldap_search_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let secret_reader = VectorReader::new(input, 0);
-    let url_reader = VectorReader::new(input, 1);
-    let base_reader = VectorReader::new(input, 2);
-    let filter_reader = VectorReader::new(input, 3);
-    let attrs_reader = VectorReader::new(input, 4);
-
-    for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row as usize);
-        let url = url_reader.read_str(row as usize);
-        let base_dn = base_reader.read_str(row as usize);
-        let filter = filter_reader.read_str(row as usize);
-        let attrs_str = attrs_reader.read_str(row as usize);
-
-        let msg = match crate::secrets_resolve::resolve_credentials(secret_name) {
-            Ok((Some(user), Some(pass))) => {
-                // First bind, then search
-                let bind_result = crate::ldap::bind(url, &user, &pass);
-                if !bind_result.success {
-                    security::scrub_error(&bind_result.message)
-                } else {
-                    let attr_vec: Vec<&str> = attrs_str.split(',').map(|s| s.trim()).collect();
-                    let result = crate::ldap::search(url, base_dn, filter, &attr_vec);
-                    if result.success {
-                        // Format entries as JSON
-                        let entries_json: Vec<String> = result
-                            .entries
-                            .iter()
-                            .map(|e| {
-                                let attrs: Vec<String> = e
-                                    .attributes
-                                    .iter()
-                                    .map(|(k, vals)| {
-                                        let v_json = vals
-                                            .iter()
-                                            .map(|v| format!("\"{}\"", security::json_escape(v)))
-                                            .collect::<Vec<_>>()
-                                            .join(",");
-                                        format!("\"{}\":[{}]", security::json_escape(k), v_json)
-                                    })
-                                    .collect();
-                                format!(
-                                    "{{\"dn\":\"{}\",{}}}",
-                                    security::json_escape(&e.dn),
-                                    attrs.join(",")
-                                )
-                            })
-                            .collect();
-                        format!("[{}]", entries_json.join(","))
-                    } else {
-                        security::scrub_error(&result.message)
-                    }
-                }
-            }
-            Ok(_) => format!(
-                "Secret '{}' must have 'username' and 'password'",
-                secret_name
-            ),
-            Err(e) => e,
-        };
-
-        write_varchar(output, row, &msg);
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Secrets-Aware S3 Overloads
 // ---------------------------------------------------------------------------
 
@@ -557,19 +482,26 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
 
     // S3
     ScalarFunctionBuilder::new("s3_get_secret")
-        .param(v).param(v).param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(s3_result_type())
         .function(cb_s3_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
     ScalarFunctionBuilder::new("s3_put_secret")
-        .param(v).param(v).param(v).param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(s3_result_type())
         .function(cb_s3_put_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
     ScalarFunctionBuilder::new("s3_list_secret")
-        .param(v).param(v).param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(s3_list_result_type())
         .function(cb_s3_list_secret)
         .null_handling(NullHandling::SpecialNullHandling)
@@ -577,7 +509,11 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
 
     // SMTP
     ScalarFunctionBuilder::new("smtp_send_secret")
-        .param(v).param(v).param(v).param(v).param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(smtp_secret_result_type())
         .function(cb_smtp_send_secret)
         .null_handling(NullHandling::SpecialNullHandling)
@@ -585,7 +521,9 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
 
     // Vault
     ScalarFunctionBuilder::new("vault_read_secret")
-        .param(v).param(v).param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(vault_result_type())
         .function(cb_vault_read_secret)
         .null_handling(NullHandling::SpecialNullHandling)
@@ -593,23 +531,18 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
 
     // Redis
     ScalarFunctionBuilder::new("redis_get_secret")
-        .param(v).param(v)
+        .param(v)
+        .param(v)
         .returns_logical(redis_kv_type())
         .function(cb_redis_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
     ScalarFunctionBuilder::new("redis_set_secret")
-        .param(v).param(v).param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(redis_kv_type())
         .function(cb_redis_set_secret)
-        .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
-
-    // LDAP
-    ScalarFunctionBuilder::new("ldap_search_secret")
-        .param(v).param(v).param(v).param(v).param(v)
-        .returns(TypeId::Varchar)
-        .function(cb_ldap_search_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 
