@@ -2,10 +2,14 @@
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
 //! Protocol-specific secrets-aware FFI overloads (SSH, Consul, InfluxDB, HTTP,
-//! SNMP, RADIUS, IMAP, Redis, LDAP) and the secrets list table function.
+//! SNMP, RADIUS, IMAP, LDAP). See also `secrets_protocols_ext` for the
+//! remaining overloads (Redis, S3, SMTP, Vault) and the secrets list table.
 
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
+
+use crate::secrets;
+use crate::security;
 
 use super::scalars::write_varchar;
 
