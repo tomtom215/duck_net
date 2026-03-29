@@ -278,10 +278,6 @@ unsafe extern "C" fn cb_snmp_get_secret(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Secrets-Aware RADIUS Overload
-// ---------------------------------------------------------------------------
-
 /// radius_auth_secret(secret_name, host, username, password) -> STRUCT(success, message)
 unsafe extern "C" fn cb_radius_auth_secret(
     _info: duckdb_function_info,
@@ -316,10 +312,6 @@ unsafe extern "C" fn cb_radius_auth_secret(
         write_varchar(message_vec, row, &message);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Secrets-Aware IMAP Overload
-// ---------------------------------------------------------------------------
 
 /// imap_fetch_secret(secret_name, url, mailbox, uid) -> STRUCT(success, body, message)
 unsafe extern "C" fn cb_imap_fetch_secret(
@@ -367,10 +359,6 @@ unsafe extern "C" fn cb_imap_fetch_secret(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Secrets-Aware LDAP Overload
-// ---------------------------------------------------------------------------
-
 /// ldap_search_secret(secret_name, url, base_dn, filter, attributes) -> VARCHAR
 unsafe extern "C" fn cb_ldap_search_secret(
     _info: duckdb_function_info,
@@ -396,7 +384,7 @@ unsafe extern "C" fn cb_ldap_search_secret(
                 // First bind, then search
                 let bind_result = crate::ldap::bind(url, &user, &pass);
                 if !bind_result.success {
-                    crate::security::scrub_error(&bind_result.message)
+                    security::scrub_error(&bind_result.message)
                 } else {
                     let attr_vec: Vec<&str> = attrs_str.split(',').map(|s| s.trim()).collect();
                     let result = crate::ldap::search(url, base_dn, filter, &attr_vec);
@@ -412,28 +400,22 @@ unsafe extern "C" fn cb_ldap_search_secret(
                                     .map(|(k, vals)| {
                                         let v_json = vals
                                             .iter()
-                                            .map(|v| {
-                                                format!("\"{}\"", crate::security::json_escape(v))
-                                            })
+                                            .map(|v| format!("\"{}\"", security::json_escape(v)))
                                             .collect::<Vec<_>>()
                                             .join(",");
-                                        format!(
-                                            "\"{}\":[{}]",
-                                            crate::security::json_escape(k),
-                                            v_json
-                                        )
+                                        format!("\"{}\":[{}]", security::json_escape(k), v_json)
                                     })
                                     .collect();
                                 format!(
                                     "{{\"dn\":\"{}\",{}}}",
-                                    crate::security::json_escape(&e.dn),
+                                    security::json_escape(&e.dn),
                                     attrs.join(",")
                                 )
                             })
                             .collect();
                         format!("[{}]", entries_json.join(","))
                     } else {
-                        crate::security::scrub_error(&result.message)
+                        security::scrub_error(&result.message)
                     }
                 }
             }
@@ -448,9 +430,7 @@ unsafe extern "C" fn cb_ldap_search_secret(
     }
 }
 
-// ---------------------------------------------------------------------------
 // Registration
-// ---------------------------------------------------------------------------
 
 fn success_message_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
