@@ -62,7 +62,7 @@ pub fn get_retry_statuses() -> Vec<u16> {
     GLOBAL_RETRY_STATUSES.lock().unwrap().clone()
 }
 
-static AGENT: LazyLock<Agent> = LazyLock::new(|| {
+pub static AGENT: LazyLock<Agent> = LazyLock::new(|| {
     // Use the platform's native certificate verifier so we trust the OS CA store.
     // This is critical for environments with corporate proxies or custom CAs.
     let tls = TlsConfig::builder()
@@ -176,6 +176,83 @@ fn read_body_limited(body: &mut ureq::Body) -> Result<String, String> {
         .read_to_end(&mut buf)
         .map_err(|e| format!("Failed to read response body: {e}"))?;
     String::from_utf8(buf).map_err(|e| format!("Response body is not valid UTF-8: {e}"))
+}
+
+/// Execute an arbitrary HTTP method (for WebDAV PROPFIND/MKCOL/REPORT etc).
+pub fn execute_raw_method(
+    method_str: &str,
+    url: &str,
+    headers: &[(String, String)],
+    body: Option<&str>,
+) -> HttpResponse {
+    crate::rate_limit::acquire_for_url(url);
+
+    if let Err(msg) = validate_url(url) {
+        return HttpResponse {
+            status: 0,
+            reason: msg,
+            headers: vec![],
+            body: String::new(),
+        };
+    }
+
+    // Build an http::Request with the custom method and pass it to Agent::run()
+    let mut builder = ureq::http::Request::builder()
+        .method(method_str)
+        .uri(url);
+
+    for (key, value) in headers {
+        builder = builder.header(key.as_str(), value.as_str());
+    }
+
+    let request = match builder.body(body.unwrap_or("").to_string()) {
+        Ok(r) => r,
+        Err(e) => {
+            return HttpResponse {
+                status: 0,
+                reason: format!("Invalid request: {e}"),
+                headers: vec![],
+                body: String::new(),
+            };
+        }
+    };
+
+    match AGENT.run(request) {
+        Ok(mut response) => {
+            let status = response.status().as_u16();
+            let reason = response
+                .status()
+                .canonical_reason()
+                .unwrap_or("")
+                .to_string();
+            let resp_headers: Vec<(String, String)> = response
+                .headers()
+                .iter()
+                .map(|(name, value)| {
+                    let (name, value): (&ureq::http::HeaderName, &ureq::http::HeaderValue) =
+                        (name, value);
+                    (
+                        name.as_str().to_string(),
+                        value.to_str().unwrap_or("").to_string(),
+                    )
+                })
+                .collect();
+            let resp_body = read_body_limited(response.body_mut())
+                .unwrap_or_else(|e| format!("[body read error: {e}]"));
+            HttpResponse {
+                status,
+                reason,
+                headers: resp_headers,
+                body: resp_body,
+            }
+        }
+        Err(e) => HttpResponse {
+            status: 0,
+            reason: format!("Request failed: {e}"),
+            headers: vec![],
+            body: String::new(),
+        },
+    }
 }
 
 pub fn execute(
