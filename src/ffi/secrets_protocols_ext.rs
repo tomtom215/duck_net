@@ -8,7 +8,6 @@ use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::secrets;
-use crate::security;
 
 use super::scalars::write_varchar;
 
@@ -22,16 +21,17 @@ unsafe extern "C" fn cb_redis_get_secret(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let secret_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let secret_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let value_vec = duckdb_struct_vector_get_child(output, 1);
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
+        let secret_name = secret_reader.read_str(row);
+        let key = key_reader.read_str(row);
 
         let result = match build_redis_url(secret_name) {
             Ok(url) => crate::redis_client::get(&url, key),
@@ -41,8 +41,7 @@ unsafe extern "C" fn cb_redis_get_secret(
             },
         };
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(value_vec, row, &result.value);
     }
 }
@@ -53,18 +52,19 @@ unsafe extern "C" fn cb_redis_set_secret(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let secret_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let val_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let secret_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let val_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let value_vec = duckdb_struct_vector_get_child(output, 1);
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let value = val_reader.read_str(row as usize);
+        let secret_name = secret_reader.read_str(row);
+        let key = key_reader.read_str(row);
+        let value = val_reader.read_str(row);
 
         let result = match build_redis_url(secret_name) {
             Ok(url) => crate::redis_client::set(&url, key, value),
@@ -74,8 +74,7 @@ unsafe extern "C" fn cb_redis_set_secret(
             },
         };
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(value_vec, row, &result.value);
     }
 }
@@ -113,20 +112,21 @@ unsafe extern "C" fn cb_s3_get_secret(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let secret_reader = VectorReader::new(input, 0);
-    let bucket_reader = VectorReader::new(input, 1);
-    let key_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let secret_reader = chunk.reader(0);
+    let bucket_reader = chunk.reader(1);
+    let key_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let status_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut status_w = StructVector::field_writer(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row as usize);
-        let bucket = bucket_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
+        let secret_name = secret_reader.read_str(row);
+        let bucket = bucket_reader.read_str(row);
+        let key = key_reader.read_str(row);
 
         let result = match crate::secrets_resolve::resolve_s3(secret_name) {
             Ok((endpoint, access_key, secret_key, region)) => {
@@ -140,11 +140,9 @@ unsafe extern "C" fn cb_s3_get_secret(
             },
         };
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(body_vec, row, &result.body);
-        let st = duckdb_vector_get_data(status_vec) as *mut i32;
-        *st.add(row as usize) = result.status;
+        status_w.write_i32(row, result.status);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -155,22 +153,23 @@ unsafe extern "C" fn cb_s3_put_secret(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let secret_reader = VectorReader::new(input, 0);
-    let bucket_reader = VectorReader::new(input, 1);
-    let key_reader = VectorReader::new(input, 2);
-    let body_reader = VectorReader::new(input, 3);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let secret_reader = chunk.reader(0);
+    let bucket_reader = chunk.reader(1);
+    let key_reader = chunk.reader(2);
+    let body_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let status_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut status_w = StructVector::field_writer(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row as usize);
-        let bucket = bucket_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let body = body_reader.read_str(row as usize);
+        let secret_name = secret_reader.read_str(row);
+        let bucket = bucket_reader.read_str(row);
+        let key = key_reader.read_str(row);
+        let body = body_reader.read_str(row);
 
         let result = match crate::secrets_resolve::resolve_s3(secret_name) {
             Ok((endpoint, access_key, secret_key, region)) => crate::s3::s3_put(
@@ -190,11 +189,9 @@ unsafe extern "C" fn cb_s3_put_secret(
             },
         };
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(body_vec, row, &result.body);
-        let st = duckdb_vector_get_data(status_vec) as *mut i32;
-        *st.add(row as usize) = result.status;
+        status_w.write_i32(row, result.status);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -205,20 +202,21 @@ unsafe extern "C" fn cb_s3_list_secret(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let secret_reader = VectorReader::new(input, 0);
-    let bucket_reader = VectorReader::new(input, 1);
-    let prefix_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let secret_reader = chunk.reader(0);
+    let bucket_reader = chunk.reader(1);
+    let prefix_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let keys_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
-    let mut list_offset: idx_t = 0;
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row as usize);
-        let bucket = bucket_reader.read_str(row as usize);
-        let prefix = prefix_reader.read_str(row as usize);
+        let secret_name = secret_reader.read_str(row);
+        let bucket = bucket_reader.read_str(row);
+        let prefix = prefix_reader.read_str(row);
 
         let result = match crate::secrets_resolve::resolve_s3(secret_name) {
             Ok((endpoint, access_key, secret_key, region)) => {
@@ -231,8 +229,7 @@ unsafe extern "C" fn cb_s3_list_secret(
             },
         };
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         super::dns::write_string_list(keys_vec, row, &result.keys, &mut list_offset);
         write_varchar(message_vec, row, &result.message);
     }
@@ -248,25 +245,26 @@ unsafe extern "C" fn cb_smtp_send_secret(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let secret_reader = VectorReader::new(input, 0);
-    let from_reader = VectorReader::new(input, 1);
-    let to_reader = VectorReader::new(input, 2);
-    let subject_reader = VectorReader::new(input, 3);
-    let body_reader = VectorReader::new(input, 4);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let secret_reader = chunk.reader(0);
+    let from_reader = chunk.reader(1);
+    let to_reader = chunk.reader(2);
+    let subject_reader = chunk.reader(3);
+    let body_reader = chunk.reader(4);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let message_vec = duckdb_struct_vector_get_child(output, 1);
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row as usize);
+        let secret_name = secret_reader.read_str(row);
 
         let (success, message) = match resolve_smtp_config(
             secret_name,
-            from_reader.read_str(row as usize),
-            to_reader.read_str(row as usize),
-            subject_reader.read_str(row as usize),
-            body_reader.read_str(row as usize),
+            from_reader.read_str(row),
+            to_reader.read_str(row),
+            subject_reader.read_str(row),
+            body_reader.read_str(row),
         ) {
             Ok(config) => {
                 let r = crate::smtp::send(&config);
@@ -275,8 +273,7 @@ unsafe extern "C" fn cb_smtp_send_secret(
             Err(e) => (false, e),
         };
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = success;
+        success_w.write_bool(row, success);
         write_varchar(message_vec, row, &message);
     }
 }
@@ -323,21 +320,22 @@ unsafe extern "C" fn cb_vault_read_secret(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let secret_reader = VectorReader::new(input, 0);
-    let url_reader = VectorReader::new(input, 1);
-    let path_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let secret_reader = chunk.reader(0);
+    let url_reader = chunk.reader(1);
+    let path_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let data_vec = duckdb_struct_vector_get_child(output, 1);
-    let lease_vec = duckdb_struct_vector_get_child(output, 2);
-    let renew_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut lease_w = StructVector::field_writer(output, 2);
+    let mut renew_w = StructVector::field_writer(output, 3);
     let message_vec = duckdb_struct_vector_get_child(output, 4);
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row as usize);
-        let url = url_reader.read_str(row as usize);
-        let path = path_reader.read_str(row as usize);
+        let secret_name = secret_reader.read_str(row);
+        let url = url_reader.read_str(row);
+        let path = path_reader.read_str(row);
 
         let result = match crate::secrets_resolve::resolve_token(secret_name) {
             Ok(token) => crate::vault::read(url, &token, path),
@@ -350,13 +348,10 @@ unsafe extern "C" fn cb_vault_read_secret(
             },
         };
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(data_vec, row, &result.data);
-        let ld = duckdb_vector_get_data(lease_vec) as *mut i64;
-        *ld.add(row as usize) = result.lease_duration;
-        let rd = duckdb_vector_get_data(renew_vec) as *mut bool;
-        *rd.add(row as usize) = result.renewable;
+        lease_w.write_i64(row, result.lease_duration);
+        renew_w.write_bool(row, result.renewable);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -402,24 +397,24 @@ unsafe extern "C" fn secrets_list_scan(info: duckdb_function_info, output: duckd
         init_data.entries = secrets::list_secrets();
     }
 
-    let name_vec = duckdb_data_chunk_get_vector(output, 0);
-    let type_vec = duckdb_data_chunk_get_vector(output, 1);
-    let count_vec = duckdb_data_chunk_get_vector(output, 2);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut name_w = out_chunk.writer(0);
+    let mut type_w = out_chunk.writer(1);
+    let mut count_w = out_chunk.writer(2);
 
-    let mut count: idx_t = 0;
+    let mut count: usize = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.entries.len() && count < max_chunk {
         let (name, stype, key_count) = &init_data.entries[init_data.idx];
-        write_varchar(name_vec, count, name);
-        write_varchar(type_vec, count, stype);
-        let cd = duckdb_vector_get_data(count_vec) as *mut i32;
-        *cd.add(count as usize) = *key_count as i32;
+        name_w.write_varchar(count, name);
+        type_w.write_varchar(count, stype);
+        count_w.write_i32(count, *key_count as i32);
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
+    duckdb_data_chunk_set_size(output, count as idx_t);
 }
 
 // ---------------------------------------------------------------------------

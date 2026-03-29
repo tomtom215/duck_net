@@ -6,9 +6,7 @@ use quack_rs::prelude::*;
 
 use crate::soap::{self, SoapVersion};
 
-use super::scalars::{
-    map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar,
-};
+use super::scalars::{map_varchar_varchar, read_headers_map, response_type, write_response};
 
 // ===== SOAP Request Callbacks =====
 
@@ -18,16 +16,17 @@ unsafe extern "C" fn cb_soap11_3(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let action_reader = VectorReader::new(input, 1);
-    let body_reader = VectorReader::new(input, 2);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let action_reader = chunk.reader(1);
+    let body_reader = chunk.reader(2);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let action = action_reader.read_str(row as usize);
-        let body_xml = body_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let action = action_reader.read_str(row);
+        let body_xml = body_reader.read_str(row);
         let resp = soap::send_request(url, action, body_xml, None, &[], SoapVersion::V1_1);
         write_response(output, row, &resp, &mut map_offset);
     }
@@ -39,17 +38,18 @@ unsafe extern "C" fn cb_soap11_4h(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let action_reader = VectorReader::new(input, 1);
-    let body_reader = VectorReader::new(input, 2);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let action_reader = chunk.reader(1);
+    let body_reader = chunk.reader(2);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let action = action_reader.read_str(row as usize);
-        let body_xml = body_reader.read_str(row as usize);
-        let headers = read_headers_map(input, 3, row as usize);
+        let url = url_reader.read_str(row);
+        let action = action_reader.read_str(row);
+        let body_xml = body_reader.read_str(row);
+        let headers = read_headers_map(input, 3, row);
         let resp = soap::send_request(url, action, body_xml, None, &headers, SoapVersion::V1_1);
         write_response(output, row, &resp, &mut map_offset);
     }
@@ -61,18 +61,19 @@ unsafe extern "C" fn cb_soap11_4s(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let action_reader = VectorReader::new(input, 1);
-    let body_reader = VectorReader::new(input, 2);
-    let soap_hdr_reader = VectorReader::new(input, 3);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let action_reader = chunk.reader(1);
+    let body_reader = chunk.reader(2);
+    let soap_hdr_reader = chunk.reader(3);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let action = action_reader.read_str(row as usize);
-        let body_xml = body_reader.read_str(row as usize);
-        let soap_hdr = soap_hdr_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let action = action_reader.read_str(row);
+        let body_xml = body_reader.read_str(row);
+        let soap_hdr = soap_hdr_reader.read_str(row);
         let resp = soap::send_request(
             url,
             action,
@@ -91,19 +92,20 @@ unsafe extern "C" fn cb_soap11_5(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let action_reader = VectorReader::new(input, 1);
-    let body_reader = VectorReader::new(input, 2);
-    let soap_hdr_reader = VectorReader::new(input, 3);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let action_reader = chunk.reader(1);
+    let body_reader = chunk.reader(2);
+    let soap_hdr_reader = chunk.reader(3);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let action = action_reader.read_str(row as usize);
-        let body_xml = body_reader.read_str(row as usize);
-        let soap_hdr = soap_hdr_reader.read_str(row as usize);
-        let headers = read_headers_map(input, 4, row as usize);
+        let url = url_reader.read_str(row);
+        let action = action_reader.read_str(row);
+        let body_xml = body_reader.read_str(row);
+        let soap_hdr = soap_hdr_reader.read_str(row);
+        let headers = read_headers_map(input, 4, row);
         let resp = soap::send_request(
             url,
             action,
@@ -122,16 +124,17 @@ unsafe extern "C" fn cb_soap12_3(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let action_reader = VectorReader::new(input, 1);
-    let body_reader = VectorReader::new(input, 2);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let action_reader = chunk.reader(1);
+    let body_reader = chunk.reader(2);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let action = action_reader.read_str(row as usize);
-        let body_xml = body_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let action = action_reader.read_str(row);
+        let body_xml = body_reader.read_str(row);
         let resp = soap::send_request(url, action, body_xml, None, &[], SoapVersion::V1_2);
         write_response(output, row, &resp, &mut map_offset);
     }
@@ -143,18 +146,19 @@ unsafe extern "C" fn cb_soap12_4s(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let action_reader = VectorReader::new(input, 1);
-    let body_reader = VectorReader::new(input, 2);
-    let soap_hdr_reader = VectorReader::new(input, 3);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let action_reader = chunk.reader(1);
+    let body_reader = chunk.reader(2);
+    let soap_hdr_reader = chunk.reader(3);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let action = action_reader.read_str(row as usize);
-        let body_xml = body_reader.read_str(row as usize);
-        let soap_hdr = soap_hdr_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let action = action_reader.read_str(row);
+        let body_xml = body_reader.read_str(row);
+        let soap_hdr = soap_hdr_reader.read_str(row);
         let resp = soap::send_request(
             url,
             action,
@@ -173,19 +177,20 @@ unsafe extern "C" fn cb_soap12_5(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let action_reader = VectorReader::new(input, 1);
-    let body_reader = VectorReader::new(input, 2);
-    let soap_hdr_reader = VectorReader::new(input, 3);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let action_reader = chunk.reader(1);
+    let body_reader = chunk.reader(2);
+    let soap_hdr_reader = chunk.reader(3);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let action = action_reader.read_str(row as usize);
-        let body_xml = body_reader.read_str(row as usize);
-        let soap_hdr = soap_hdr_reader.read_str(row as usize);
-        let headers = read_headers_map(input, 4, row as usize);
+        let url = url_reader.read_str(row);
+        let action = action_reader.read_str(row);
+        let body_xml = body_reader.read_str(row);
+        let soap_hdr = soap_hdr_reader.read_str(row);
+        let headers = read_headers_map(input, 4, row);
         let resp = soap::send_request(
             url,
             action,
@@ -206,13 +211,15 @@ unsafe extern "C" fn cb_extract_body(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let xml_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let xml_reader = chunk.reader(0);
+    let mut writer = VectorWriter::from_vector(output);
 
     for row in 0..row_count {
-        let xml = xml_reader.read_str(row as usize);
+        let xml = xml_reader.read_str(row);
         let body = soap::extract_body(xml).unwrap_or("");
-        write_varchar(output, row, body);
+        writer.write_varchar(row, body);
     }
 }
 
@@ -222,13 +229,14 @@ unsafe extern "C" fn cb_is_fault(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let xml_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let xml_reader = chunk.reader(0);
     let data = duckdb_vector_get_data(output) as *mut bool;
 
     for row in 0..row_count {
-        let xml = xml_reader.read_str(row as usize);
-        *data.add(row as usize) = soap::is_fault(xml);
+        let xml = xml_reader.read_str(row);
+        *data.add(row) = soap::is_fault(xml);
     }
 }
 
@@ -238,16 +246,16 @@ unsafe extern "C" fn cb_fault_string(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let xml_reader = VectorReader::new(input, 0);
-    duckdb_vector_ensure_validity_writable(output);
-    let validity = duckdb_vector_get_validity(output);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let xml_reader = chunk.reader(0);
+    let mut writer = VectorWriter::from_vector(output);
 
     for row in 0..row_count {
-        let xml = xml_reader.read_str(row as usize);
+        let xml = xml_reader.read_str(row);
         match soap::fault_string(xml) {
-            Some(s) => write_varchar(output, row, s),
-            None => duckdb_validity_set_row_invalid(validity, row),
+            Some(s) => writer.write_varchar(row, s),
+            None => writer.set_null(row),
         }
     }
 }

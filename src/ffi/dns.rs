@@ -6,29 +6,27 @@ use quack_rs::prelude::*;
 
 use crate::dns;
 
-use super::scalars::write_varchar;
-
 // ===== Helper: write a Vec<String> to a LIST(VARCHAR) vector =====
 
 pub(crate) unsafe fn write_string_list(
     output: duckdb_vector,
-    row: idx_t,
+    row: usize,
     items: &[String],
-    list_offset: &mut idx_t,
+    list_offset: &mut usize,
 ) {
-    let n = items.len() as idx_t;
+    let n = items.len();
     let new_total = *list_offset + n;
 
-    ListVector::reserve(output, new_total as usize);
-    let child = ListVector::get_child(output);
+    ListVector::reserve(output, new_total);
+    let mut child_w = ListVector::child_writer(output);
 
     for (i, s) in items.iter().enumerate() {
-        write_varchar(child, *list_offset + i as idx_t, s);
+        child_w.write_varchar(*list_offset + i, s);
     }
 
-    ListVector::set_entry(output, row as usize, *list_offset, n);
+    ListVector::set_entry(output, row, *list_offset as u64, n as u64);
     *list_offset = new_total;
-    ListVector::set_size(output, new_total as usize);
+    ListVector::set_size(output, new_total);
 }
 
 // ===== DNS Callbacks =====
@@ -39,12 +37,13 @@ unsafe extern "C" fn cb_dns_lookup(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let mut list_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let hostname = host_reader.read_str(row as usize);
+        let hostname = host_reader.read_str(row);
         let ips = dns::lookup(hostname).unwrap_or_default();
         write_string_list(output, row, &ips, &mut list_offset);
     }
@@ -56,12 +55,13 @@ unsafe extern "C" fn cb_dns_lookup_a(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let mut list_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let hostname = host_reader.read_str(row as usize);
+        let hostname = host_reader.read_str(row);
         let ips = dns::lookup_a(hostname).unwrap_or_default();
         write_string_list(output, row, &ips, &mut list_offset);
     }
@@ -73,12 +73,13 @@ unsafe extern "C" fn cb_dns_lookup_aaaa(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let mut list_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let hostname = host_reader.read_str(row as usize);
+        let hostname = host_reader.read_str(row);
         let ips = dns::lookup_aaaa(hostname).unwrap_or_default();
         write_string_list(output, row, &ips, &mut list_offset);
     }
@@ -90,16 +91,16 @@ unsafe extern "C" fn cb_dns_reverse(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let ip_reader = VectorReader::new(input, 0);
-    duckdb_vector_ensure_validity_writable(output);
-    let validity = duckdb_vector_get_validity(output);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let ip_reader = chunk.reader(0);
+    let mut writer = VectorWriter::from_vector(output);
 
     for row in 0..row_count {
-        let ip = ip_reader.read_str(row as usize);
+        let ip = ip_reader.read_str(row);
         match dns::reverse(ip) {
-            Ok(Some(hostname)) => write_varchar(output, row, &hostname),
-            _ => duckdb_validity_set_row_invalid(validity, row),
+            Ok(Some(hostname)) => writer.write_varchar(row, &hostname),
+            _ => writer.set_null(row),
         }
     }
 }
@@ -110,30 +111,31 @@ unsafe extern "C" fn cb_dns_txt(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let mut list_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let hostname = host_reader.read_str(row as usize);
+        let hostname = host_reader.read_str(row);
         let txts = dns::lookup_txt(hostname).unwrap_or_default();
         write_string_list(output, row, &txts, &mut list_offset);
     }
 }
 
-/// dns_mx(hostname) -> VARCHAR[] (formatted as "priority host")
-/// Using VARCHAR[] instead of LIST(STRUCT) for simplicity. Each entry is "priority\thost".
+/// dns_mx(hostname) -> VARCHAR[] (each entry: "priority\thost")
 unsafe extern "C" fn cb_dns_mx(
     _info: duckdb_function_info,
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let mut list_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let hostname = host_reader.read_str(row as usize);
+        let hostname = host_reader.read_str(row);
         let records = dns::lookup_mx(hostname).unwrap_or_default();
         let formatted: Vec<String> = records
             .iter()

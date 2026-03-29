@@ -50,84 +50,59 @@ unsafe extern "C" fn cb_sntp_query(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let server_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let server_reader = chunk.reader(0);
 
-    let offset_vec = duckdb_struct_vector_get_child(output, 0);
-    let delay_vec = duckdb_struct_vector_get_child(output, 1);
-    let stratum_vec = duckdb_struct_vector_get_child(output, 2);
-    let leap_vec = duckdb_struct_vector_get_child(output, 3);
-    let version_vec = duckdb_struct_vector_get_child(output, 4);
-    let poll_vec = duckdb_struct_vector_get_child(output, 5);
-    let precision_vec = duckdb_struct_vector_get_child(output, 6);
-    let root_delay_vec = duckdb_struct_vector_get_child(output, 7);
-    let root_disp_vec = duckdb_struct_vector_get_child(output, 8);
-    let refid_vec = duckdb_struct_vector_get_child(output, 9);
-    let ref_time_vec = duckdb_struct_vector_get_child(output, 10);
-    let rx_time_vec = duckdb_struct_vector_get_child(output, 11);
-    let tx_time_vec = duckdb_struct_vector_get_child(output, 12);
-    let srv_time_vec = duckdb_struct_vector_get_child(output, 13);
+    let mut offset_w = StructVector::field_writer(output, 0);
+    let mut delay_w = StructVector::field_writer(output, 1);
+    let mut stratum_w = StructVector::field_writer(output, 2);
+    let mut leap_w = StructVector::field_writer(output, 3);
+    let mut version_w = StructVector::field_writer(output, 4);
+    let mut poll_w = StructVector::field_writer(output, 5);
+    let mut precision_w = StructVector::field_writer(output, 6);
+    let mut root_delay_w = StructVector::field_writer(output, 7);
+    let mut root_disp_w = StructVector::field_writer(output, 8);
+    let refid_vec = StructVector::get_child(output, 9);
+    let mut ref_time_w = StructVector::field_writer(output, 10);
+    let mut rx_time_w = StructVector::field_writer(output, 11);
+    let mut tx_time_w = StructVector::field_writer(output, 12);
+    let mut srv_time_w = StructVector::field_writer(output, 13);
 
     for row in 0..row_count {
         let server = server_reader.read_str(row as usize);
         match ptp::sntp_query(server) {
             Ok(result) => {
-                let p = duckdb_vector_get_data(offset_vec) as *mut f64;
-                *p.add(row as usize) = result.offset_ns;
-                let p = duckdb_vector_get_data(delay_vec) as *mut f64;
-                *p.add(row as usize) = result.delay_ns;
-                let p = duckdb_vector_get_data(stratum_vec) as *mut i32;
-                *p.add(row as usize) = result.stratum as i32;
-                let p = duckdb_vector_get_data(leap_vec) as *mut i32;
-                *p.add(row as usize) = result.leap_indicator as i32;
-                let p = duckdb_vector_get_data(version_vec) as *mut i32;
-                *p.add(row as usize) = result.version as i32;
-                let p = duckdb_vector_get_data(poll_vec) as *mut i32;
-                *p.add(row as usize) = result.poll_interval as i32;
-                let p = duckdb_vector_get_data(precision_vec) as *mut i32;
-                *p.add(row as usize) = result.precision as i32;
-                let p = duckdb_vector_get_data(root_delay_vec) as *mut f64;
-                *p.add(row as usize) = result.root_delay_us;
-                let p = duckdb_vector_get_data(root_disp_vec) as *mut f64;
-                *p.add(row as usize) = result.root_dispersion_us;
-                write_varchar(refid_vec, row, &result.reference_id);
-                let p = duckdb_vector_get_data(ref_time_vec) as *mut f64;
-                *p.add(row as usize) = result.reference_time_unix;
-                let p = duckdb_vector_get_data(rx_time_vec) as *mut f64;
-                *p.add(row as usize) = result.receive_time_unix;
-                let p = duckdb_vector_get_data(tx_time_vec) as *mut f64;
-                *p.add(row as usize) = result.transmit_time_unix;
-                let p = duckdb_vector_get_data(srv_time_vec) as *mut f64;
-                *p.add(row as usize) = result.server_time_unix;
+                offset_w.write_f64(row as usize, result.offset_ns);
+                delay_w.write_f64(row as usize, result.delay_ns);
+                stratum_w.write_i32(row as usize, result.stratum as i32);
+                leap_w.write_i32(row as usize, result.leap_indicator as i32);
+                version_w.write_i32(row as usize, result.version as i32);
+                poll_w.write_i32(row as usize, result.poll_interval as i32);
+                precision_w.write_i32(row as usize, result.precision as i32);
+                root_delay_w.write_f64(row as usize, result.root_delay_us);
+                root_disp_w.write_f64(row as usize, result.root_dispersion_us);
+                write_varchar(refid_vec, row as usize, &result.reference_id);
+                ref_time_w.write_f64(row as usize, result.reference_time_unix);
+                rx_time_w.write_f64(row as usize, result.receive_time_unix);
+                tx_time_w.write_f64(row as usize, result.transmit_time_unix);
+                srv_time_w.write_f64(row as usize, result.server_time_unix);
             }
             Err(e) => {
-                let p = duckdb_vector_get_data(offset_vec) as *mut f64;
-                *p.add(row as usize) = 0.0;
-                let p = duckdb_vector_get_data(delay_vec) as *mut f64;
-                *p.add(row as usize) = 0.0;
-                let p = duckdb_vector_get_data(stratum_vec) as *mut i32;
-                *p.add(row as usize) = -1;
-                let p = duckdb_vector_get_data(leap_vec) as *mut i32;
-                *p.add(row as usize) = 0;
-                let p = duckdb_vector_get_data(version_vec) as *mut i32;
-                *p.add(row as usize) = 0;
-                let p = duckdb_vector_get_data(poll_vec) as *mut i32;
-                *p.add(row as usize) = 0;
-                let p = duckdb_vector_get_data(precision_vec) as *mut i32;
-                *p.add(row as usize) = 0;
-                let p = duckdb_vector_get_data(root_delay_vec) as *mut f64;
-                *p.add(row as usize) = 0.0;
-                let p = duckdb_vector_get_data(root_disp_vec) as *mut f64;
-                *p.add(row as usize) = 0.0;
-                write_varchar(refid_vec, row, &format!("Error: {e}"));
-                let p = duckdb_vector_get_data(ref_time_vec) as *mut f64;
-                *p.add(row as usize) = 0.0;
-                let p = duckdb_vector_get_data(rx_time_vec) as *mut f64;
-                *p.add(row as usize) = 0.0;
-                let p = duckdb_vector_get_data(tx_time_vec) as *mut f64;
-                *p.add(row as usize) = 0.0;
-                let p = duckdb_vector_get_data(srv_time_vec) as *mut f64;
-                *p.add(row as usize) = 0.0;
+                offset_w.write_f64(row as usize, 0.0);
+                delay_w.write_f64(row as usize, 0.0);
+                stratum_w.write_i32(row as usize, -1);
+                leap_w.write_i32(row as usize, 0);
+                version_w.write_i32(row as usize, 0);
+                poll_w.write_i32(row as usize, 0);
+                precision_w.write_i32(row as usize, 0);
+                root_delay_w.write_f64(row as usize, 0.0);
+                root_disp_w.write_f64(row as usize, 0.0);
+                write_varchar(refid_vec, row as usize, &format!("Error: {e}"));
+                ref_time_w.write_f64(row as usize, 0.0);
+                rx_time_w.write_f64(row as usize, 0.0);
+                tx_time_w.write_f64(row as usize, 0.0);
+                srv_time_w.write_f64(row as usize, 0.0);
             }
         }
     }
@@ -137,7 +112,7 @@ unsafe extern "C" fn cb_sntp_query(
 #[allow(clippy::too_many_arguments)]
 unsafe fn write_ptp_probe_row(
     output: duckdb_vector,
-    row: idx_t,
+    row: usize,
     best_offset_ns: f64,
     best_delay_ns: f64,
     avg_offset_ns: f64,
@@ -149,36 +124,27 @@ unsafe fn write_ptp_probe_row(
     reference_id: &str,
     server_time_unix: f64,
 ) {
-    let best_offset_vec = duckdb_struct_vector_get_child(output, 0);
-    let best_delay_vec = duckdb_struct_vector_get_child(output, 1);
-    let avg_offset_vec = duckdb_struct_vector_get_child(output, 2);
-    let min_delay_vec = duckdb_struct_vector_get_child(output, 3);
-    let max_delay_vec = duckdb_struct_vector_get_child(output, 4);
-    let stddev_vec = duckdb_struct_vector_get_child(output, 5);
-    let samples_vec = duckdb_struct_vector_get_child(output, 6);
-    let stratum_vec = duckdb_struct_vector_get_child(output, 7);
-    let refid_vec = duckdb_struct_vector_get_child(output, 8);
-    let srv_time_vec = duckdb_struct_vector_get_child(output, 9);
+    let mut best_offset_w = StructVector::field_writer(output, 0);
+    let mut best_delay_w = StructVector::field_writer(output, 1);
+    let mut avg_offset_w = StructVector::field_writer(output, 2);
+    let mut min_delay_w = StructVector::field_writer(output, 3);
+    let mut max_delay_w = StructVector::field_writer(output, 4);
+    let mut stddev_w = StructVector::field_writer(output, 5);
+    let mut samples_w = StructVector::field_writer(output, 6);
+    let mut stratum_w = StructVector::field_writer(output, 7);
+    let refid_vec = StructVector::get_child(output, 8);
+    let mut srv_time_w = StructVector::field_writer(output, 9);
 
-    let p = duckdb_vector_get_data(best_offset_vec) as *mut f64;
-    *p.add(row as usize) = best_offset_ns;
-    let p = duckdb_vector_get_data(best_delay_vec) as *mut f64;
-    *p.add(row as usize) = best_delay_ns;
-    let p = duckdb_vector_get_data(avg_offset_vec) as *mut f64;
-    *p.add(row as usize) = avg_offset_ns;
-    let p = duckdb_vector_get_data(min_delay_vec) as *mut f64;
-    *p.add(row as usize) = min_delay_ns;
-    let p = duckdb_vector_get_data(max_delay_vec) as *mut f64;
-    *p.add(row as usize) = max_delay_ns;
-    let p = duckdb_vector_get_data(stddev_vec) as *mut f64;
-    *p.add(row as usize) = stddev_ns;
-    let p = duckdb_vector_get_data(samples_vec) as *mut i32;
-    *p.add(row as usize) = samples;
-    let p = duckdb_vector_get_data(stratum_vec) as *mut i32;
-    *p.add(row as usize) = stratum;
-    write_varchar(refid_vec, row, reference_id);
-    let p = duckdb_vector_get_data(srv_time_vec) as *mut f64;
-    *p.add(row as usize) = server_time_unix;
+    best_offset_w.write_f64(row as usize, best_offset_ns);
+    best_delay_w.write_f64(row as usize, best_delay_ns);
+    avg_offset_w.write_f64(row as usize, avg_offset_ns);
+    min_delay_w.write_f64(row as usize, min_delay_ns);
+    max_delay_w.write_f64(row as usize, max_delay_ns);
+    stddev_w.write_f64(row as usize, stddev_ns);
+    samples_w.write_i32(row as usize, samples);
+    stratum_w.write_i32(row as usize, stratum);
+    write_varchar(refid_vec, row as usize, reference_id);
+    srv_time_w.write_f64(row as usize, server_time_unix);
 }
 
 /// ptp_probe(server, count) -> STRUCT(best_offset_ns, best_delay_ns, avg_offset_ns,
@@ -188,9 +154,10 @@ unsafe extern "C" fn cb_ptp_probe(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let server_reader = VectorReader::new(input, 0);
-    let count_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let server_reader = chunk.reader(0);
+    let count_reader = chunk.reader(1);
 
     for row in 0..row_count {
         let server = server_reader.read_str(row as usize);
@@ -238,8 +205,9 @@ unsafe extern "C" fn cb_ptp_probe_default(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let server_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let server_reader = chunk.reader(0);
 
     for row in 0..row_count {
         let server = server_reader.read_str(row as usize);

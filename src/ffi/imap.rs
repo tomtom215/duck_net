@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use std::ffi::CStr;
-
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
@@ -31,23 +29,30 @@ struct ImapListInitData {
 unsafe extern "C" fn imap_list_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
 
-    let url = read_bind_varchar(&bind, 0);
-    let username = read_bind_varchar(&bind, 1);
-    let password = read_bind_varchar(&bind, 2);
+    let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
+    let username = bind.get_parameter_value(1).as_str().unwrap_or_default();
+    let password = bind.get_parameter_value(2).as_str().unwrap_or_default();
 
-    let mailbox_val = bind.get_named_parameter("mailbox");
+    let mailbox_val = bind.get_named_parameter_value("mailbox");
     let mailbox = if mailbox_val.is_null() {
         "INBOX".to_string()
     } else {
-        let cstr = duckdb_get_varchar(mailbox_val);
-        let s = CStr::from_ptr(cstr).to_str().unwrap_or("INBOX").to_string();
-        duckdb_free(cstr as *mut _);
-        duckdb_destroy_value(&mut { mailbox_val });
-        s
+        mailbox_val.as_str().unwrap_or("INBOX".to_string())
     };
 
-    let search = read_named_varchar_imap(info, "search").unwrap_or_default();
-    let limit = read_named_bigint_imap(info, "limit").unwrap_or(50);
+    let search_val = bind.get_named_parameter_value("search");
+    let search = if search_val.is_null() {
+        String::new()
+    } else {
+        search_val.as_str().unwrap_or_default()
+    };
+
+    let limit_val = bind.get_named_parameter_value("limit");
+    let limit = if limit_val.is_null() {
+        50
+    } else {
+        limit_val.as_i64()
+    };
 
     bind.add_result_column("uid", TypeId::BigInt);
     bind.add_result_column("from_addr", TypeId::Varchar);
@@ -67,43 +72,6 @@ unsafe extern "C" fn imap_list_bind(info: duckdb_bind_info) {
             limit,
         },
     );
-}
-
-unsafe fn read_bind_varchar(bind: &BindInfo, idx: u64) -> String {
-    let val = bind.get_parameter(idx);
-    let cstr = duckdb_get_varchar(val);
-    let s = CStr::from_ptr(cstr).to_str().unwrap_or("").to_string();
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
-    s
-}
-
-unsafe fn read_named_varchar_imap(info: duckdb_bind_info, name: &str) -> Option<String> {
-    let bind = BindInfo::new(info);
-    let val = bind.get_named_parameter(name);
-    if val.is_null() {
-        return None;
-    }
-    let cstr = duckdb_get_varchar(val);
-    if cstr.is_null() {
-        duckdb_destroy_value(&mut { val });
-        return None;
-    }
-    let s = CStr::from_ptr(cstr).to_str().ok().map(|s| s.to_string());
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
-    s
-}
-
-unsafe fn read_named_bigint_imap(info: duckdb_bind_info, name: &str) -> Option<i64> {
-    let bind = BindInfo::new(info);
-    let val = bind.get_named_parameter(name);
-    if val.is_null() {
-        return None;
-    }
-    let n = duckdb_get_int64(val);
-    duckdb_destroy_value(&mut { val });
-    Some(n)
 }
 
 unsafe extern "C" fn imap_list_init(info: duckdb_init_info) {
@@ -152,26 +120,25 @@ unsafe extern "C" fn imap_list_scan(info: duckdb_function_info, output: duckdb_d
         init_data.messages = result.messages;
     }
 
-    let uid_vec = duckdb_data_chunk_get_vector(output, 0);
-    let from_vec = duckdb_data_chunk_get_vector(output, 1);
-    let to_vec = duckdb_data_chunk_get_vector(output, 2);
-    let subject_vec = duckdb_data_chunk_get_vector(output, 3);
-    let date_vec = duckdb_data_chunk_get_vector(output, 4);
-    let size_vec = duckdb_data_chunk_get_vector(output, 5);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut uid_w = out_chunk.writer(0);
+    let mut from_w = out_chunk.writer(1);
+    let mut to_w = out_chunk.writer(2);
+    let mut subject_w = out_chunk.writer(3);
+    let mut date_w = out_chunk.writer(4);
+    let mut size_w = out_chunk.writer(5);
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.messages.len() && count < max_chunk {
         let msg = &init_data.messages[init_data.idx];
-        let uid_data = duckdb_vector_get_data(uid_vec) as *mut i64;
-        *uid_data.add(count as usize) = msg.uid;
-        write_varchar(from_vec, count, &msg.from);
-        write_varchar(to_vec, count, &msg.to);
-        write_varchar(subject_vec, count, &msg.subject);
-        write_varchar(date_vec, count, &msg.date);
-        let size_data = duckdb_vector_get_data(size_vec) as *mut i64;
-        *size_data.add(count as usize) = msg.size;
+        uid_w.write_i64(count as usize, msg.uid);
+        from_w.write_varchar(count as usize, &msg.from);
+        to_w.write_varchar(count as usize, &msg.to);
+        subject_w.write_varchar(count as usize, &msg.subject);
+        date_w.write_varchar(count as usize, &msg.date);
+        size_w.write_i64(count as usize, msg.size);
         init_data.idx += 1;
         count += 1;
     }
@@ -194,25 +161,24 @@ unsafe extern "C" fn cb_imap_fetch(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let user_reader = VectorReader::new(input, 1);
-    let pass_reader = VectorReader::new(input, 2);
-    let uid_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 3)) as *const i64;
-
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let user_reader = chunk.reader(1);
+    let pass_reader = chunk.reader(2);
+    let uid_reader = chunk.reader(3);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
         let user = user_reader.read_str(row as usize);
         let pass = pass_reader.read_str(row as usize);
-        let uid = *uid_data.add(row as usize);
+        let uid = uid_reader.read_i64(row as usize);
 
         let result = imap::fetch_message(url, user, pass, "INBOX", uid);
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        let mut success_w = StructVector::field_writer(output, 0);
+        let body_vec = duckdb_struct_vector_get_child(output, 1);
+        let message_vec = duckdb_struct_vector_get_child(output, 2);
+        success_w.write_bool(row as usize, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }
@@ -231,29 +197,28 @@ unsafe extern "C" fn cb_imap_move(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let user_reader = VectorReader::new(input, 1);
-    let pass_reader = VectorReader::new(input, 2);
-    let mailbox_reader = VectorReader::new(input, 3);
-    let uid_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 4)) as *const i64;
-    let dest_reader = VectorReader::new(input, 5);
-
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let user_reader = chunk.reader(1);
+    let pass_reader = chunk.reader(2);
+    let mailbox_reader = chunk.reader(3);
+    let uid_reader = chunk.reader(4);
+    let dest_reader = chunk.reader(5);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
         let user = user_reader.read_str(row as usize);
         let pass = pass_reader.read_str(row as usize);
         let mailbox = mailbox_reader.read_str(row as usize);
-        let uid = *uid_data.add(row as usize);
+        let uid = uid_reader.read_i64(row as usize);
         let dest = dest_reader.read_str(row as usize);
 
         let result = imap_write::move_message(url, user, pass, mailbox, uid, dest);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        let mut success_w = StructVector::field_writer(output, 0);
+        let message_vec = duckdb_struct_vector_get_child(output, 1);
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -264,27 +229,26 @@ unsafe extern "C" fn cb_imap_delete(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let user_reader = VectorReader::new(input, 1);
-    let pass_reader = VectorReader::new(input, 2);
-    let mailbox_reader = VectorReader::new(input, 3);
-    let uid_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 4)) as *const i64;
-
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let user_reader = chunk.reader(1);
+    let pass_reader = chunk.reader(2);
+    let mailbox_reader = chunk.reader(3);
+    let uid_reader = chunk.reader(4);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
         let user = user_reader.read_str(row as usize);
         let pass = pass_reader.read_str(row as usize);
         let mailbox = mailbox_reader.read_str(row as usize);
-        let uid = *uid_data.add(row as usize);
+        let uid = uid_reader.read_i64(row as usize);
 
         let result = imap_write::delete_message(url, user, pass, mailbox, uid);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        let mut success_w = StructVector::field_writer(output, 0);
+        let message_vec = duckdb_struct_vector_get_child(output, 1);
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -295,29 +259,28 @@ unsafe extern "C" fn cb_imap_flag(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let user_reader = VectorReader::new(input, 1);
-    let pass_reader = VectorReader::new(input, 2);
-    let mailbox_reader = VectorReader::new(input, 3);
-    let uid_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 4)) as *const i64;
-    let flags_reader = VectorReader::new(input, 5);
-
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let user_reader = chunk.reader(1);
+    let pass_reader = chunk.reader(2);
+    let mailbox_reader = chunk.reader(3);
+    let uid_reader = chunk.reader(4);
+    let flags_reader = chunk.reader(5);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
         let user = user_reader.read_str(row as usize);
         let pass = pass_reader.read_str(row as usize);
         let mailbox = mailbox_reader.read_str(row as usize);
-        let uid = *uid_data.add(row as usize);
+        let uid = uid_reader.read_i64(row as usize);
         let flags = flags_reader.read_str(row as usize);
 
         let result = imap_write::flag_message(url, user, pass, mailbox, uid, flags);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        let mut success_w = StructVector::field_writer(output, 0);
+        let message_vec = duckdb_struct_vector_get_child(output, 1);
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }

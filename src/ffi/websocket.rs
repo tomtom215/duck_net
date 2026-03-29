@@ -22,11 +22,12 @@ unsafe extern "C" fn cb_ws_request(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let msg_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let msg_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let response_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -36,8 +37,7 @@ unsafe extern "C" fn cb_ws_request(
 
         let result = websocket::request_default_timeout(url, msg);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(response_vec, row, &result.response);
         write_varchar(message_vec, row, &result.message);
     }
@@ -49,24 +49,24 @@ unsafe extern "C" fn cb_ws_request_timeout(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let msg_reader = VectorReader::new(input, 1);
-    let timeout_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 2)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let msg_reader = chunk.reader(1);
+    let timeout_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let response_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
         let msg = msg_reader.read_str(row as usize);
-        let timeout = *timeout_data.add(row as usize) as u32;
+        let timeout = timeout_reader.read_i32(row as usize) as u32;
 
         let result = websocket::request(url, msg, timeout);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(response_vec, row, &result.response);
         write_varchar(message_vec, row, &result.message);
     }
@@ -88,20 +88,21 @@ unsafe extern "C" fn cb_ws_multi_request(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let msgs_reader = VectorReader::new(input, 1);
-    let timeout_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 2)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let msgs_reader = chunk.reader(1);
+    let timeout_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let responses_vec = duckdb_struct_vector_get_child(output, 1);
-    let count_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut count_writer = StructVector::field_writer(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
         let msgs_str = msgs_reader.read_str(row as usize);
-        let timeout = *timeout_data.add(row as usize) as u32;
+        let timeout = timeout_reader.read_i32(row as usize) as u32;
 
         let msgs: Vec<String> = msgs_str
             .split('\n')
@@ -111,11 +112,9 @@ unsafe extern "C" fn cb_ws_multi_request(
 
         let result = websocket::multi_request(url, &msgs, timeout);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(responses_vec, row, &result.responses.join("\n"));
-        let cd = duckdb_vector_get_data(count_vec) as *mut i32;
-        *cd.add(row as usize) = result.responses.len() as i32;
+        unsafe { count_writer.write_i32(row as usize, result.responses.len() as i32) };
         write_varchar(message_vec, row, &result.message);
     }
 }

@@ -14,16 +14,17 @@ unsafe extern "C" fn cb_jsonrpc_call_3(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let method_reader = VectorReader::new(input, 1);
-    let params_reader = VectorReader::new(input, 2);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let method_reader = chunk.reader(1);
+    let params_reader = chunk.reader(2);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let method = method_reader.read_str(row as usize);
-        let params = params_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let method = method_reader.read_str(row);
+        let params = params_reader.read_str(row);
         let params_opt = if params.is_empty() {
             None
         } else {
@@ -40,17 +41,18 @@ unsafe extern "C" fn cb_jsonrpc_call_4(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let method_reader = VectorReader::new(input, 1);
-    let params_reader = VectorReader::new(input, 2);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let method_reader = chunk.reader(1);
+    let params_reader = chunk.reader(2);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let method = method_reader.read_str(row as usize);
-        let params = params_reader.read_str(row as usize);
-        let headers = read_headers_map(input, 3, row as usize);
+        let url = url_reader.read_str(row);
+        let method = method_reader.read_str(row);
+        let params = params_reader.read_str(row);
+        let headers = read_headers_map(input, 3, row);
         let params_opt = if params.is_empty() {
             None
         } else {
@@ -67,16 +69,17 @@ unsafe extern "C" fn cb_xmlrpc_call(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let method_reader = VectorReader::new(input, 1);
-    let params_reader = VectorReader::new(input, 2);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let method_reader = chunk.reader(1);
+    let params_reader = chunk.reader(2);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let method = method_reader.read_str(row as usize);
-        let params_str = params_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let method = method_reader.read_str(row);
+        let params_str = params_reader.read_str(row);
         let params: Vec<&str> = if params_str.is_empty() {
             vec![]
         } else {

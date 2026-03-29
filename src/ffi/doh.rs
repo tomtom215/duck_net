@@ -26,25 +26,25 @@ unsafe extern "C" fn cb_doh_lookup(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let domain_reader = VectorReader::new(input, 1);
-    let type_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let domain_reader = chunk.reader(1);
+    let type_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let records_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
-    let mut list_offset: idx_t = 0;
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let domain = domain_reader.read_str(row as usize);
-        let rtype = type_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let domain = domain_reader.read_str(row);
+        let rtype = type_reader.read_str(row);
 
         let result = doh::lookup(url, domain, rtype);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_string_list(records_vec, row, &result.records, &mut list_offset);
         write_varchar(message_vec, row, &result.message);
     }
@@ -56,23 +56,23 @@ unsafe extern "C" fn cb_doh_lookup_default(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let domain_reader = VectorReader::new(input, 0);
-    let type_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let domain_reader = chunk.reader(0);
+    let type_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let records_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
-    let mut list_offset: idx_t = 0;
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let domain = domain_reader.read_str(row as usize);
-        let rtype = type_reader.read_str(row as usize);
+        let domain = domain_reader.read_str(row);
+        let rtype = type_reader.read_str(row);
 
         let result = doh::lookup_default(domain, rtype);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_string_list(records_vec, row, &result.records, &mut list_offset);
         write_varchar(message_vec, row, &result.message);
     }

@@ -9,7 +9,6 @@ use quack_rs::prelude::*;
 use crate::mdns;
 
 use super::dns::write_string_list;
-use super::scalars::write_varchar;
 
 // ===== mdns_discover table function =====
 
@@ -102,25 +101,24 @@ unsafe extern "C" fn mdns_scan(info: duckdb_function_info, output: duckdb_data_c
         }
     }
 
-    let name_vec = duckdb_data_chunk_get_vector(output, 0);
-    let host_vec = duckdb_data_chunk_get_vector(output, 1);
-    let port_vec = duckdb_data_chunk_get_vector(output, 2);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut name_w = out_chunk.writer(0);
+    let mut host_w = out_chunk.writer(1);
+    let mut port_w = out_chunk.writer(2);
     let ips_vec = duckdb_data_chunk_get_vector(output, 3);
     let txt_vec = duckdb_data_chunk_get_vector(output, 4);
 
-    let mut count: idx_t = 0;
+    let mut count: usize = 0;
     let max_chunk = 2048;
-    let mut ips_list_offset: idx_t = 0;
-    let mut txt_list_offset: idx_t = 0;
+    let mut ips_list_offset: usize = 0;
+    let mut txt_list_offset: usize = 0;
 
     while init_data.idx < init_data.services.len() && count < max_chunk {
         let svc = &init_data.services[init_data.idx];
 
-        write_varchar(name_vec, count, &svc.instance_name);
-        write_varchar(host_vec, count, &svc.hostname);
-
-        let pd = duckdb_vector_get_data(port_vec) as *mut i32;
-        *pd.add(count as usize) = svc.port as i32;
+        name_w.write_varchar(count, &svc.instance_name);
+        host_w.write_varchar(count, &svc.hostname);
+        port_w.write_i32(count, svc.port as i32);
 
         write_string_list(ips_vec, count, &svc.ips, &mut ips_list_offset);
         write_string_list(txt_vec, count, &svc.txt, &mut txt_list_offset);
@@ -129,7 +127,7 @@ unsafe extern "C" fn mdns_scan(info: duckdb_function_info, output: duckdb_data_c
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
+    duckdb_data_chunk_set_size(output, count as idx_t);
 }
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {

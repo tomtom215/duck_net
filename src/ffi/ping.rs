@@ -25,24 +25,22 @@ unsafe extern "C" fn cb_ping(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
 
-    let alive_vec = duckdb_struct_vector_get_child(output, 0);
-    let latency_vec = duckdb_struct_vector_get_child(output, 1);
-    let ttl_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut alive_w = StructVector::field_writer(output, 0);
+    let mut latency_w = StructVector::field_writer(output, 1);
+    let mut ttl_w = StructVector::field_writer(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
         let host = host_reader.read_str(row as usize);
         let result = ping_mod::ping(host, 5);
 
-        let ad = duckdb_vector_get_data(alive_vec) as *mut bool;
-        *ad.add(row as usize) = result.alive;
-        let ld = duckdb_vector_get_data(latency_vec) as *mut f64;
-        *ld.add(row as usize) = result.latency_ms;
-        let td = duckdb_vector_get_data(ttl_vec) as *mut i32;
-        *td.add(row as usize) = result.ttl;
+        alive_w.write_bool(row as usize, result.alive);
+        latency_w.write_f64(row as usize, result.latency_ms);
+        ttl_w.write_i32(row as usize, result.ttl);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -53,26 +51,24 @@ unsafe extern "C" fn cb_ping_timeout(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let timeout_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 1)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let timeout_reader = chunk.reader(1);
 
-    let alive_vec = duckdb_struct_vector_get_child(output, 0);
-    let latency_vec = duckdb_struct_vector_get_child(output, 1);
-    let ttl_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut alive_w = StructVector::field_writer(output, 0);
+    let mut latency_w = StructVector::field_writer(output, 1);
+    let mut ttl_w = StructVector::field_writer(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
         let host = host_reader.read_str(row as usize);
-        let timeout = *timeout_data.add(row as usize) as u32;
+        let timeout = timeout_reader.read_i32(row as usize) as u32;
         let result = ping_mod::ping(host, timeout);
 
-        let ad = duckdb_vector_get_data(alive_vec) as *mut bool;
-        *ad.add(row as usize) = result.alive;
-        let ld = duckdb_vector_get_data(latency_vec) as *mut f64;
-        *ld.add(row as usize) = result.latency_ms;
-        let td = duckdb_vector_get_data(ttl_vec) as *mut i32;
-        *td.add(row as usize) = result.ttl;
+        alive_w.write_bool(row as usize, result.alive);
+        latency_w.write_f64(row as usize, result.latency_ms);
+        ttl_w.write_i32(row as usize, result.ttl);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -155,27 +151,26 @@ unsafe extern "C" fn traceroute_scan(info: duckdb_function_info, output: duckdb_
         }
     }
 
-    let hop_vec = duckdb_data_chunk_get_vector(output, 0);
-    let ip_vec = duckdb_data_chunk_get_vector(output, 1);
-    let host_vec = duckdb_data_chunk_get_vector(output, 2);
-    let lat_vec = duckdb_data_chunk_get_vector(output, 3);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut hop_w = out_chunk.writer(0);
+    let mut ip_w = out_chunk.writer(1);
+    let mut host_w = out_chunk.writer(2);
+    let mut lat_w = out_chunk.writer(3);
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.hops.len() && count < max_chunk {
         let h = &init_data.hops[init_data.idx];
-        let hd = duckdb_vector_get_data(hop_vec) as *mut i32;
-        *hd.add(count as usize) = h.hop;
-        write_varchar(ip_vec, count, &h.ip);
-        write_varchar(host_vec, count, &h.hostname);
-        let ld = duckdb_vector_get_data(lat_vec) as *mut f64;
-        *ld.add(count as usize) = h.latency_ms;
+        hop_w.write_i32(count as usize, h.hop);
+        ip_w.write_varchar(count as usize, &h.ip);
+        host_w.write_varchar(count as usize, &h.hostname);
+        lat_w.write_f64(count as usize, h.latency_ms);
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
+    out_chunk.set_size(count as usize);
 }
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {

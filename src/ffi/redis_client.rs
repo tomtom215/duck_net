@@ -33,12 +33,13 @@ unsafe extern "C" fn cb_redis_get(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_w = StructVector::field_writer(output, 0);
+    let value_vec = StructVector::get_child(output, 1);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -46,9 +47,8 @@ unsafe extern "C" fn cb_redis_get(
 
         let result = redis_client::get(url, key);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        write_varchar(value_vec, row, &result.value);
+        success_w.write_bool(row as usize, result.success);
+        write_varchar(value_vec, row as usize, &result.value);
     }
 }
 
@@ -58,13 +58,14 @@ unsafe extern "C" fn cb_redis_set(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let value_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let value_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_w = StructVector::field_writer(output, 0);
+    let value_vec = StructVector::get_child(output, 1);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -73,9 +74,8 @@ unsafe extern "C" fn cb_redis_set(
 
         let result = redis_client::set(url, key, value);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        write_varchar(value_vec, row, &result.value);
+        success_w.write_bool(row as usize, result.success);
+        write_varchar(value_vec, row as usize, &result.value);
     }
 }
 
@@ -85,26 +85,26 @@ unsafe extern "C" fn cb_redis_set_ex(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let value_reader = VectorReader::new(input, 2);
-    let ttl_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 3)) as *const i64;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let value_reader = chunk.reader(2);
+    let ttl_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_w = StructVector::field_writer(output, 0);
+    let value_vec = StructVector::get_child(output, 1);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
         let key = key_reader.read_str(row as usize);
         let value = value_reader.read_str(row as usize);
-        let ttl = *ttl_data.add(row as usize);
+        let ttl = ttl_reader.read_i64(row as usize);
 
         let result = redis_client::set_ex(url, key, value, ttl);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        write_varchar(value_vec, row, &result.value);
+        success_w.write_bool(row as usize, result.success);
+        write_varchar(value_vec, row as usize, &result.value);
     }
 }
 
@@ -114,14 +114,15 @@ unsafe extern "C" fn cb_redis_keys(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let pattern_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let pattern_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let keys_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
-    let mut list_offset: idx_t = 0;
+    let mut success_w = StructVector::field_writer(output, 0);
+    let keys_vec = StructVector::get_child(output, 1);
+    let message_vec = StructVector::get_child(output, 2);
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -129,10 +130,9 @@ unsafe extern "C" fn cb_redis_keys(
 
         let result = redis_client::keys(url, pattern);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        write_string_list(keys_vec, row, &result.keys, &mut list_offset);
-        write_varchar(message_vec, row, &result.message);
+        success_w.write_bool(row as usize, result.success);
+        write_string_list(keys_vec, row as usize, &result.keys, &mut list_offset);
+        write_varchar(message_vec, row as usize, &result.message);
     }
 }
 
@@ -142,12 +142,13 @@ unsafe extern "C" fn cb_redis_del(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_w = StructVector::field_writer(output, 0);
+    let value_vec = StructVector::get_child(output, 1);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -155,9 +156,8 @@ unsafe extern "C" fn cb_redis_del(
 
         let result = redis_client::del(url, key);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        write_varchar(value_vec, row, &result.value);
+        success_w.write_bool(row as usize, result.success);
+        write_varchar(value_vec, row as usize, &result.value);
     }
 }
 
@@ -167,24 +167,24 @@ unsafe extern "C" fn cb_redis_expire(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let ttl_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 2)) as *const i64;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let ttl_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_w = StructVector::field_writer(output, 0);
+    let value_vec = StructVector::get_child(output, 1);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
         let key = key_reader.read_str(row as usize);
-        let ttl = *ttl_data.add(row as usize);
+        let ttl = ttl_reader.read_i64(row as usize);
 
         let result = redis_client::expire(url, key, ttl);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        write_varchar(value_vec, row, &result.value);
+        success_w.write_bool(row as usize, result.success);
+        write_varchar(value_vec, row as usize, &result.value);
     }
 }
 
@@ -194,13 +194,14 @@ unsafe extern "C" fn cb_redis_hget(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let field_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let field_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_w = StructVector::field_writer(output, 0);
+    let value_vec = StructVector::get_child(output, 1);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -209,9 +210,8 @@ unsafe extern "C" fn cb_redis_hget(
 
         let result = redis_client::hget(url, key, field);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        write_varchar(value_vec, row, &result.value);
+        success_w.write_bool(row as usize, result.success);
+        write_varchar(value_vec, row as usize, &result.value);
     }
 }
 
@@ -221,14 +221,15 @@ unsafe extern "C" fn cb_redis_hset(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let field_reader = VectorReader::new(input, 2);
-    let value_reader = VectorReader::new(input, 3);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let field_reader = chunk.reader(2);
+    let value_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_w = StructVector::field_writer(output, 0);
+    let value_vec = StructVector::get_child(output, 1);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -238,9 +239,8 @@ unsafe extern "C" fn cb_redis_hset(
 
         let result = redis_client::hset(url, key, field, value);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        write_varchar(value_vec, row, &result.value);
+        success_w.write_bool(row as usize, result.success);
+        write_varchar(value_vec, row as usize, &result.value);
     }
 }
 

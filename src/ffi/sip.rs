@@ -24,11 +24,12 @@ unsafe extern "C" fn cb_sip_options(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
 
-    let alive_vec = duckdb_struct_vector_get_child(output, 0);
-    let code_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut alive_writer = StructVector::field_writer(output, 0);
+    let mut code_writer = StructVector::field_writer(output, 1);
     let text_vec = duckdb_struct_vector_get_child(output, 2);
     let ua_vec = duckdb_struct_vector_get_child(output, 3);
     let allow_vec = duckdb_struct_vector_get_child(output, 4);
@@ -37,10 +38,8 @@ unsafe extern "C" fn cb_sip_options(
         let host = host_reader.read_str(row as usize);
         let result = sip::options_ping(host, 0);
 
-        let ad = duckdb_vector_get_data(alive_vec) as *mut bool;
-        *ad.add(row as usize) = result.alive;
-        let cd = duckdb_vector_get_data(code_vec) as *mut i32;
-        *cd.add(row as usize) = result.status_code;
+        unsafe { alive_writer.write_bool(row as usize, result.alive) };
+        unsafe { code_writer.write_i32(row as usize, result.status_code) };
         write_varchar(text_vec, row, &result.status_text);
         write_varchar(ua_vec, row, &result.user_agent);
         write_varchar(allow_vec, row, &result.allow_methods);
@@ -53,25 +52,24 @@ unsafe extern "C" fn cb_sip_options_port(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let port_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 1)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let port_reader = chunk.reader(1);
 
-    let alive_vec = duckdb_struct_vector_get_child(output, 0);
-    let code_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut alive_writer = StructVector::field_writer(output, 0);
+    let mut code_writer = StructVector::field_writer(output, 1);
     let text_vec = duckdb_struct_vector_get_child(output, 2);
     let ua_vec = duckdb_struct_vector_get_child(output, 3);
     let allow_vec = duckdb_struct_vector_get_child(output, 4);
 
     for row in 0..row_count {
         let host = host_reader.read_str(row as usize);
-        let port = *port_data.add(row as usize) as u16;
+        let port = port_reader.read_i32(row as usize) as u16;
         let result = sip::options_ping(host, port);
 
-        let ad = duckdb_vector_get_data(alive_vec) as *mut bool;
-        *ad.add(row as usize) = result.alive;
-        let cd = duckdb_vector_get_data(code_vec) as *mut i32;
-        *cd.add(row as usize) = result.status_code;
+        unsafe { alive_writer.write_bool(row as usize, result.alive) };
+        unsafe { code_writer.write_i32(row as usize, result.status_code) };
         write_varchar(text_vec, row, &result.status_text);
         write_varchar(ua_vec, row, &result.user_agent);
         write_varchar(allow_vec, row, &result.allow_methods);

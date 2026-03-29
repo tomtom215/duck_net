@@ -6,9 +6,7 @@ use quack_rs::prelude::*;
 
 use crate::webdav;
 
-use super::scalars::{
-    map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar,
-};
+use super::scalars::{map_varchar_varchar, read_headers_map, response_type, write_response};
 
 // ===== webdav_list table function =====
 
@@ -89,31 +87,30 @@ unsafe extern "C" fn webdav_list_scan(info: duckdb_function_info, output: duckdb
         }
     }
 
-    let href_vec = duckdb_data_chunk_get_vector(output, 0);
-    let name_vec = duckdb_data_chunk_get_vector(output, 1);
-    let ct_vec = duckdb_data_chunk_get_vector(output, 2);
-    let size_vec = duckdb_data_chunk_get_vector(output, 3);
-    let lm_vec = duckdb_data_chunk_get_vector(output, 4);
-    let ic_vec = duckdb_data_chunk_get_vector(output, 5);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut href_w = out_chunk.writer(0);
+    let mut name_w = out_chunk.writer(1);
+    let mut ct_w = out_chunk.writer(2);
+    let mut size_w = out_chunk.writer(3);
+    let mut lm_w = out_chunk.writer(4);
+    let mut ic_w = out_chunk.writer(5);
 
-    let mut count: idx_t = 0;
+    let mut count: usize = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.entries.len() && count < max_chunk {
         let entry = &init_data.entries[init_data.idx];
-        write_varchar(href_vec, count, &entry.href);
-        write_varchar(name_vec, count, &entry.name);
-        write_varchar(ct_vec, count, &entry.content_type);
-        let szd = duckdb_vector_get_data(size_vec) as *mut i64;
-        *szd.add(count as usize) = entry.size;
-        write_varchar(lm_vec, count, &entry.last_modified);
-        let icd = duckdb_vector_get_data(ic_vec) as *mut bool;
-        *icd.add(count as usize) = entry.is_collection;
+        href_w.write_varchar(count, &entry.href);
+        name_w.write_varchar(count, &entry.name);
+        ct_w.write_varchar(count, &entry.content_type);
+        size_w.write_i64(count, entry.size);
+        lm_w.write_varchar(count, &entry.last_modified);
+        ic_w.write_bool(count, entry.is_collection);
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
+    duckdb_data_chunk_set_size(output, count as idx_t);
 }
 
 // ===== Scalar functions =====
@@ -124,13 +121,14 @@ unsafe extern "C" fn cb_webdav_read(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let headers = read_headers_map(input, 1, row as usize);
+        let url = url_reader.read_str(row);
+        let headers = read_headers_map(input, 1, row);
         let resp = webdav::read(url, &headers);
         write_response(output, row, &resp, &mut map_offset);
     }
@@ -142,15 +140,16 @@ unsafe extern "C" fn cb_webdav_write(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let content_reader = VectorReader::new(input, 1);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let content_reader = chunk.reader(1);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let content = content_reader.read_str(row as usize);
-        let headers = read_headers_map(input, 2, row as usize);
+        let url = url_reader.read_str(row);
+        let content = content_reader.read_str(row);
+        let headers = read_headers_map(input, 2, row);
         let resp = webdav::write(url, content, &headers);
         write_response(output, row, &resp, &mut map_offset);
     }
@@ -162,13 +161,14 @@ unsafe extern "C" fn cb_webdav_delete(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let headers = read_headers_map(input, 1, row as usize);
+        let url = url_reader.read_str(row);
+        let headers = read_headers_map(input, 1, row);
         let resp = webdav::delete(url, &headers);
         write_response(output, row, &resp, &mut map_offset);
     }
@@ -180,13 +180,14 @@ unsafe extern "C" fn cb_webdav_mkcol(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let headers = read_headers_map(input, 1, row as usize);
+        let url = url_reader.read_str(row);
+        let headers = read_headers_map(input, 1, row);
         let resp = webdav::mkcol(url, &headers);
         write_response(output, row, &resp, &mut map_offset);
     }

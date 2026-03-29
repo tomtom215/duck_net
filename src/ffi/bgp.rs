@@ -22,20 +22,20 @@ unsafe extern "C" fn cb_bgp_route(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let prefix_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let prefix_reader = chunk.reader(0);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
     for row in 0..row_count {
-        let prefix = prefix_reader.read_str(row as usize);
+        let prefix = prefix_reader.read_str(row);
 
         let result = bgp::route(prefix);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }
@@ -47,20 +47,20 @@ unsafe extern "C" fn cb_bgp_prefix_overview(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let prefix_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let prefix_reader = chunk.reader(0);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
     for row in 0..row_count {
-        let prefix = prefix_reader.read_str(row as usize);
+        let prefix = prefix_reader.read_str(row);
 
         let result = bgp::prefix_overview(prefix);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }
@@ -72,20 +72,20 @@ unsafe extern "C" fn cb_bgp_asn_info(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let asn_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let asn_reader = chunk.reader(0);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
     for row in 0..row_count {
-        let asn = asn_reader.read_str(row as usize);
+        let asn = asn_reader.read_str(row);
 
         let result = bgp::asn_info(asn);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }

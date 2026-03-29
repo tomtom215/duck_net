@@ -29,12 +29,13 @@ unsafe extern "C" fn cb_nats_publish(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let subject_reader = VectorReader::new(input, 1);
-    let payload_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let subject_reader = chunk.reader(1);
+    let payload_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let message_vec = duckdb_struct_vector_get_child(output, 1);
 
     for row in 0..row_count {
@@ -44,8 +45,7 @@ unsafe extern "C" fn cb_nats_publish(
 
         let result = nats::publish(url, subject, payload);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -56,13 +56,14 @@ unsafe extern "C" fn cb_nats_request(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let subject_reader = VectorReader::new(input, 1);
-    let payload_reader = VectorReader::new(input, 2);
-    let timeout_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 3)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let subject_reader = chunk.reader(1);
+    let payload_reader = chunk.reader(2);
+    let timeout_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let response_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -70,12 +71,11 @@ unsafe extern "C" fn cb_nats_request(
         let url = url_reader.read_str(row as usize);
         let subject = subject_reader.read_str(row as usize);
         let payload = payload_reader.read_str(row as usize);
-        let timeout_ms = *timeout_data.add(row as usize);
+        let timeout_ms = timeout_reader.read_i32(row as usize);
 
         let result = nats::request(url, subject, payload, timeout_ms as u32);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(response_vec, row, &result.response);
         write_varchar(message_vec, row, &result.message);
     }
@@ -87,12 +87,13 @@ unsafe extern "C" fn cb_nats_request_default(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let subject_reader = VectorReader::new(input, 1);
-    let payload_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let subject_reader = chunk.reader(1);
+    let payload_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let response_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -103,8 +104,7 @@ unsafe extern "C" fn cb_nats_request_default(
 
         let result = nats::request(url, subject, payload, 5000);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(response_vec, row, &result.response);
         write_varchar(message_vec, row, &result.message);
     }

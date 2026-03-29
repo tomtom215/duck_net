@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use std::ffi::CStr;
-
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
@@ -26,10 +24,11 @@ unsafe extern "C" fn cb_snmp_get(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let oid_reader = VectorReader::new(input, 1);
-    let comm_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let oid_reader = chunk.reader(1);
+    let comm_reader = chunk.reader(2);
 
     let oid_vec = duckdb_struct_vector_get_child(output, 0);
     let value_vec = duckdb_struct_vector_get_child(output, 1);
@@ -72,17 +71,15 @@ struct SnmpWalkInitData {
 
 unsafe extern "C" fn snmp_walk_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
-    let host = read_bind_str(&bind, 0);
-    let oid = read_bind_str(&bind, 1);
-    let community = read_bind_str(&bind, 2);
+    let host = bind.get_parameter_value(0).as_str().unwrap_or_default();
+    let oid = bind.get_parameter_value(1).as_str().unwrap_or_default();
+    let community = bind.get_parameter_value(2).as_str().unwrap_or_default();
 
-    let max_val = bind.get_named_parameter("max_entries");
+    let max_val = bind.get_named_parameter_value("max_entries");
     let max_entries = if max_val.is_null() {
         1000
     } else {
-        let n = duckdb_get_int64(max_val) as usize;
-        duckdb_destroy_value(&mut { max_val });
-        n
+        max_val.as_i64() as usize
     };
 
     bind.add_result_column("oid", TypeId::Varchar);
@@ -98,15 +95,6 @@ unsafe extern "C" fn snmp_walk_bind(info: duckdb_bind_info) {
             max_entries,
         },
     );
-}
-
-unsafe fn read_bind_str(bind: &BindInfo, idx: u64) -> String {
-    let val = bind.get_parameter(idx);
-    let cstr = duckdb_get_varchar(val);
-    let s = CStr::from_ptr(cstr).to_str().unwrap_or("").to_string();
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
-    s
 }
 
 unsafe extern "C" fn snmp_walk_init(info: duckdb_init_info) {
@@ -154,18 +142,19 @@ unsafe extern "C" fn snmp_walk_scan(info: duckdb_function_info, output: duckdb_d
         }
     }
 
-    let oid_vec = duckdb_data_chunk_get_vector(output, 0);
-    let value_vec = duckdb_data_chunk_get_vector(output, 1);
-    let type_vec = duckdb_data_chunk_get_vector(output, 2);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut oid_w = out_chunk.writer(0);
+    let mut value_w = out_chunk.writer(1);
+    let mut type_w = out_chunk.writer(2);
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.results.len() && count < max_chunk {
         let r = &init_data.results[init_data.idx];
-        write_varchar(oid_vec, count, &r.oid);
-        write_varchar(value_vec, count, &r.value);
-        write_varchar(type_vec, count, &r.value_type);
+        oid_w.write_varchar(count as usize, &r.oid);
+        value_w.write_varchar(count as usize, &r.value);
+        type_w.write_varchar(count as usize, &r.value_type);
         init_data.idx += 1;
         count += 1;
     }

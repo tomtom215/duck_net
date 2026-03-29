@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use std::ffi::CStr;
-
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
@@ -20,13 +18,14 @@ unsafe extern "C" fn cb_odata_query(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let mut map_offset: idx_t = 0;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let headers = read_headers_map(input, 1, row as usize);
+        let url = url_reader.read_str(row);
+        let headers = read_headers_map(input, 1, row);
         let resp = odata::query(url, None, None, None, None, None, None, &headers);
         write_response(output, row, &resp, &mut map_offset);
     }
@@ -52,18 +51,25 @@ struct ODataPaginateInitData {
 unsafe extern "C" fn odata_paginate_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
 
-    let url_val = bind.get_parameter(0);
-    let url_cstr = duckdb_get_varchar(url_val);
-    let url = CStr::from_ptr(url_cstr).to_str().unwrap_or("").to_string();
-    duckdb_free(url_cstr as *mut _);
-    duckdb_destroy_value(&mut { url_val });
+    let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
 
-    let filter = read_named_varchar_odata(info, "filter");
-    let select = read_named_varchar_odata(info, "select");
-    let orderby = read_named_varchar_odata(info, "orderby");
-    let expand = read_named_varchar_odata(info, "expand");
-    let top = read_named_bigint_odata(info, "top");
-    let max_pages = read_named_bigint_odata(info, "max_pages").unwrap_or(100);
+    let filter_val = bind.get_named_parameter_value("filter");
+    let filter = if filter_val.is_null() { None } else { filter_val.as_str().ok() };
+
+    let select_val = bind.get_named_parameter_value("select");
+    let select = if select_val.is_null() { None } else { select_val.as_str().ok() };
+
+    let orderby_val = bind.get_named_parameter_value("orderby");
+    let orderby = if orderby_val.is_null() { None } else { orderby_val.as_str().ok() };
+
+    let expand_val = bind.get_named_parameter_value("expand");
+    let expand = if expand_val.is_null() { None } else { expand_val.as_str().ok() };
+
+    let top_val = bind.get_named_parameter_value("top");
+    let top = if top_val.is_null() { None } else { Some(top_val.as_i64()) };
+
+    let max_pages_val = bind.get_named_parameter_value("max_pages");
+    let max_pages = if max_pages_val.is_null() { 100 } else { max_pages_val.as_i64() };
 
     bind.add_result_column("page", TypeId::Integer);
     bind.add_result_column("status", TypeId::Integer);
@@ -83,34 +89,6 @@ unsafe extern "C" fn odata_paginate_bind(info: duckdb_bind_info) {
             max_pages,
         },
     );
-}
-
-unsafe fn read_named_varchar_odata(info: duckdb_bind_info, name: &str) -> Option<String> {
-    let bind = BindInfo::new(info);
-    let val = bind.get_named_parameter(name);
-    if val.is_null() {
-        return None;
-    }
-    let cstr = duckdb_get_varchar(val);
-    if cstr.is_null() {
-        duckdb_destroy_value(&mut { val });
-        return None;
-    }
-    let s = CStr::from_ptr(cstr).to_str().ok().map(|s| s.to_string());
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
-    s
-}
-
-unsafe fn read_named_bigint_odata(info: duckdb_bind_info, name: &str) -> Option<i64> {
-    let bind = BindInfo::new(info);
-    let val = bind.get_named_parameter(name);
-    if val.is_null() {
-        return None;
-    }
-    let n = duckdb_get_int64(val);
-    duckdb_destroy_value(&mut { val });
-    Some(n)
 }
 
 unsafe extern "C" fn odata_paginate_init(info: duckdb_init_info) {
@@ -150,29 +128,27 @@ unsafe extern "C" fn odata_paginate_scan(info: duckdb_function_info, output: duc
         bind_data.max_pages,
     ) {
         Some((page_num, resp)) => {
-            let page_vec = duckdb_data_chunk_get_vector(output, 0);
-            let status_vec = duckdb_data_chunk_get_vector(output, 1);
+            let out_chunk = DataChunk::from_raw(output);
+            let mut page_w = out_chunk.writer(0);
+            let mut status_w = out_chunk.writer(1);
             let headers_vec = duckdb_data_chunk_get_vector(output, 2);
-            let body_vec = duckdb_data_chunk_get_vector(output, 3);
+            let mut body_w = out_chunk.writer(3);
 
-            let page_data = duckdb_vector_get_data(page_vec) as *mut i32;
-            *page_data = page_num as i32;
-
-            let status_data = duckdb_vector_get_data(status_vec) as *mut i32;
-            *status_data = resp.status as i32;
+            page_w.write_i32(0, page_num as i32);
+            status_w.write_i32(0, resp.status as i32);
 
             let n = resp.headers.len() as idx_t;
             MapVector::reserve(headers_vec, n as usize);
             let keys = MapVector::keys(headers_vec);
             let vals = MapVector::values(headers_vec);
             for (i, (k, v)) in resp.headers.iter().enumerate() {
-                write_varchar(keys, i as idx_t, k);
-                write_varchar(vals, i as idx_t, v);
+                write_varchar(keys, i, k);
+                write_varchar(vals, i, v);
             }
             MapVector::set_entry(headers_vec, 0, 0, n);
             MapVector::set_size(headers_vec, n as usize);
 
-            write_varchar(body_vec, 0, &resp.body);
+            body_w.write_varchar(0, &resp.body);
             duckdb_data_chunk_set_size(output, 1);
         }
         None => {

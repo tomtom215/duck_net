@@ -22,13 +22,14 @@ unsafe extern "C" fn cb_influx_query(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let org_reader = VectorReader::new(input, 1);
-    let token_reader = VectorReader::new(input, 2);
-    let flux_query_reader = VectorReader::new(input, 3);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let org_reader = chunk.reader(1);
+    let token_reader = chunk.reader(2);
+    let flux_query_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -40,8 +41,7 @@ unsafe extern "C" fn cb_influx_query(
 
         let result = influxdb::query(url, org, token, flux_query);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }
@@ -53,14 +53,15 @@ unsafe extern "C" fn cb_influx_write(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let org_reader = VectorReader::new(input, 1);
-    let bucket_reader = VectorReader::new(input, 2);
-    let token_reader = VectorReader::new(input, 3);
-    let line_protocol_reader = VectorReader::new(input, 4);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let org_reader = chunk.reader(1);
+    let bucket_reader = chunk.reader(2);
+    let token_reader = chunk.reader(3);
+    let line_protocol_reader = chunk.reader(4);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -73,8 +74,7 @@ unsafe extern "C" fn cb_influx_write(
 
         let result = influxdb::write(url, org, bucket, token, line_protocol);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }
@@ -86,10 +86,11 @@ unsafe extern "C" fn cb_influx_health(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -98,8 +99,7 @@ unsafe extern "C" fn cb_influx_health(
 
         let result = influxdb::health(url);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }

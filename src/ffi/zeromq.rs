@@ -22,22 +22,22 @@ unsafe extern "C" fn cb_zmq_request(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let endpoint_reader = VectorReader::new(input, 0);
-    let message_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let endpoint_reader = chunk.reader(0);
+    let message_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let response_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
     for row in 0..row_count {
-        let endpoint = endpoint_reader.read_str(row as usize);
-        let message = message_reader.read_str(row as usize);
+        let endpoint = endpoint_reader.read_str(row);
+        let message = message_reader.read_str(row);
 
         let result = zeromq::request(endpoint, message);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(response_vec, row, &result.response);
         write_varchar(message_vec, row, &result.message);
     }

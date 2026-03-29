@@ -16,8 +16,9 @@ unsafe extern "C" fn cb_set_retry_statuses(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let statuses_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let statuses_reader = chunk.reader(0);
 
     for row in 0..row_count {
         let input_str = statuses_reader.read_str(row as usize);
@@ -58,8 +59,9 @@ unsafe extern "C" fn cb_set_domain_rate_limits(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let config_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let config_reader = chunk.reader(0);
 
     for row in 0..row_count {
         let config = config_reader.read_str(row as usize);
@@ -78,11 +80,12 @@ unsafe extern "C" fn cb_set_rate_limit(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let rps_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let rps_reader = chunk.reader(0);
 
     for row in 0..row_count {
-        let rps = *rps_data.add(row as usize);
+        let rps = rps_reader.read_i32(row as usize);
         let rps = rps.max(0) as u32;
         rate_limit::set_global_rps(rps);
         let msg = if rps == 0 {
@@ -100,13 +103,14 @@ unsafe extern "C" fn cb_set_retries(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let retries_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const i32;
-    let backoff_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 1)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let retries_reader = chunk.reader(0);
+    let backoff_reader = chunk.reader(1);
 
     for row in 0..row_count {
-        let retries = (*retries_data.add(row as usize)).max(0) as u32;
-        let backoff_ms = (*backoff_data.add(row as usize)).max(100) as u64;
+        let retries = retries_reader.read_i32(row as usize).max(0) as u32;
+        let backoff_ms = backoff_reader.read_i32(row as usize).max(100) as u64;
         http::set_max_retries(retries);
         http::set_retry_backoff_ms(backoff_ms);
         let msg = if retries == 0 {
@@ -124,11 +128,12 @@ unsafe extern "C" fn cb_set_timeout(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let secs_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let secs_reader = chunk.reader(0);
 
     for row in 0..row_count {
-        let secs = (*secs_data.add(row as usize)).max(1) as u64;
+        let secs = secs_reader.read_i32(row as usize).max(1) as u64;
         http::set_timeout_secs(secs);
         write_varchar(output, row, &format!("Timeout set to {secs} seconds"));
     }

@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::smtp::{self, SmtpConfig};
 
-use super::scalars::write_varchar;
 
 /// STRUCT(success BOOLEAN, message VARCHAR)
 fn smtp_result_type() -> LogicalType {
@@ -16,14 +15,12 @@ fn smtp_result_type() -> LogicalType {
     ])
 }
 
-unsafe fn write_smtp_result(output: duckdb_vector, row: idx_t, success: bool, message: &str) {
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+unsafe fn write_smtp_result(output: duckdb_vector, row: usize, success: bool, message: &str) {
+    let mut success_w = StructVector::field_writer(output, 0);
+    let mut message_w = StructVector::field_writer(output, 1);
 
-    let success_data = duckdb_vector_get_data(success_vec) as *mut bool;
-    *success_data.add(row as usize) = success;
-
-    write_varchar(message_vec, row, message);
+    success_w.write_bool(row, success);
+    message_w.write_varchar(row, message);
 }
 
 /// smtp_send(server, from, to, subject, body) -> STRUCT(success, message)
@@ -32,15 +29,16 @@ unsafe extern "C" fn cb_smtp_send_5(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let server_reader = VectorReader::new(input, 0);
-    let from_reader = VectorReader::new(input, 1);
-    let to_reader = VectorReader::new(input, 2);
-    let subject_reader = VectorReader::new(input, 3);
-    let body_reader = VectorReader::new(input, 4);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let server_reader = chunk.reader(0);
+    let from_reader = chunk.reader(1);
+    let to_reader = chunk.reader(2);
+    let subject_reader = chunk.reader(3);
+    let body_reader = chunk.reader(4);
 
     for row in 0..row_count {
-        let server = server_reader.read_str(row as usize);
+        let server = server_reader.read_str(row);
         let (host, port, use_tls) = match smtp::parse_server_url(server) {
             Ok(v) => v,
             Err(e) => {
@@ -53,10 +51,10 @@ unsafe extern "C" fn cb_smtp_send_5(
             host,
             port,
             use_tls,
-            from: from_reader.read_str(row as usize).to_string(),
-            to: to_reader.read_str(row as usize).to_string(),
-            subject: subject_reader.read_str(row as usize).to_string(),
-            body: body_reader.read_str(row as usize).to_string(),
+            from: from_reader.read_str(row).to_string(),
+            to: to_reader.read_str(row).to_string(),
+            subject: subject_reader.read_str(row).to_string(),
+            body: body_reader.read_str(row).to_string(),
             username: None,
             password: None,
         };
@@ -72,17 +70,18 @@ unsafe extern "C" fn cb_smtp_send_7(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let server_reader = VectorReader::new(input, 0);
-    let from_reader = VectorReader::new(input, 1);
-    let to_reader = VectorReader::new(input, 2);
-    let subject_reader = VectorReader::new(input, 3);
-    let body_reader = VectorReader::new(input, 4);
-    let user_reader = VectorReader::new(input, 5);
-    let pass_reader = VectorReader::new(input, 6);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let server_reader = chunk.reader(0);
+    let from_reader = chunk.reader(1);
+    let to_reader = chunk.reader(2);
+    let subject_reader = chunk.reader(3);
+    let body_reader = chunk.reader(4);
+    let user_reader = chunk.reader(5);
+    let pass_reader = chunk.reader(6);
 
     for row in 0..row_count {
-        let server = server_reader.read_str(row as usize);
+        let server = server_reader.read_str(row);
         let (host, port, use_tls) = match smtp::parse_server_url(server) {
             Ok(v) => v,
             Err(e) => {
@@ -95,12 +94,12 @@ unsafe extern "C" fn cb_smtp_send_7(
             host,
             port,
             use_tls,
-            from: from_reader.read_str(row as usize).to_string(),
-            to: to_reader.read_str(row as usize).to_string(),
-            subject: subject_reader.read_str(row as usize).to_string(),
-            body: body_reader.read_str(row as usize).to_string(),
-            username: Some(user_reader.read_str(row as usize).to_string()),
-            password: Some(pass_reader.read_str(row as usize).to_string()),
+            from: from_reader.read_str(row).to_string(),
+            to: to_reader.read_str(row).to_string(),
+            subject: subject_reader.read_str(row).to_string(),
+            body: body_reader.read_str(row).to_string(),
+            username: Some(user_reader.read_str(row).to_string()),
+            password: Some(pass_reader.read_str(row).to_string()),
         };
 
         let result = smtp::send(&config);

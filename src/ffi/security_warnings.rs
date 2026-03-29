@@ -20,11 +20,12 @@ unsafe extern "C" fn cb_set_security_warnings(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const bool;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let enabled_reader = chunk.reader(0);
 
     for row in 0..row_count {
-        let enabled = *data.add(row as usize);
+        let enabled = enabled_reader.read_bool(row);
         security_warnings::set_warnings_enabled(enabled);
         let msg = if enabled {
             "Security warnings enabled"
@@ -89,27 +90,28 @@ unsafe extern "C" fn warnings_scan(info: duckdb_function_info, output: duckdb_da
         init_data.entries = security_warnings::list_warnings();
     }
 
-    let code_vec = duckdb_data_chunk_get_vector(output, 0);
-    let sev_vec = duckdb_data_chunk_get_vector(output, 1);
-    let cwe_vec = duckdb_data_chunk_get_vector(output, 2);
-    let proto_vec = duckdb_data_chunk_get_vector(output, 3);
-    let msg_vec = duckdb_data_chunk_get_vector(output, 4);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut code_w = out_chunk.writer(0);
+    let mut sev_w = out_chunk.writer(1);
+    let mut cwe_w = out_chunk.writer(2);
+    let mut proto_w = out_chunk.writer(3);
+    let mut msg_w = out_chunk.writer(4);
 
-    let mut count: idx_t = 0;
+    let mut count: usize = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.entries.len() && count < max_chunk {
         let w = &init_data.entries[init_data.idx];
-        write_varchar(code_vec, count, w.code);
-        write_varchar(sev_vec, count, w.severity.as_str());
-        write_varchar(cwe_vec, count, w.cwe);
-        write_varchar(proto_vec, count, w.protocol);
-        write_varchar(msg_vec, count, &w.message);
+        code_w.write_varchar(count, w.code);
+        sev_w.write_varchar(count, w.severity.as_str());
+        cwe_w.write_varchar(count, w.cwe);
+        proto_w.write_varchar(count, w.protocol);
+        msg_w.write_varchar(count, &w.message);
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
+    duckdb_data_chunk_set_size(output, count as idx_t);
 }
 
 // ---------------------------------------------------------------------------
