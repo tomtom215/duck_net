@@ -364,6 +364,87 @@ unsafe extern "C" fn cb_imap_fetch_secret(
 }
 
 // ---------------------------------------------------------------------------
+// Secrets-Aware LDAP Overload
+// ---------------------------------------------------------------------------
+
+/// ldap_search_secret(secret_name, url, base_dn, filter, attributes) -> VARCHAR
+unsafe extern "C" fn cb_ldap_search_secret(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let secret_reader = VectorReader::new(input, 0);
+    let url_reader = VectorReader::new(input, 1);
+    let base_reader = VectorReader::new(input, 2);
+    let filter_reader = VectorReader::new(input, 3);
+    let attrs_reader = VectorReader::new(input, 4);
+
+    for row in 0..row_count {
+        let secret_name = secret_reader.read_str(row as usize);
+        let url = url_reader.read_str(row as usize);
+        let base_dn = base_reader.read_str(row as usize);
+        let filter = filter_reader.read_str(row as usize);
+        let attrs_str = attrs_reader.read_str(row as usize);
+
+        let msg = match crate::secrets_resolve::resolve_credentials(secret_name) {
+            Ok((Some(user), Some(pass))) => {
+                // First bind, then search
+                let bind_result = crate::ldap::bind(url, &user, &pass);
+                if !bind_result.success {
+                    crate::security::scrub_error(&bind_result.message)
+                } else {
+                    let attr_vec: Vec<&str> = attrs_str.split(',').map(|s| s.trim()).collect();
+                    let result = crate::ldap::search(url, base_dn, filter, &attr_vec);
+                    if result.success {
+                        // Format entries as JSON
+                        let entries_json: Vec<String> = result
+                            .entries
+                            .iter()
+                            .map(|e| {
+                                let attrs: Vec<String> = e
+                                    .attributes
+                                    .iter()
+                                    .map(|(k, vals)| {
+                                        let v_json = vals
+                                            .iter()
+                                            .map(|v| {
+                                                format!("\"{}\"", crate::security::json_escape(v))
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join(",");
+                                        format!(
+                                            "\"{}\":[{}]",
+                                            crate::security::json_escape(k),
+                                            v_json
+                                        )
+                                    })
+                                    .collect();
+                                format!(
+                                    "{{\"dn\":\"{}\",{}}}",
+                                    crate::security::json_escape(&e.dn),
+                                    attrs.join(",")
+                                )
+                            })
+                            .collect();
+                        format!("[{}]", entries_json.join(","))
+                    } else {
+                        crate::security::scrub_error(&result.message)
+                    }
+                }
+            }
+            Ok(_) => format!(
+                "Secret '{}' must have 'username' and 'password'",
+                secret_name
+            ),
+            Err(e) => e,
+        };
+
+        write_varchar(output, row, &msg);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -465,7 +546,19 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 
-    // Delegate Redis, LDAP, S3, SMTP, Vault, and secrets-list to the ext module
+    // LDAP with secrets (bind credentials from secret store)
+    ScalarFunctionBuilder::new("ldap_search_secret")
+        .param(v) // secret_name
+        .param(v) // url
+        .param(v) // base_dn
+        .param(v) // filter
+        .param(v) // attributes (comma-separated)
+        .returns(TypeId::Varchar)
+        .function(cb_ldap_search_secret)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // Delegate Redis, S3, SMTP, Vault, and secrets-list to the ext module
     super::secrets_protocols_ext::register_all(con)?;
 
     Ok(())
