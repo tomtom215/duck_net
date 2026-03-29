@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use std::ffi::CStr;
-
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::caldav;
-
-use super::scalars::write_varchar;
 
 // ===== caldav_events table function =====
 
@@ -27,14 +23,13 @@ struct CalDavEventsInitData {
 
 unsafe extern "C" fn caldav_events_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
-    let val = bind.get_parameter(0);
-    let cstr = duckdb_get_varchar(val);
-    let url = CStr::from_ptr(cstr).to_str().unwrap_or("").to_string();
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
+    let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
 
-    let time_start = read_named_str(info, "time_start");
-    let time_end = read_named_str(info, "time_end");
+    let time_start_val = bind.get_named_parameter_value("time_start");
+    let time_start = if time_start_val.is_null() { None } else { time_start_val.as_str().ok() };
+
+    let time_end_val = bind.get_named_parameter_value("time_end");
+    let time_end = if time_end_val.is_null() { None } else { time_end_val.as_str().ok() };
 
     bind.add_result_column("href", TypeId::Varchar);
     bind.add_result_column("etag", TypeId::Varchar);
@@ -49,23 +44,6 @@ unsafe extern "C" fn caldav_events_bind(info: duckdb_bind_info) {
             time_end,
         },
     );
-}
-
-unsafe fn read_named_str(info: duckdb_bind_info, name: &str) -> Option<String> {
-    let bind = BindInfo::new(info);
-    let val = bind.get_named_parameter(name);
-    if val.is_null() {
-        return None;
-    }
-    let cstr = duckdb_get_varchar(val);
-    if cstr.is_null() {
-        duckdb_destroy_value(&mut { val });
-        return None;
-    }
-    let s = CStr::from_ptr(cstr).to_str().ok().map(|s| s.to_string());
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
-    s
 }
 
 unsafe extern "C" fn caldav_events_init(info: duckdb_init_info) {
@@ -113,18 +91,19 @@ unsafe extern "C" fn caldav_events_scan(info: duckdb_function_info, output: duck
         }
     }
 
-    let href_vec = duckdb_data_chunk_get_vector(output, 0);
-    let etag_vec = duckdb_data_chunk_get_vector(output, 1);
-    let data_vec = duckdb_data_chunk_get_vector(output, 2);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut href_w = out_chunk.writer(0);
+    let mut etag_w = out_chunk.writer(1);
+    let mut data_w = out_chunk.writer(2);
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.events.len() && count < max_chunk {
         let e = &init_data.events[init_data.idx];
-        write_varchar(href_vec, count, &e.href);
-        write_varchar(etag_vec, count, &e.etag);
-        write_varchar(data_vec, count, &e.data);
+        href_w.write_varchar(count as usize, &e.href);
+        etag_w.write_varchar(count as usize, &e.etag);
+        data_w.write_varchar(count as usize, &e.data);
         init_data.idx += 1;
         count += 1;
     }
@@ -147,11 +126,7 @@ struct CardDavContactsInitData {
 
 unsafe extern "C" fn carddav_contacts_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
-    let val = bind.get_parameter(0);
-    let cstr = duckdb_get_varchar(val);
-    let url = CStr::from_ptr(cstr).to_str().unwrap_or("").to_string();
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
+    let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
 
     bind.add_result_column("href", TypeId::Varchar);
     bind.add_result_column("etag", TypeId::Varchar);
@@ -206,18 +181,19 @@ unsafe extern "C" fn carddav_contacts_scan(info: duckdb_function_info, output: d
         }
     }
 
-    let href_vec = duckdb_data_chunk_get_vector(output, 0);
-    let etag_vec = duckdb_data_chunk_get_vector(output, 1);
-    let data_vec = duckdb_data_chunk_get_vector(output, 2);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut href_w = out_chunk.writer(0);
+    let mut etag_w = out_chunk.writer(1);
+    let mut data_w = out_chunk.writer(2);
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.contacts.len() && count < max_chunk {
         let c = &init_data.contacts[init_data.idx];
-        write_varchar(href_vec, count, &c.href);
-        write_varchar(etag_vec, count, &c.etag);
-        write_varchar(data_vec, count, &c.data);
+        href_w.write_varchar(count as usize, &c.href);
+        etag_w.write_varchar(count as usize, &c.etag);
+        data_w.write_varchar(count as usize, &c.data);
         init_data.idx += 1;
         count += 1;
     }

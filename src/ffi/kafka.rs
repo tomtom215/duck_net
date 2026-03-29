@@ -23,15 +23,16 @@ unsafe extern "C" fn cb_kafka_produce(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let brokers_reader = VectorReader::new(input, 0);
-    let topic_reader = VectorReader::new(input, 1);
-    let key_reader = VectorReader::new(input, 2);
-    let value_reader = VectorReader::new(input, 3);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let brokers_reader = chunk.reader(0);
+    let topic_reader = chunk.reader(1);
+    let key_reader = chunk.reader(2);
+    let value_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let partition_vec = duckdb_struct_vector_get_child(output, 1);
-    let offset_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut success_writer = StructVector::field_writer(output, 0);
+    let mut partition_writer = StructVector::field_writer(output, 1);
+    let mut offset_writer = StructVector::field_writer(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
@@ -43,12 +44,9 @@ unsafe extern "C" fn cb_kafka_produce(
         let key_opt = if key.is_empty() { None } else { Some(key) };
         let result = kafka::produce(brokers, topic, key_opt, value);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        let pd = duckdb_vector_get_data(partition_vec) as *mut i32;
-        *pd.add(row as usize) = result.partition;
-        let od = duckdb_vector_get_data(offset_vec) as *mut i64;
-        *od.add(row as usize) = result.offset;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
+        unsafe { partition_writer.write_i32(row as usize, result.partition) };
+        unsafe { offset_writer.write_i64(row as usize, result.offset) };
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -59,14 +57,15 @@ unsafe extern "C" fn cb_kafka_produce_no_key(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let brokers_reader = VectorReader::new(input, 0);
-    let topic_reader = VectorReader::new(input, 1);
-    let value_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let brokers_reader = chunk.reader(0);
+    let topic_reader = chunk.reader(1);
+    let value_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let partition_vec = duckdb_struct_vector_get_child(output, 1);
-    let offset_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut success_writer = StructVector::field_writer(output, 0);
+    let mut partition_writer = StructVector::field_writer(output, 1);
+    let mut offset_writer = StructVector::field_writer(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
@@ -76,12 +75,9 @@ unsafe extern "C" fn cb_kafka_produce_no_key(
 
         let result = kafka::produce(brokers, topic, None, value);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        let pd = duckdb_vector_get_data(partition_vec) as *mut i32;
-        *pd.add(row as usize) = result.partition;
-        let od = duckdb_vector_get_data(offset_vec) as *mut i64;
-        *od.add(row as usize) = result.offset;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
+        unsafe { partition_writer.write_i32(row as usize, result.partition) };
+        unsafe { offset_writer.write_i64(row as usize, result.offset) };
         write_varchar(message_vec, row, &result.message);
     }
 }

@@ -26,11 +26,12 @@ unsafe extern "C" fn cb_ocsp_check(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let port_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 1)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let port_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let status_vec = duckdb_struct_vector_get_child(output, 1);
     let revocation_vec = duckdb_struct_vector_get_child(output, 2);
     let this_update_vec = duckdb_struct_vector_get_child(output, 3);
@@ -39,13 +40,12 @@ unsafe extern "C" fn cb_ocsp_check(
     let message_vec = duckdb_struct_vector_get_child(output, 6);
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let port = *port_data.add(row as usize) as u16;
+        let host = host_reader.read_str(row);
+        let port = port_reader.read_i32(row) as u16;
 
         let result = ocsp::check(host, port);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(status_vec, row, &result.status);
         write_varchar(revocation_vec, row, &result.revocation_time);
         write_varchar(this_update_vec, row, &result.this_update);
@@ -61,10 +61,11 @@ unsafe extern "C" fn cb_ocsp_check_default(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let status_vec = duckdb_struct_vector_get_child(output, 1);
     let revocation_vec = duckdb_struct_vector_get_child(output, 2);
     let this_update_vec = duckdb_struct_vector_get_child(output, 3);
@@ -73,12 +74,11 @@ unsafe extern "C" fn cb_ocsp_check_default(
     let message_vec = duckdb_struct_vector_get_child(output, 6);
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
+        let host = host_reader.read_str(row);
 
         let result = ocsp::check(host, 443);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(status_vec, row, &result.status);
         write_varchar(revocation_vec, row, &result.revocation_time);
         write_varchar(this_update_vec, row, &result.this_update);

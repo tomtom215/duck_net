@@ -23,14 +23,15 @@ unsafe extern "C" fn cb_radius_auth(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let secret_reader = VectorReader::new(input, 1);
-    let user_reader = VectorReader::new(input, 2);
-    let pass_reader = VectorReader::new(input, 3);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let secret_reader = chunk.reader(1);
+    let user_reader = chunk.reader(2);
+    let pass_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let code_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_writer = StructVector::field_writer(output, 0);
+    let mut code_writer = StructVector::field_writer(output, 1);
     let name_vec = duckdb_struct_vector_get_child(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
@@ -42,10 +43,8 @@ unsafe extern "C" fn cb_radius_auth(
 
         let result = radius::auth_default_port(host, secret, username, password);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        let cd = duckdb_vector_get_data(code_vec) as *mut i32;
-        *cd.add(row as usize) = result.code;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
+        unsafe { code_writer.write_i32(row as usize, result.code) };
         write_varchar(name_vec, row, &result.code_name);
         write_varchar(message_vec, row, &result.message);
     }
@@ -57,31 +56,30 @@ unsafe extern "C" fn cb_radius_auth_port(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let port_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 1)) as *const i32;
-    let secret_reader = VectorReader::new(input, 2);
-    let user_reader = VectorReader::new(input, 3);
-    let pass_reader = VectorReader::new(input, 4);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let port_reader = chunk.reader(1);
+    let secret_reader = chunk.reader(2);
+    let user_reader = chunk.reader(3);
+    let pass_reader = chunk.reader(4);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let code_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_writer = StructVector::field_writer(output, 0);
+    let mut code_writer = StructVector::field_writer(output, 1);
     let name_vec = duckdb_struct_vector_get_child(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
         let host = host_reader.read_str(row as usize);
-        let port = *port_data.add(row as usize) as u16;
+        let port = port_reader.read_i32(row as usize) as u16;
         let secret = secret_reader.read_str(row as usize);
         let username = user_reader.read_str(row as usize);
         let password = pass_reader.read_str(row as usize);
 
         let result = radius::auth(host, port, secret, username, password);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        let cd = duckdb_vector_get_data(code_vec) as *mut i32;
-        *cd.add(row as usize) = result.code;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
+        unsafe { code_writer.write_i32(row as usize, result.code) };
         write_varchar(name_vec, row, &result.code_name);
         write_varchar(message_vec, row, &result.message);
     }

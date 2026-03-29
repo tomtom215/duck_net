@@ -21,10 +21,11 @@ unsafe extern "C" fn cb_add_secret(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let name_reader = VectorReader::new(input, 0);
-    let type_reader = VectorReader::new(input, 1);
-    let config_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let name_reader = chunk.reader(0);
+    let type_reader = chunk.reader(1);
+    let config_reader = chunk.reader(2);
 
     for row in 0..row_count {
         let name = name_reader.read_str(row as usize);
@@ -45,8 +46,9 @@ unsafe extern "C" fn cb_clear_secret(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let name_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let name_reader = chunk.reader(0);
 
     for row in 0..row_count {
         let name = name_reader.read_str(row as usize);
@@ -75,8 +77,9 @@ unsafe extern "C" fn cb_get_secret_type(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let name_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let name_reader = chunk.reader(0);
 
     let validity = duckdb_vector_get_validity(output);
 
@@ -88,9 +91,9 @@ unsafe extern "C" fn cb_get_secret_type(
                 if validity.is_null() {
                     duckdb_vector_ensure_validity_writable(output);
                     let validity = duckdb_vector_get_validity(output);
-                    duckdb_validity_set_row_invalid(validity, row);
+                    duckdb_validity_set_row_invalid(validity, row as idx_t);
                 } else {
-                    duckdb_validity_set_row_invalid(validity, row);
+                    duckdb_validity_set_row_invalid(validity, row as idx_t);
                 }
             }
         }
@@ -104,8 +107,9 @@ unsafe extern "C" fn cb_get_secret_redacted(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let name_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let name_reader = chunk.reader(0);
 
     for row in 0..row_count {
         let name = name_reader.read_str(row as usize);
@@ -131,8 +135,9 @@ unsafe extern "C" fn cb_scrub_url(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -148,8 +153,9 @@ unsafe extern "C" fn cb_scrub_error(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let msg_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let msg_reader = chunk.reader(0);
 
     for row in 0..row_count {
         let msg = msg_reader.read_str(row as usize);
@@ -165,9 +171,10 @@ unsafe extern "C" fn cb_get_secret_value(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let name_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let name_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
 
     let validity = duckdb_vector_get_validity(output);
 
@@ -184,9 +191,9 @@ unsafe extern "C" fn cb_get_secret_value(
                 if validity.is_null() {
                     duckdb_vector_ensure_validity_writable(output);
                     let validity = duckdb_vector_get_validity(output);
-                    duckdb_validity_set_row_invalid(validity, row);
+                    duckdb_validity_set_row_invalid(validity, row as idx_t);
                 } else {
-                    duckdb_validity_set_row_invalid(validity, row);
+                    duckdb_validity_set_row_invalid(validity, row as idx_t);
                 }
             }
         }
@@ -203,7 +210,8 @@ unsafe extern "C" fn cb_set_ssrf_protection(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
     let data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const bool;
 
     for row in 0..row_count {
@@ -224,7 +232,8 @@ unsafe extern "C" fn cb_set_ssh_strict(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
     let data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const bool;
 
     for row in 0..row_count {

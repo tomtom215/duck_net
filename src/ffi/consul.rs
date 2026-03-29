@@ -22,12 +22,13 @@ unsafe extern "C" fn cb_consul_get(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let token_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let token_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let value_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -38,8 +39,7 @@ unsafe extern "C" fn cb_consul_get(
 
         let result = consul::consul_get(url, key, token);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(value_vec, row, &result.value);
         write_varchar(message_vec, row, &result.message);
     }
@@ -51,13 +51,14 @@ unsafe extern "C" fn cb_consul_set(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let value_reader = VectorReader::new(input, 2);
-    let token_reader = VectorReader::new(input, 3);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let value_reader = chunk.reader(2);
+    let token_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let value_out_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -69,8 +70,7 @@ unsafe extern "C" fn cb_consul_set(
 
         let result = consul::consul_set(url, key, value, token);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(value_out_vec, row, &result.value);
         write_varchar(message_vec, row, &result.message);
     }
@@ -82,12 +82,13 @@ unsafe extern "C" fn cb_consul_delete(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let token_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let token_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let value_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -98,8 +99,7 @@ unsafe extern "C" fn cb_consul_delete(
 
         let result = consul::consul_delete(url, key, token);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(value_vec, row, &result.value);
         write_varchar(message_vec, row, &result.message);
     }
@@ -111,11 +111,12 @@ unsafe extern "C" fn cb_etcd_get(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let value_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -125,8 +126,7 @@ unsafe extern "C" fn cb_etcd_get(
 
         let result = consul::etcd_get(url, key);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(value_vec, row, &result.value);
         write_varchar(message_vec, row, &result.message);
     }
@@ -138,12 +138,13 @@ unsafe extern "C" fn cb_etcd_put(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let value_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let value_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let value_out_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -154,8 +155,7 @@ unsafe extern "C" fn cb_etcd_put(
 
         let result = consul::etcd_put(url, key, value);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(value_out_vec, row, &result.value);
         write_varchar(message_vec, row, &result.message);
     }

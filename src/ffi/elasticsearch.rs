@@ -22,12 +22,13 @@ unsafe extern "C" fn cb_es_search(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let index_reader = VectorReader::new(input, 1);
-    let query_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let index_reader = chunk.reader(1);
+    let query_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -38,8 +39,7 @@ unsafe extern "C" fn cb_es_search(
 
         let result = elasticsearch::search(url, index, query);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }
@@ -51,12 +51,13 @@ unsafe extern "C" fn cb_es_count(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let index_reader = VectorReader::new(input, 1);
-    let query_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let index_reader = chunk.reader(1);
+    let query_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -67,8 +68,7 @@ unsafe extern "C" fn cb_es_count(
 
         let result = elasticsearch::count(url, index, query);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }
@@ -80,11 +80,12 @@ unsafe extern "C" fn cb_es_cat(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let endpoint_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let endpoint_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -94,8 +95,7 @@ unsafe extern "C" fn cb_es_cat(
 
         let result = elasticsearch::cat(url, endpoint);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
     }

@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use std::ffi::CStr;
-
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::pagination::{self, PaginateConfig, PaginateState, PaginationStrategy};
 
-use super::scalars::{map_varchar_varchar, write_varchar};
+use super::scalars::map_varchar_varchar;
 
 // ===== Bind/Init/Scan Data =====
 
@@ -26,11 +24,10 @@ unsafe extern "C" fn paginate_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
 
     // Read positional parameter: url (VARCHAR)
-    let url_val = bind.get_parameter(0);
-    let url_cstr = duckdb_get_varchar(url_val);
-    let url = CStr::from_ptr(url_cstr).to_str().unwrap_or("").to_string();
-    duckdb_free(url_cstr as *mut _);
-    duckdb_destroy_value(&mut { url_val });
+    let url = bind
+        .get_parameter_value(0)
+        .as_str()
+        .unwrap_or_default();
 
     // Read named parameters
     let page_param = read_named_varchar(info, "page_param");
@@ -71,30 +68,20 @@ unsafe extern "C" fn paginate_bind(info: duckdb_bind_info) {
 
 unsafe fn read_named_varchar(info: duckdb_bind_info, name: &str) -> Option<String> {
     let bind = BindInfo::new(info);
-    let val = bind.get_named_parameter(name);
+    let val = bind.get_named_parameter_value(name);
     if val.is_null() {
         return None;
     }
-    let cstr = duckdb_get_varchar(val);
-    if cstr.is_null() {
-        duckdb_destroy_value(&mut { val });
-        return None;
-    }
-    let s = CStr::from_ptr(cstr).to_str().ok().map(|s| s.to_string());
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
-    s
+    val.as_str().ok()
 }
 
 unsafe fn read_named_bigint(info: duckdb_bind_info, name: &str) -> Option<i64> {
     let bind = BindInfo::new(info);
-    let val = bind.get_named_parameter(name);
+    let val = bind.get_named_parameter_value(name);
     if val.is_null() {
         return None;
     }
-    let n = duckdb_get_int64(val);
-    duckdb_destroy_value(&mut { val });
-    Some(n)
+    Some(val.as_i64())
 }
 
 // ===== Init Callback =====
@@ -136,35 +123,34 @@ unsafe extern "C" fn paginate_scan(info: duckdb_function_info, output: duckdb_da
 
     match pagination::fetch_next(&bind_data.config, &mut init_data.state) {
         Some((page_num, resp)) => {
-            let page_vec = duckdb_data_chunk_get_vector(output, 0);
-            let status_vec = duckdb_data_chunk_get_vector(output, 1);
-            let headers_vec = duckdb_data_chunk_get_vector(output, 2);
-            let body_vec = duckdb_data_chunk_get_vector(output, 3);
+            let chunk = DataChunk::from_raw(output);
 
             // page (INTEGER)
-            let page_data = duckdb_vector_get_data(page_vec) as *mut i32;
-            *page_data = page_num as i32;
+            let mut page_w = chunk.writer(0);
+            page_w.write_i32(0, page_num as i32);
 
             // status (INTEGER)
-            let status_data = duckdb_vector_get_data(status_vec) as *mut i32;
-            *status_data = resp.status as i32;
+            let mut status_w = chunk.writer(1);
+            status_w.write_i32(0, resp.status as i32);
 
             // headers (MAP)
+            let headers_vec = chunk.vector(2);
             let n = resp.headers.len() as idx_t;
             MapVector::reserve(headers_vec, n as usize);
-            let keys = MapVector::keys(headers_vec);
-            let vals = MapVector::values(headers_vec);
+            let mut key_w = MapVector::key_writer(headers_vec);
+            let mut val_w = MapVector::value_writer(headers_vec);
             for (i, (k, v)) in resp.headers.iter().enumerate() {
-                write_varchar(keys, i as idx_t, k);
-                write_varchar(vals, i as idx_t, v);
+                key_w.write_varchar(i, k);
+                val_w.write_varchar(i, v);
             }
             MapVector::set_entry(headers_vec, 0, 0, n);
             MapVector::set_size(headers_vec, n as usize);
 
             // body (VARCHAR)
-            write_varchar(body_vec, 0, &resp.body);
+            let mut body_w = chunk.writer(3);
+            body_w.write_varchar(0, &resp.body);
 
-            duckdb_data_chunk_set_size(output, 1);
+            chunk.set_size(1);
         }
         None => {
             duckdb_data_chunk_set_size(output, 0);

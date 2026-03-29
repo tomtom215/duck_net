@@ -34,8 +34,9 @@ unsafe extern "C" fn cb_tls_inspect(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
 
     let subject_vec = duckdb_struct_vector_get_child(output, 0);
     let issuer_vec = duckdb_struct_vector_get_child(output, 1);
@@ -45,11 +46,11 @@ unsafe extern "C" fn cb_tls_inspect(
     let san_names_vec = duckdb_struct_vector_get_child(output, 5);
     let key_algo_vec = duckdb_struct_vector_get_child(output, 6);
     let sig_algo_vec = duckdb_struct_vector_get_child(output, 7);
-    let is_expired_vec = duckdb_struct_vector_get_child(output, 8);
-    let days_vec = duckdb_struct_vector_get_child(output, 9);
+    let mut is_expired_w = StructVector::field_writer(output, 8);
+    let mut days_w = StructVector::field_writer(output, 9);
     let version_vec = duckdb_struct_vector_get_child(output, 10);
 
-    let mut san_list_offset: idx_t = 0;
+    let mut san_list_offset: usize = 0;
 
     for row in 0..row_count {
         let host = host_reader.read_str(row as usize);
@@ -63,10 +64,8 @@ unsafe extern "C" fn cb_tls_inspect(
                 write_string_list(san_names_vec, row, &info.san_names, &mut san_list_offset);
                 write_varchar(key_algo_vec, row, &info.key_algorithm);
                 write_varchar(sig_algo_vec, row, &info.signature_algorithm);
-                let exp_data = duckdb_vector_get_data(is_expired_vec) as *mut bool;
-                *exp_data.add(row as usize) = info.is_expired;
-                let days_data = duckdb_vector_get_data(days_vec) as *mut i64;
-                *days_data.add(row as usize) = info.days_until_expiry;
+                is_expired_w.write_bool(row as usize, info.is_expired);
+                days_w.write_i64(row as usize, info.days_until_expiry);
                 write_varchar(version_vec, row, &info.version);
             }
             Err(e) => {
@@ -78,10 +77,8 @@ unsafe extern "C" fn cb_tls_inspect(
                 write_string_list(san_names_vec, row, &[], &mut san_list_offset);
                 write_varchar(key_algo_vec, row, "");
                 write_varchar(sig_algo_vec, row, "");
-                let exp_data = duckdb_vector_get_data(is_expired_vec) as *mut bool;
-                *exp_data.add(row as usize) = false;
-                let days_data = duckdb_vector_get_data(days_vec) as *mut i64;
-                *days_data.add(row as usize) = -1;
+                is_expired_w.write_bool(row as usize, false);
+                days_w.write_i64(row as usize, -1);
                 write_varchar(version_vec, row, "");
             }
         }
@@ -94,9 +91,10 @@ unsafe extern "C" fn cb_tls_inspect_port(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let port_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 1)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let port_reader = chunk.reader(1);
 
     let subject_vec = duckdb_struct_vector_get_child(output, 0);
     let issuer_vec = duckdb_struct_vector_get_child(output, 1);
@@ -106,15 +104,15 @@ unsafe extern "C" fn cb_tls_inspect_port(
     let san_names_vec = duckdb_struct_vector_get_child(output, 5);
     let key_algo_vec = duckdb_struct_vector_get_child(output, 6);
     let sig_algo_vec = duckdb_struct_vector_get_child(output, 7);
-    let is_expired_vec = duckdb_struct_vector_get_child(output, 8);
-    let days_vec = duckdb_struct_vector_get_child(output, 9);
+    let mut is_expired_w = StructVector::field_writer(output, 8);
+    let mut days_w = StructVector::field_writer(output, 9);
     let version_vec = duckdb_struct_vector_get_child(output, 10);
 
-    let mut san_list_offset: idx_t = 0;
+    let mut san_list_offset: usize = 0;
 
     for row in 0..row_count {
         let host = host_reader.read_str(row as usize);
-        let port = *port_data.add(row as usize) as u16;
+        let port = port_reader.read_i32(row as usize) as u16;
         match tls_inspect::inspect(host, port) {
             Ok(info) => {
                 write_varchar(subject_vec, row, &info.subject);
@@ -125,10 +123,8 @@ unsafe extern "C" fn cb_tls_inspect_port(
                 write_string_list(san_names_vec, row, &info.san_names, &mut san_list_offset);
                 write_varchar(key_algo_vec, row, &info.key_algorithm);
                 write_varchar(sig_algo_vec, row, &info.signature_algorithm);
-                let exp_data = duckdb_vector_get_data(is_expired_vec) as *mut bool;
-                *exp_data.add(row as usize) = info.is_expired;
-                let days_data = duckdb_vector_get_data(days_vec) as *mut i64;
-                *days_data.add(row as usize) = info.days_until_expiry;
+                is_expired_w.write_bool(row as usize, info.is_expired);
+                days_w.write_i64(row as usize, info.days_until_expiry);
                 write_varchar(version_vec, row, &info.version);
             }
             Err(e) => {
@@ -140,10 +136,8 @@ unsafe extern "C" fn cb_tls_inspect_port(
                 write_string_list(san_names_vec, row, &[], &mut san_list_offset);
                 write_varchar(key_algo_vec, row, "");
                 write_varchar(sig_algo_vec, row, "");
-                let exp_data = duckdb_vector_get_data(is_expired_vec) as *mut bool;
-                *exp_data.add(row as usize) = false;
-                let days_data = duckdb_vector_get_data(days_vec) as *mut i64;
-                *days_data.add(row as usize) = -1;
+                is_expired_w.write_bool(row as usize, false);
+                days_w.write_i64(row as usize, -1);
                 write_varchar(version_vec, row, "");
             }
         }

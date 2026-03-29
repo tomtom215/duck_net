@@ -23,23 +23,23 @@ unsafe extern "C" fn cb_prometheus_query(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let promql_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let promql_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let rtype_vec = duckdb_struct_vector_get_child(output, 1);
     let body_vec = duckdb_struct_vector_get_child(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let promql = promql_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let promql = promql_reader.read_str(row);
 
         let result = prometheus::query(url, promql);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(rtype_vec, row, &result.result_type);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);
@@ -52,29 +52,29 @@ unsafe extern "C" fn cb_prometheus_query_range(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let promql_reader = VectorReader::new(input, 1);
-    let start_reader = VectorReader::new(input, 2);
-    let end_reader = VectorReader::new(input, 3);
-    let step_reader = VectorReader::new(input, 4);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let promql_reader = chunk.reader(1);
+    let start_reader = chunk.reader(2);
+    let end_reader = chunk.reader(3);
+    let step_reader = chunk.reader(4);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let rtype_vec = duckdb_struct_vector_get_child(output, 1);
     let body_vec = duckdb_struct_vector_get_child(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let promql = promql_reader.read_str(row as usize);
-        let start = start_reader.read_str(row as usize);
-        let end = end_reader.read_str(row as usize);
-        let step = step_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let promql = promql_reader.read_str(row);
+        let start = start_reader.read_str(row);
+        let end = end_reader.read_str(row);
+        let step = step_reader.read_str(row);
 
         let result = prometheus::query_range(url, promql, start, end, step);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row, result.success);
         write_varchar(rtype_vec, row, &result.result_type);
         write_varchar(body_vec, row, &result.body);
         write_varchar(message_vec, row, &result.message);

@@ -21,13 +21,14 @@ unsafe extern "C" fn cb_syslog_send_4(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let facility_reader = VectorReader::new(input, 1);
-    let severity_reader = VectorReader::new(input, 2);
-    let msg_reader = VectorReader::new(input, 3);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let facility_reader = chunk.reader(1);
+    let severity_reader = chunk.reader(2);
+    let msg_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let message_vec = duckdb_struct_vector_get_child(output, 1);
 
     for row in 0..row_count {
@@ -39,8 +40,7 @@ unsafe extern "C" fn cb_syslog_send_4(
         let facility = match syslog::facility_from_name(facility_str) {
             Some(f) => f,
             None => {
-                let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-                *sd.add(row as usize) = false;
+                success_w.write_bool(row as usize, false);
                 write_varchar(
                     message_vec,
                     row,
@@ -52,8 +52,7 @@ unsafe extern "C" fn cb_syslog_send_4(
         let severity = match syslog::severity_from_name(severity_str) {
             Some(s) => s,
             None => {
-                let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-                *sd.add(row as usize) = false;
+                success_w.write_bool(row as usize, false);
                 write_varchar(
                     message_vec,
                     row,
@@ -64,8 +63,7 @@ unsafe extern "C" fn cb_syslog_send_4(
         };
 
         let result = syslog::send(host, 0, facility, severity, "", "", msg);
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -76,21 +74,22 @@ unsafe extern "C" fn cb_syslog_send_7(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let port_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 1)) as *const i32;
-    let facility_reader = VectorReader::new(input, 2);
-    let severity_reader = VectorReader::new(input, 3);
-    let hostname_reader = VectorReader::new(input, 4);
-    let app_reader = VectorReader::new(input, 5);
-    let msg_reader = VectorReader::new(input, 6);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let port_reader = chunk.reader(1);
+    let facility_reader = chunk.reader(2);
+    let severity_reader = chunk.reader(3);
+    let hostname_reader = chunk.reader(4);
+    let app_reader = chunk.reader(5);
+    let msg_reader = chunk.reader(6);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let message_vec = duckdb_struct_vector_get_child(output, 1);
 
     for row in 0..row_count {
         let host = host_reader.read_str(row as usize);
-        let port = *port_data.add(row as usize) as u16;
+        let port = port_reader.read_i32(row as usize) as u16;
         let facility_str = facility_reader.read_str(row as usize);
         let severity_str = severity_reader.read_str(row as usize);
         let hostname = hostname_reader.read_str(row as usize);
@@ -100,8 +99,7 @@ unsafe extern "C" fn cb_syslog_send_7(
         let facility = match syslog::facility_from_name(facility_str) {
             Some(f) => f,
             None => {
-                let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-                *sd.add(row as usize) = false;
+                success_w.write_bool(row as usize, false);
                 write_varchar(
                     message_vec,
                     row,
@@ -113,8 +111,7 @@ unsafe extern "C" fn cb_syslog_send_7(
         let severity = match syslog::severity_from_name(severity_str) {
             Some(s) => s,
             None => {
-                let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-                *sd.add(row as usize) = false;
+                success_w.write_bool(row as usize, false);
                 write_varchar(
                     message_vec,
                     row,
@@ -125,8 +122,7 @@ unsafe extern "C" fn cb_syslog_send_7(
         };
 
         let result = syslog::send(host, port, facility, severity, hostname, app_name, msg);
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }

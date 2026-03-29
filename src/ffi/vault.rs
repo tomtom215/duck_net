@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::vault;
 
-use super::scalars::write_varchar;
 
 // ===== Return Types =====
 
@@ -34,50 +33,35 @@ fn vault_health_type() -> LogicalType {
 // ===== Output Helpers =====
 
 /// Write a VaultResult into the output STRUCT vector at the given row.
-unsafe fn write_vault_result(output: duckdb_vector, row: idx_t, r: &vault::VaultResult) {
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let data_vec = duckdb_struct_vector_get_child(output, 1);
-    let lease_vec = duckdb_struct_vector_get_child(output, 2);
-    let renewable_vec = duckdb_struct_vector_get_child(output, 3);
-    let message_vec = duckdb_struct_vector_get_child(output, 4);
+unsafe fn write_vault_result(output: duckdb_vector, row: usize, r: &vault::VaultResult) {
+    let mut success_w = StructVector::field_writer(output, 0);
+    let mut data_w = StructVector::field_writer(output, 1);
+    let mut lease_w = StructVector::field_writer(output, 2);
+    let mut renewable_w = StructVector::field_writer(output, 3);
+    let mut message_w = StructVector::field_writer(output, 4);
 
-    let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-    *sd.add(row as usize) = r.success;
-
-    write_varchar(data_vec, row, &r.data);
-
-    let ld = duckdb_vector_get_data(lease_vec) as *mut i64;
-    *ld.add(row as usize) = r.lease_duration;
-
-    let rd = duckdb_vector_get_data(renewable_vec) as *mut bool;
-    *rd.add(row as usize) = r.renewable;
-
-    write_varchar(message_vec, row, &r.message);
+    success_w.write_bool(row, r.success);
+    data_w.write_varchar(row, &r.data);
+    lease_w.write_i64(row, r.lease_duration);
+    renewable_w.write_bool(row, r.renewable);
+    message_w.write_varchar(row, &r.message);
 }
 
 /// Write a VaultHealthResult into the output STRUCT vector at the given row.
-unsafe fn write_vault_health(output: duckdb_vector, row: idx_t, r: &vault::VaultHealthResult) {
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let init_vec = duckdb_struct_vector_get_child(output, 1);
-    let sealed_vec = duckdb_struct_vector_get_child(output, 2);
-    let standby_vec = duckdb_struct_vector_get_child(output, 3);
-    let version_vec = duckdb_struct_vector_get_child(output, 4);
-    let message_vec = duckdb_struct_vector_get_child(output, 5);
+unsafe fn write_vault_health(output: duckdb_vector, row: usize, r: &vault::VaultHealthResult) {
+    let mut success_w = StructVector::field_writer(output, 0);
+    let mut init_w = StructVector::field_writer(output, 1);
+    let mut sealed_w = StructVector::field_writer(output, 2);
+    let mut standby_w = StructVector::field_writer(output, 3);
+    let mut version_w = StructVector::field_writer(output, 4);
+    let mut message_w = StructVector::field_writer(output, 5);
 
-    let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-    *sd.add(row as usize) = r.success;
-
-    let id = duckdb_vector_get_data(init_vec) as *mut bool;
-    *id.add(row as usize) = r.initialized;
-
-    let se = duckdb_vector_get_data(sealed_vec) as *mut bool;
-    *se.add(row as usize) = r.sealed;
-
-    let st = duckdb_vector_get_data(standby_vec) as *mut bool;
-    *st.add(row as usize) = r.standby;
-
-    write_varchar(version_vec, row, &r.version);
-    write_varchar(message_vec, row, &r.message);
+    success_w.write_bool(row, r.success);
+    init_w.write_bool(row, r.initialized);
+    sealed_w.write_bool(row, r.sealed);
+    standby_w.write_bool(row, r.standby);
+    version_w.write_varchar(row, &r.version);
+    message_w.write_varchar(row, &r.message);
 }
 
 // ===== Callbacks =====
@@ -88,15 +72,16 @@ unsafe extern "C" fn cb_vault_read(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let token_reader = VectorReader::new(input, 1);
-    let path_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let token_reader = chunk.reader(1);
+    let path_reader = chunk.reader(2);
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let token = token_reader.read_str(row as usize);
-        let path = path_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let token = token_reader.read_str(row);
+        let path = path_reader.read_str(row);
         let result = vault::read(url, token, path);
         write_vault_result(output, row, &result);
     }
@@ -108,17 +93,18 @@ unsafe extern "C" fn cb_vault_write(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let token_reader = VectorReader::new(input, 1);
-    let path_reader = VectorReader::new(input, 2);
-    let data_reader = VectorReader::new(input, 3);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let token_reader = chunk.reader(1);
+    let path_reader = chunk.reader(2);
+    let data_reader = chunk.reader(3);
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let token = token_reader.read_str(row as usize);
-        let path = path_reader.read_str(row as usize);
-        let data_json = data_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let token = token_reader.read_str(row);
+        let path = path_reader.read_str(row);
+        let data_json = data_reader.read_str(row);
         let result = vault::write(url, token, path, data_json);
         write_vault_result(output, row, &result);
     }
@@ -130,15 +116,16 @@ unsafe extern "C" fn cb_vault_list(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let token_reader = VectorReader::new(input, 1);
-    let path_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let token_reader = chunk.reader(1);
+    let path_reader = chunk.reader(2);
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let token = token_reader.read_str(row as usize);
-        let path = path_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
+        let token = token_reader.read_str(row);
+        let path = path_reader.read_str(row);
         let result = vault::list(url, token, path);
         write_vault_result(output, row, &result);
     }
@@ -150,11 +137,12 @@ unsafe extern "C" fn cb_vault_health(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
+        let url = url_reader.read_str(row);
         let result = vault::health(url);
         write_vault_health(output, row, &result);
     }

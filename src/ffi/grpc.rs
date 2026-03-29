@@ -37,21 +37,21 @@ unsafe extern "C" fn cb_grpc_list_services(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let services_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
-    let mut list_offset: idx_t = 0;
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
 
         let result = grpc_reflect::list_services(url);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_string_list(services_vec, row, &result.services, &mut list_offset);
         write_varchar(message_vec, row, &result.message);
     }
@@ -63,16 +63,17 @@ unsafe extern "C" fn cb_grpc_call(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let svc_reader = VectorReader::new(input, 1);
-    let method_reader = VectorReader::new(input, 2);
-    let payload_reader = VectorReader::new(input, 3);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let svc_reader = chunk.reader(1);
+    let method_reader = chunk.reader(2);
+    let payload_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let status_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut success_w = StructVector::field_writer(output, 0);
+    let mut status_w = StructVector::field_writer(output, 1);
     let body_vec = duckdb_struct_vector_get_child(output, 2);
-    let grpc_status_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut grpc_status_w = StructVector::field_writer(output, 3);
     let grpc_msg_vec = duckdb_struct_vector_get_child(output, 4);
 
     for row in 0..row_count {
@@ -83,13 +84,10 @@ unsafe extern "C" fn cb_grpc_call(
 
         let result = grpc::call(url, service, method, payload);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
-        let hd = duckdb_vector_get_data(status_vec) as *mut i32;
-        *hd.add(row as usize) = result.status_code;
+        success_w.write_bool(row as usize, result.success);
+        status_w.write_i32(row as usize, result.status_code);
         write_varchar(body_vec, row, &result.body);
-        let gd = duckdb_vector_get_data(grpc_status_vec) as *mut i32;
-        *gd.add(row as usize) = result.grpc_status;
+        grpc_status_w.write_i32(row as usize, result.grpc_status);
         write_varchar(grpc_msg_vec, row, &result.grpc_message);
     }
 }

@@ -22,11 +22,12 @@ unsafe extern "C" fn cb_memcached_get(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let value_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -36,8 +37,7 @@ unsafe extern "C" fn cb_memcached_get(
 
         let result = memcached::get(host, key);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(value_vec, row, &result.value);
         write_varchar(message_vec, row, &result.message);
     }
@@ -49,12 +49,13 @@ unsafe extern "C" fn cb_memcached_set(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let value_reader = VectorReader::new(input, 2);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let value_reader = chunk.reader(2);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let value_out_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -65,8 +66,7 @@ unsafe extern "C" fn cb_memcached_set(
 
         let result = memcached::set(host, key, value, 0);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(value_out_vec, row, &result.value);
         write_varchar(message_vec, row, &result.message);
     }
@@ -78,13 +78,14 @@ unsafe extern "C" fn cb_memcached_set_ttl(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let host_reader = VectorReader::new(input, 0);
-    let key_reader = VectorReader::new(input, 1);
-    let value_reader = VectorReader::new(input, 2);
-    let ttl_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 3)) as *const i32;
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let host_reader = chunk.reader(0);
+    let key_reader = chunk.reader(1);
+    let value_reader = chunk.reader(2);
+    let ttl_reader = chunk.reader(3);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_w = StructVector::field_writer(output, 0);
     let value_out_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
 
@@ -92,12 +93,11 @@ unsafe extern "C" fn cb_memcached_set_ttl(
         let host = host_reader.read_str(row as usize);
         let key = key_reader.read_str(row as usize);
         let value = value_reader.read_str(row as usize);
-        let ttl = *ttl_data.add(row as usize) as u32;
+        let ttl = ttl_reader.read_i32(row as usize) as u32;
 
         let result = memcached::set(host, key, value, ttl);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        success_w.write_bool(row as usize, result.success);
         write_varchar(value_out_vec, row, &result.value);
         write_varchar(message_vec, row, &result.message);
     }

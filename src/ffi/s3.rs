@@ -35,17 +35,18 @@ unsafe extern "C" fn cb_s3_get(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let endpoint_reader = VectorReader::new(input, 0);
-    let bucket_reader = VectorReader::new(input, 1);
-    let key_reader = VectorReader::new(input, 2);
-    let access_key_reader = VectorReader::new(input, 3);
-    let secret_key_reader = VectorReader::new(input, 4);
-    let region_reader = VectorReader::new(input, 5);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let endpoint_reader = chunk.reader(0);
+    let bucket_reader = chunk.reader(1);
+    let key_reader = chunk.reader(2);
+    let access_key_reader = chunk.reader(3);
+    let secret_key_reader = chunk.reader(4);
+    let region_reader = chunk.reader(5);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let status_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut status_writer = StructVector::field_writer(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
@@ -58,11 +59,9 @@ unsafe extern "C" fn cb_s3_get(
 
         let result = s3::s3_get(endpoint, bucket, key, access_key, secret_key, region);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(body_vec, row, &result.body);
-        let st = duckdb_vector_get_data(status_vec) as *mut i32;
-        *st.add(row as usize) = result.status;
+        unsafe { status_writer.write_i32(row as usize, result.status) };
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -73,18 +72,19 @@ unsafe extern "C" fn cb_s3_put(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let endpoint_reader = VectorReader::new(input, 0);
-    let bucket_reader = VectorReader::new(input, 1);
-    let key_reader = VectorReader::new(input, 2);
-    let body_reader = VectorReader::new(input, 3);
-    let access_key_reader = VectorReader::new(input, 4);
-    let secret_key_reader = VectorReader::new(input, 5);
-    let region_reader = VectorReader::new(input, 6);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let endpoint_reader = chunk.reader(0);
+    let bucket_reader = chunk.reader(1);
+    let key_reader = chunk.reader(2);
+    let body_reader = chunk.reader(3);
+    let access_key_reader = chunk.reader(4);
+    let secret_key_reader = chunk.reader(5);
+    let region_reader = chunk.reader(6);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let status_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut status_writer = StructVector::field_writer(output, 2);
     let message_vec = duckdb_struct_vector_get_child(output, 3);
 
     for row in 0..row_count {
@@ -98,11 +98,9 @@ unsafe extern "C" fn cb_s3_put(
 
         let result = s3::s3_put(endpoint, bucket, key, body, access_key, secret_key, region);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row as usize, result.success) };
         write_varchar(body_vec, row, &result.body);
-        let st = duckdb_vector_get_data(status_vec) as *mut i32;
-        *st.add(row as usize) = result.status;
+        unsafe { status_writer.write_i32(row as usize, result.status) };
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -113,31 +111,31 @@ unsafe extern "C" fn cb_s3_list(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let endpoint_reader = VectorReader::new(input, 0);
-    let bucket_reader = VectorReader::new(input, 1);
-    let prefix_reader = VectorReader::new(input, 2);
-    let access_key_reader = VectorReader::new(input, 3);
-    let secret_key_reader = VectorReader::new(input, 4);
-    let region_reader = VectorReader::new(input, 5);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let endpoint_reader = chunk.reader(0);
+    let bucket_reader = chunk.reader(1);
+    let prefix_reader = chunk.reader(2);
+    let access_key_reader = chunk.reader(3);
+    let secret_key_reader = chunk.reader(4);
+    let region_reader = chunk.reader(5);
 
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let mut success_writer = StructVector::field_writer(output, 0);
     let keys_vec = duckdb_struct_vector_get_child(output, 1);
     let message_vec = duckdb_struct_vector_get_child(output, 2);
-    let mut list_offset: idx_t = 0;
+    let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let endpoint = endpoint_reader.read_str(row as usize);
-        let bucket = bucket_reader.read_str(row as usize);
-        let prefix = prefix_reader.read_str(row as usize);
-        let access_key = access_key_reader.read_str(row as usize);
-        let secret_key = secret_key_reader.read_str(row as usize);
-        let region = region_reader.read_str(row as usize);
+        let endpoint = endpoint_reader.read_str(row);
+        let bucket = bucket_reader.read_str(row);
+        let prefix = prefix_reader.read_str(row);
+        let access_key = access_key_reader.read_str(row);
+        let secret_key = secret_key_reader.read_str(row);
+        let region = region_reader.read_str(row);
 
         let result = s3::s3_list(endpoint, bucket, prefix, access_key, secret_key, region);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        unsafe { success_writer.write_bool(row, result.success) };
         write_string_list(keys_vec, row, &result.keys, &mut list_offset);
         write_varchar(message_vec, row, &result.message);
     }

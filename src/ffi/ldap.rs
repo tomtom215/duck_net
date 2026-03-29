@@ -27,10 +27,10 @@ struct LdapSearchInitData {
 unsafe extern "C" fn ldap_search_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
 
-    let url = read_param_varchar(&bind, 0);
-    let base_dn = read_param_varchar(&bind, 1);
-    let filter = read_param_varchar(&bind, 2);
-    let attrs_str = read_param_varchar(&bind, 3);
+    let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
+    let base_dn = bind.get_parameter_value(1).as_str().unwrap_or_default();
+    let filter = bind.get_parameter_value(2).as_str().unwrap_or_default();
+    let attrs_str = bind.get_parameter_value(3).as_str().unwrap_or_default();
 
     let attributes: Vec<String> = attrs_str
         .split(',')
@@ -51,18 +51,6 @@ unsafe extern "C" fn ldap_search_bind(info: duckdb_bind_info) {
             attributes,
         },
     );
-}
-
-unsafe fn read_param_varchar(bind: &BindInfo, idx: u64) -> String {
-    let val = bind.get_parameter(idx);
-    let cstr = duckdb_get_varchar(val);
-    let s = std::ffi::CStr::from_ptr(cstr)
-        .to_str()
-        .unwrap_or("")
-        .to_string();
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
-    s
 }
 
 unsafe extern "C" fn ldap_search_init(info: duckdb_init_info) {
@@ -111,9 +99,10 @@ unsafe extern "C" fn ldap_search_scan(info: duckdb_function_info, output: duckdb
     }
 
     // Flatten entries into rows
-    let dn_vec = duckdb_data_chunk_get_vector(output, 0);
-    let attr_vec = duckdb_data_chunk_get_vector(output, 1);
-    let val_vec = duckdb_data_chunk_get_vector(output, 2);
+    let out_chunk = DataChunk::from_raw(output);
+    let mut dn_w = out_chunk.writer(0);
+    let mut attr_w = out_chunk.writer(1);
+    let mut val_w = out_chunk.writer(2);
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
@@ -129,18 +118,18 @@ unsafe extern "C" fn ldap_search_scan(info: duckdb_function_info, output: duckdb
                     // For simplicity, we output all attributes of one entry at once
                     break;
                 }
-                write_varchar(dn_vec, count, &entry.dn);
-                write_varchar(attr_vec, count, attr_name);
-                write_varchar(val_vec, count, val);
+                dn_w.write_varchar(count as usize, &entry.dn);
+                attr_w.write_varchar(count as usize, attr_name);
+                val_w.write_varchar(count as usize, val);
                 count += 1;
                 emitted = true;
             }
         }
         if !emitted {
             // Entry with no attributes
-            write_varchar(dn_vec, count, &entry.dn);
-            write_varchar(attr_vec, count, "");
-            write_varchar(val_vec, count, "");
+            dn_w.write_varchar(count as usize, &entry.dn);
+            attr_w.write_varchar(count as usize, "");
+            val_w.write_varchar(count as usize, "");
             count += 1;
         }
         init_data.idx += 1;
@@ -163,13 +152,11 @@ unsafe extern "C" fn cb_ldap_bind(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let dn_reader = VectorReader::new(input, 1);
-    let pass_reader = VectorReader::new(input, 2);
-
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let dn_reader = chunk.reader(1);
+    let pass_reader = chunk.reader(2);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -177,8 +164,9 @@ unsafe extern "C" fn cb_ldap_bind(
         let pass = pass_reader.read_str(row as usize);
         let result = ldap::bind(url, dn, pass);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        let mut success_w = StructVector::field_writer(output, 0);
+        let message_vec = duckdb_struct_vector_get_child(output, 1);
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -189,15 +177,13 @@ unsafe extern "C" fn cb_ldap_add(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let dn_reader = VectorReader::new(input, 1);
-    let pass_reader = VectorReader::new(input, 2);
-    let entry_dn_reader = VectorReader::new(input, 3);
-    let attrs_reader = VectorReader::new(input, 4);
-
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let dn_reader = chunk.reader(1);
+    let pass_reader = chunk.reader(2);
+    let entry_dn_reader = chunk.reader(3);
+    let attrs_reader = chunk.reader(4);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -207,8 +193,9 @@ unsafe extern "C" fn cb_ldap_add(
         let attrs = attrs_reader.read_str(row as usize);
         let result = ldap_write::add(url, dn, pass, entry_dn, attrs);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        let mut success_w = StructVector::field_writer(output, 0);
+        let message_vec = duckdb_struct_vector_get_child(output, 1);
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -219,15 +206,13 @@ unsafe extern "C" fn cb_ldap_modify(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let dn_reader = VectorReader::new(input, 1);
-    let pass_reader = VectorReader::new(input, 2);
-    let entry_dn_reader = VectorReader::new(input, 3);
-    let mods_reader = VectorReader::new(input, 4);
-
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let dn_reader = chunk.reader(1);
+    let pass_reader = chunk.reader(2);
+    let entry_dn_reader = chunk.reader(3);
+    let mods_reader = chunk.reader(4);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -237,8 +222,9 @@ unsafe extern "C" fn cb_ldap_modify(
         let mods = mods_reader.read_str(row as usize);
         let result = ldap_write::modify(url, dn, pass, entry_dn, mods);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        let mut success_w = StructVector::field_writer(output, 0);
+        let message_vec = duckdb_struct_vector_get_child(output, 1);
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }
@@ -249,14 +235,12 @@ unsafe extern "C" fn cb_ldap_delete(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let url_reader = VectorReader::new(input, 0);
-    let dn_reader = VectorReader::new(input, 1);
-    let pass_reader = VectorReader::new(input, 2);
-    let entry_dn_reader = VectorReader::new(input, 3);
-
-    let success_vec = duckdb_struct_vector_get_child(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let url_reader = chunk.reader(0);
+    let dn_reader = chunk.reader(1);
+    let pass_reader = chunk.reader(2);
+    let entry_dn_reader = chunk.reader(3);
 
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
@@ -265,8 +249,9 @@ unsafe extern "C" fn cb_ldap_delete(
         let entry_dn = entry_dn_reader.read_str(row as usize);
         let result = ldap_write::delete(url, dn, pass, entry_dn);
 
-        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
-        *sd.add(row as usize) = result.success;
+        let mut success_w = StructVector::field_writer(output, 0);
+        let message_vec = duckdb_struct_vector_get_child(output, 1);
+        success_w.write_bool(row as usize, result.success);
         write_varchar(message_vec, row, &result.message);
     }
 }

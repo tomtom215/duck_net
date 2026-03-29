@@ -6,8 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::aws_sigv4;
 
-use super::scalars::write_varchar;
-
 fn sigv4_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("authorization", LogicalType::new(TypeId::Varchar)),
@@ -22,27 +20,28 @@ unsafe extern "C" fn cb_aws_sigv4_sign(
     input: duckdb_data_chunk,
     output: duckdb_vector,
 ) {
-    let row_count = duckdb_data_chunk_get_size(input);
-    let method_reader = VectorReader::new(input, 0);
-    let url_reader = VectorReader::new(input, 1);
-    let body_reader = VectorReader::new(input, 2);
-    let ak_reader = VectorReader::new(input, 3);
-    let sk_reader = VectorReader::new(input, 4);
-    let region_reader = VectorReader::new(input, 5);
-    let service_reader = VectorReader::new(input, 6);
+    let chunk = DataChunk::from_raw(input);
+    let row_count = chunk.size();
+    let method_reader = chunk.reader(0);
+    let url_reader = chunk.reader(1);
+    let body_reader = chunk.reader(2);
+    let ak_reader = chunk.reader(3);
+    let sk_reader = chunk.reader(4);
+    let region_reader = chunk.reader(5);
+    let service_reader = chunk.reader(6);
 
-    let auth_vec = duckdb_struct_vector_get_child(output, 0);
-    let date_vec = duckdb_struct_vector_get_child(output, 1);
-    let sha_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut auth_w = StructVector::field_writer(output, 0);
+    let mut date_w = StructVector::field_writer(output, 1);
+    let mut sha_w = StructVector::field_writer(output, 2);
 
     for row in 0..row_count {
-        let method = method_reader.read_str(row as usize);
-        let url = url_reader.read_str(row as usize);
-        let body = body_reader.read_str(row as usize);
-        let access_key = ak_reader.read_str(row as usize);
-        let secret_key = sk_reader.read_str(row as usize);
-        let region = region_reader.read_str(row as usize);
-        let service = service_reader.read_str(row as usize);
+        let method = method_reader.read_str(row);
+        let url = url_reader.read_str(row);
+        let body = body_reader.read_str(row);
+        let access_key = ak_reader.read_str(row);
+        let secret_key = sk_reader.read_str(row);
+        let region = region_reader.read_str(row);
+        let service = service_reader.read_str(row);
 
         match aws_sigv4::sign(
             method,
@@ -55,14 +54,14 @@ unsafe extern "C" fn cb_aws_sigv4_sign(
             service,
         ) {
             Ok(signed) => {
-                write_varchar(auth_vec, row, &signed.authorization);
-                write_varchar(date_vec, row, &signed.x_amz_date);
-                write_varchar(sha_vec, row, &signed.x_amz_content_sha256);
+                auth_w.write_varchar(row, &signed.authorization);
+                date_w.write_varchar(row, &signed.x_amz_date);
+                sha_w.write_varchar(row, &signed.x_amz_content_sha256);
             }
             Err(e) => {
-                write_varchar(auth_vec, row, &format!("Error: {e}"));
-                write_varchar(date_vec, row, "");
-                write_varchar(sha_vec, row, "");
+                auth_w.write_varchar(row, &format!("Error: {e}"));
+                date_w.write_varchar(row, "");
+                sha_w.write_varchar(row, "");
             }
         }
     }
