@@ -16,6 +16,7 @@ pub struct SignedRequest {
 /// Sign an HTTP request using AWS Signature Version 4.
 ///
 /// Returns the Authorization header value and required X-Amz-* headers.
+#[allow(clippy::too_many_arguments)]
 pub fn sign(
     method: &str,
     url: &str,

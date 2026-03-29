@@ -146,6 +146,18 @@ fn effective_rps(domain: &str) -> u32 {
     get_global_rps()
 }
 
+/// Maximum number of tracked domains to prevent unbounded memory growth.
+const MAX_TRACKED_DOMAINS: usize = 10_000;
+
+/// Evict stale buckets that have not been used for over 5 minutes.
+fn evict_stale_buckets(limiters: &mut HashMap<String, TokenBucket>) {
+    if limiters.len() <= MAX_TRACKED_DOMAINS / 2 {
+        return;
+    }
+    let cutoff = std::time::Instant::now() - std::time::Duration::from_secs(300);
+    limiters.retain(|_, bucket| bucket.last_refill > cutoff);
+}
+
 /// Acquire a rate limit token for the given URL. Blocks if necessary.
 pub fn acquire_for_url(url: &str) {
     let domain = match domain_from_url(url) {
@@ -160,6 +172,10 @@ pub fn acquire_for_url(url: &str) {
 
     let wait = {
         let mut limiters = LIMITERS.lock().unwrap();
+        // Evict stale entries to prevent unbounded memory growth (CWE-400)
+        if limiters.len() >= MAX_TRACKED_DOMAINS {
+            evict_stale_buckets(&mut limiters);
+        }
         let bucket = limiters
             .entry(domain)
             .or_insert_with(|| TokenBucket::new(rps as f64));

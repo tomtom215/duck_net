@@ -23,6 +23,11 @@ pub struct NtpResult {
 
 /// Query an NTP server for the current time.
 pub fn query(server: &str) -> Result<NtpResult, String> {
+    // Input validation
+    crate::security::validate_host(server)?;
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(server)?;
+
     let addr = format!("{server}:{NTP_PORT}");
 
     let socket =

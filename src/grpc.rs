@@ -166,12 +166,18 @@ async fn call_inner(
     json_payload: &str,
 ) -> Result<GrpcResult, String> {
     let (host, port, use_tls) = parse_url(url)?;
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
     let path = format!("/{service}/{method}");
 
     let addr = format!("{host}:{port}");
-    let tcp = tokio::net::TcpStream::connect(&addr)
-        .await
-        .map_err(|e| format!("gRPC TCP connect failed: {e}"))?;
+    let tcp = tokio::time::timeout(
+        tokio::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+        tokio::net::TcpStream::connect(&addr),
+    )
+    .await
+    .map_err(|_| "gRPC TCP connect timed out".to_string())?
+    .map_err(|e| format!("gRPC TCP connect failed: {e}"))?;
 
     // Encode the payload with gRPC framing
     let payload = encode_grpc_message(json_payload.as_bytes());
@@ -347,12 +353,23 @@ async fn send_grpc_request(
     })
 }
 
+/// Maximum recursion depth for protobuf parsing to prevent stack overflow.
+const MAX_PROTO_DEPTH: usize = 16;
+
 /// Extract length-delimited string fields from protobuf-encoded data.
 ///
 /// Scans the byte stream for varint-encoded field tags with wire type 2
 /// (length-delimited) and attempts to decode the value as a UTF-8 string.
 /// Non-UTF-8 values are silently skipped.
 fn extract_proto_strings(data: &[u8]) -> Vec<String> {
+    extract_proto_strings_depth(data, 0)
+}
+
+/// Depth-limited protobuf string extraction (CWE-674).
+fn extract_proto_strings_depth(data: &[u8], depth: usize) -> Vec<String> {
+    if depth >= MAX_PROTO_DEPTH {
+        return Vec::new();
+    }
     let mut strings = Vec::new();
     let mut i = 0;
 
@@ -394,8 +411,8 @@ fn extract_proto_strings(data: &[u8]) -> Vec<String> {
                         strings.push(s.to_string());
                     }
                 }
-                // Also recurse into the sub-message to find nested strings
-                let nested = extract_proto_strings(value);
+                // Recurse into the sub-message with depth limit
+                let nested = extract_proto_strings_depth(value, depth + 1);
                 strings.extend(nested);
                 i += length;
             }
@@ -465,12 +482,18 @@ async fn list_services_async(url: &str) -> GrpcReflectionResult {
 
 async fn list_services_inner(url: &str) -> Result<GrpcReflectionResult, String> {
     let (host, port, use_tls) = parse_url(url)?;
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
     let path = "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo";
 
     let addr = format!("{host}:{port}");
-    let tcp = tokio::net::TcpStream::connect(&addr)
-        .await
-        .map_err(|e| format!("gRPC TCP connect failed: {e}"))?;
+    let tcp = tokio::time::timeout(
+        tokio::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+        tokio::net::TcpStream::connect(&addr),
+    )
+    .await
+    .map_err(|_| "gRPC TCP connect timed out".to_string())?
+    .map_err(|e| format!("gRPC TCP connect failed: {e}"))?;
 
     // Protobuf-encoded ServerReflectionRequest with list_services = ""
     // Field 7, wire type 2 (length-delimited), length 0

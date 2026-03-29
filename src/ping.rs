@@ -24,7 +24,7 @@ pub fn ping(host: &str, timeout_secs: u32) -> PingResult {
         };
     }
 
-    let timeout = timeout_secs.max(1).min(30);
+    let timeout = timeout_secs.clamp(1, 30);
 
     let output = Command::new("ping")
         .args(["-c", "1", "-W", &timeout.to_string(), host])
@@ -77,7 +77,7 @@ pub fn traceroute(host: &str, max_hops: u32) -> Result<Vec<TracerouteHop>, Strin
         return Err(format!("Invalid host: {host}"));
     }
 
-    let max_hops = max_hops.max(1).min(64);
+    let max_hops = max_hops.clamp(1, 64);
 
     let output = Command::new("traceroute")
         .args(["-m", &max_hops.to_string(), "-w", "3", "-n", host])

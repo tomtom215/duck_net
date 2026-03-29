@@ -28,6 +28,15 @@ pub fn build_envelope(body_xml: &str, header_xml: Option<&str>, version: SoapVer
     )
 }
 
+/// Sanitize a SOAP action string to prevent HTTP header injection (CWE-113).
+/// Strips CR/LF/NUL characters that could cause header splitting.
+fn sanitize_action(action: &str) -> String {
+    action
+        .chars()
+        .filter(|c| *c != '\r' && *c != '\n' && *c != '\0')
+        .collect()
+}
+
 pub fn send_request(
     url: &str,
     action: &str,
@@ -37,18 +46,19 @@ pub fn send_request(
     version: SoapVersion,
 ) -> HttpResponse {
     let envelope = build_envelope(body_xml, header_xml, version);
+    let action = sanitize_action(action);
 
     let mut headers: Vec<(String, String)> = custom_headers.to_vec();
 
     match version {
         SoapVersion::V1_1 => {
             headers.push(("Content-Type".into(), "text/xml; charset=utf-8".into()));
-            headers.push(("SOAPAction".into(), format!("\"{action}\"")));
+            headers.push(("SOAPAction".into(), format!("\"{}\"", action)));
         }
         SoapVersion::V1_2 => {
             headers.push((
                 "Content-Type".into(),
-                format!("application/soap+xml; charset=utf-8; action=\"{action}\""),
+                format!("application/soap+xml; charset=utf-8; action=\"{}\"", action),
             ));
         }
     }

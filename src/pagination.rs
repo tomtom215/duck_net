@@ -117,8 +117,11 @@ pub fn fetch_next(
             if let Some(path) = json_path {
                 if let Some(next) = json::dot_path(&resp.body, path) {
                     if !next.is_empty() {
-                        state.next_url = Some(next.to_string());
-                        found = true;
+                        // Validate next URL to prevent open redirect (CWE-601)
+                        if is_safe_pagination_url(next) {
+                            state.next_url = Some(next.to_string());
+                            found = true;
+                        }
                     }
                 }
             }
@@ -126,8 +129,11 @@ pub fn fetch_next(
             // Try Link header
             if !found && *use_link_header {
                 if let Some(next) = parse_link_header_next(&resp.headers) {
-                    state.next_url = Some(next);
-                    found = true;
+                    // Validate next URL to prevent open redirect (CWE-601)
+                    if is_safe_pagination_url(&next) {
+                        state.next_url = Some(next);
+                        found = true;
+                    }
                 }
             }
 
@@ -143,6 +149,17 @@ pub fn fetch_next(
     }
 
     Some((page_num, resp))
+}
+
+/// Validate that a pagination URL is safe to follow (CWE-601, CWE-918).
+///
+/// Only allows HTTP/HTTPS URLs and applies SSRF protection.
+fn is_safe_pagination_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return false;
+    }
+    crate::security::validate_no_ssrf(url).is_ok()
 }
 
 /// Parse RFC 8288 Link header to find rel="next" URL.

@@ -32,6 +32,15 @@ pub fn lookup(domain: &str) -> Result<String, String> {
 
 /// Query a specific WHOIS server.
 pub fn query_server(server: &str, query: &str) -> Result<String, String> {
+    // Input validation
+    crate::security::validate_host(server)?;
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(server)?;
+    // Validate query length (CWE-400)
+    if query.len() > 256 {
+        return Err("WHOIS query too long (max 256 characters)".to_string());
+    }
+
     let addr = format!("{server}:{WHOIS_PORT}");
     let timeout = Duration::from_secs(TIMEOUT_SECS);
 

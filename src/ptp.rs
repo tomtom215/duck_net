@@ -36,6 +36,7 @@ pub struct SntpResult {
     /// Reference timestamp as Unix seconds (with fractional nanoseconds).
     pub reference_time_unix: f64,
     /// Origin timestamp as Unix seconds (T1 copied back by server).
+    #[allow(dead_code)]
     pub origin_time_unix: f64,
     /// Receive timestamp as Unix seconds (T2 at server).
     pub receive_time_unix: f64,
@@ -126,6 +127,8 @@ fn now_unix_secs() -> f64 {
 /// delay with nanosecond granularity.
 pub fn sntp_query(server: &str) -> Result<SntpResult, String> {
     validate_server(server)?;
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(server)?;
 
     let addr = format!("{server}:{NTP_PORT}");
 

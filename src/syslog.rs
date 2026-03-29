@@ -78,6 +78,33 @@ pub fn send(
         };
     }
 
+    // Validate message content (CWE-20)
+    if message.len() > 65000 {
+        return SyslogResult {
+            success: false,
+            message: "Syslog message too long (max 65000 bytes)".to_string(),
+        };
+    }
+    if message.contains('\0') {
+        return SyslogResult {
+            success: false,
+            message: "Syslog message must not contain null bytes".to_string(),
+        };
+    }
+    // Validate hostname and app_name don't contain control characters (CWE-93)
+    if hostname.bytes().any(|b| b < 0x20 && b != b'\t') {
+        return SyslogResult {
+            success: false,
+            message: "Hostname must not contain control characters".to_string(),
+        };
+    }
+    if app_name.bytes().any(|b| b < 0x20 && b != b'\t') {
+        return SyslogResult {
+            success: false,
+            message: "App name must not contain control characters".to_string(),
+        };
+    }
+
     let priority = (facility * 8) + severity;
 
     // RFC 5424 format:

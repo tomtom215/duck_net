@@ -504,24 +504,28 @@ See [SECURITY.md](SECURITY.md) for the full security architecture document.
 |----------|-----------|-----|
 | **SSRF protection** | All 49+ protocols validate destination IPs against private/reserved ranges before connecting | CWE-918 |
 | **Credential management** | In-memory secrets manager with zeroization; credentials never in SQL query text | CWE-316, CWE-532 |
-| **DuckDB secrets compat** | For S3/HTTP/GCS, use DuckDB native `CREATE SECRET`; duck_net covers SMTP, SSH, LDAP, Redis, etc. | - |
-| **Response size limits** | HTTP 256 MiB, gRPC/WebSocket/Redis/NATS 16 MiB, IMAP 10 MiB | CWE-400 |
+| **DuckDB secrets compat** | For S3/HTTP/GCS/R2, use DuckDB native `CREATE SECRET`; duck_net covers SMTP, SSH, LDAP, Redis, etc. | — |
+| **Response size limits** | HTTP 256 MiB, gRPC/WS/Redis/NATS/MQTT/Kafka 16 MiB, IMAP 10 MiB, Memcached 1 MiB | CWE-400 |
 | **Input validation** | URL length (64KB max), hostname format, port range, path traversal prevention | CWE-22, CWE-400 |
 | **SSH command injection** | Shell metacharacters blocked in strict mode (default) | CWE-78 |
 | **SMTP injection** | CRLF sanitization in headers, dot-stuffing in body | CWE-93 |
+| **SOAP header injection** | CR/LF/NUL stripped from SOAPAction to prevent HTTP header splitting | CWE-113 |
 | **LDAP filter injection** | RFC 4515 escaping for filter values | CWE-90 |
 | **XML injection** | CalDAV timestamp validation prevents XML attribute injection | CWE-91 |
 | **JSON injection** | NATS credentials JSON-escaped per RFC 8259 | CWE-116 |
-| **Recursive parsing limits** | Redis RESP depth-limited (8 levels), element-limited (100K) | CWE-674 |
+| **Recursion depth limits** | Vault JSON (128), gRPC protobuf (16), Redis RESP (8), mDNS (128) | CWE-674 |
 | **OCSP bounds checking** | All DER parsing uses bounds-checked slice access | CWE-125 |
-| **Cryptographic randomness** | All protocols use OS CSPRNG via `getrandom` (not time-based PRNG) | CWE-338 |
+| **Cryptographic randomness** | All protocols use OS CSPRNG via `getrandom`; panics on unavailability instead of weak fallback | CWE-338 |
 | **TLS** | rustls (pure Rust, no OpenSSL); webpki-roots CA bundle; no plaintext fallback | CWE-295 |
-| **Timeouts** | All operations have enforced timeouts (5-30s) to prevent hanging queries | CWE-400 |
+| **Timeouts** | All operations have enforced timeouts (5-30s) including gRPC TCP connect | CWE-400 |
 | **Credential scrubbing** | URLs and error messages redact passwords, tokens, API keys | CWE-532 |
 | **Host key verification** | SSH/SFTP verify against `~/.ssh/known_hosts` (TOFU on first connect) | CWE-295 |
-| **RADIUS authenticator** | Response authenticator verified per RFC 2865 to prevent spoofing | - |
-| **STUN transaction ID** | Response transaction ID matched to prevent spoofing | - |
-| **No telemetry** | Zero phone-home, zero tracking, zero analytics | - |
+| **Pagination safety** | Next-page URLs validated for scheme and SSRF before following | CWE-601 |
+| **Syslog validation** | Message size limits; control character rejection in hostname/app_name | CWE-93 |
+| **Memory bounds** | Rate limiter (10K domains), FTP cache (32), secrets (1024) with eviction | CWE-400 |
+| **RADIUS authenticator** | Response authenticator verified per RFC 2865 to prevent spoofing | — |
+| **STUN transaction ID** | CSPRNG-generated; response matched to prevent spoofing | CWE-338 |
+| **No telemetry** | Zero phone-home, zero tracking, zero analytics | — |
 
 ### Secrets-Aware Functions
 

@@ -127,51 +127,20 @@ pub fn validate_no_ssrf_host(host: &str) -> Result<(), String> {
 
 /// Extract the hostname portion from a URL.
 fn extract_hostname(url: &str) -> Option<String> {
-    // Strip scheme (case-insensitive via lowercase check)
-    let lower = url.to_ascii_lowercase();
-    let rest = if lower.starts_with("https://") {
-        &url[8..]
-    } else if lower.starts_with("http://") {
-        &url[7..]
-    } else if lower.starts_with("ftps://") {
-        &url[7..]
-    } else if lower.starts_with("ftp://") {
-        &url[6..]
-    } else if lower.starts_with("sftp://") {
-        &url[7..]
-    } else if lower.starts_with("mqtt://") || lower.starts_with("mqtts://") {
-        &url[url.find("://").unwrap() + 3..]
-    } else if lower.starts_with("tcp://") {
-        &url[6..]
-    } else if lower.starts_with("ldaps://") {
-        &url[8..]
-    } else if lower.starts_with("ldap://") {
-        &url[7..]
-    } else if lower.starts_with("imaps://") {
-        &url[8..]
-    } else if lower.starts_with("imap://") {
-        &url[7..]
-    } else if lower.starts_with("smtps://") {
-        &url[8..]
-    } else if lower.starts_with("smtp://") {
-        &url[7..]
-    } else if lower.starts_with("redis://") {
-        &url[8..]
-    } else if lower.starts_with("grpcs://") {
-        &url[8..]
-    } else if lower.starts_with("grpc://") {
-        &url[7..]
-    } else if lower.starts_with("wss://") {
-        &url[6..]
-    } else if lower.starts_with("ws://") {
-        &url[5..]
-    } else if lower.starts_with("nats://") {
-        &url[7..]
-    } else if lower.starts_with("amqp://") || lower.starts_with("amqps://") {
-        &url[url.find("://").unwrap() + 3..]
-    } else {
+    // Strip scheme: find "://" separator and take everything after it.
+    let scheme_end = url.find("://")?;
+    let lower_scheme = url[..scheme_end].to_ascii_lowercase();
+
+    // Validate that the scheme is one we recognize
+    const KNOWN_SCHEMES: &[&str] = &[
+        "https", "http", "ftp", "ftps", "sftp", "mqtt", "mqtts", "tcp", "ldap", "ldaps", "imap",
+        "imaps", "smtp", "smtps", "redis", "grpc", "grpcs", "ws", "wss", "nats", "amqp", "amqps",
+    ];
+    if !KNOWN_SCHEMES.contains(&lower_scheme.as_str()) {
         return None;
-    };
+    }
+
+    let rest = &url[scheme_end + 3..];
 
     // Strip userinfo
     let after_auth = if let Some(at) = rest.find('@') {
@@ -211,7 +180,6 @@ fn extract_hostname(url: &str) -> Option<String> {
 /// Scrub credentials from a URL for safe inclusion in error messages.
 ///
 /// Replaces `scheme://user:pass@host` with `scheme://***@host`.
-
 pub fn scrub_url(url: &str) -> String {
     if let Some(at) = url.find('@') {
         if let Some(scheme_end) = url.find("://") {
@@ -223,7 +191,6 @@ pub fn scrub_url(url: &str) -> String {
 
 /// Scrub known sensitive parameter values from an error message.
 /// Replaces patterns like `password=value` or `secret_key=value` with redacted forms.
-
 pub fn scrub_error(msg: &str) -> String {
     let mut result = msg.to_string();
 
@@ -487,24 +454,13 @@ pub fn validate_ical_timestamp(value: &str) -> Result<(), String> {
 /// Generate cryptographically secure random bytes using the OS entropy source.
 ///
 /// Uses `getrandom` which calls the OS CSPRNG (e.g., /dev/urandom, CryptGenRandom).
-/// Falls back to a time-based seed ONLY if the OS source is unavailable
-/// (should never happen on modern systems).
+/// Panics if the OS entropy source is unavailable, which should never happen on
+/// any supported platform. Failing open with weak randomness would be a security
+/// vulnerability (CWE-338).
 pub fn random_bytes<const N: usize>() -> [u8; N] {
     let mut buf = [0u8; N];
-    if getrandom::fill(&mut buf).is_err() {
-        // Fallback: should never happen on supported platforms, but
-        // better than panicking in a database extension.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let mut state = now.as_nanos() as u64 ^ (std::process::id() as u64);
-        for byte in buf.iter_mut() {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            *byte = (state & 0xFF) as u8;
-        }
-    }
+    getrandom::fill(&mut buf)
+        .expect("OS entropy source unavailable — cannot generate secure random bytes");
     buf
 }
 
@@ -519,18 +475,8 @@ pub fn random_hex(byte_count: usize) -> String {
 /// Generate a Vec of cryptographically secure random bytes.
 fn random_bytes_vec(n: usize) -> Vec<u8> {
     let mut buf = vec![0u8; n];
-    if getrandom::fill(&mut buf).is_err() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let mut state = now.as_nanos() as u64 ^ (std::process::id() as u64);
-        for byte in buf.iter_mut() {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            *byte = (state & 0xFF) as u8;
-        }
-    }
+    getrandom::fill(&mut buf)
+        .expect("OS entropy source unavailable — cannot generate secure random bytes");
     buf
 }
 

@@ -134,6 +134,7 @@ unsafe extern "C" fn cb_sntp_query(
 }
 
 /// Helper to write a PtpProbeResult (or error defaults) into the output vectors at a given row.
+#[allow(clippy::too_many_arguments)]
 unsafe fn write_ptp_probe_row(
     output: duckdb_vector,
     row: idx_t,

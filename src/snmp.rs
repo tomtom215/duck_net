@@ -41,6 +41,9 @@ fn validate_community(community: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Maximum walk entries to prevent unbounded iteration (CWE-400).
+const MAX_WALK_ENTRIES: usize = 10_000;
+
 /// Perform an SNMP WALK (repeated GET-NEXT) starting from an OID.
 pub fn walk(
     host: &str,
@@ -49,6 +52,8 @@ pub fn walk(
     max_entries: usize,
 ) -> Result<Vec<SnmpResult>, String> {
     validate_community(community)?;
+    // Clamp max_entries to prevent unbounded iteration
+    let max_entries = max_entries.min(MAX_WALK_ENTRIES);
     let base_oid = oid;
     let mut current_oid = oid.to_string();
     let mut results = Vec::new();

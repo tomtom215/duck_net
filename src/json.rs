@@ -31,7 +31,13 @@ pub fn extract_string<'a>(json: &'a str, key: &str) -> Option<&'a str> {
         let bytes = value_content.as_bytes();
         while end < bytes.len() {
             if bytes[end] == b'\\' {
-                end += 2; // skip escaped character
+                // Skip escaped character; guard against trailing backslash
+                // at end-of-input (CWE-125).
+                if end + 1 < bytes.len() {
+                    end += 2;
+                } else {
+                    break;
+                }
             } else if bytes[end] == b'"' {
                 return Some(&json[value_start_abs..value_start_abs + end]);
             } else {
