@@ -38,6 +38,15 @@ fn is_valid_host(host: &str) -> bool {
 /// Parse a Redis URL: redis://[password@]host[:port][/db]
 /// Returns (host, port, password, db).
 fn parse_url(url: &str) -> Result<(String, u16, Option<String>, Option<u32>), String> {
+    // Emit security warning for plaintext Redis (CWE-319)
+    if !url.starts_with("rediss://") {
+        crate::security_warnings::warn_plaintext(
+            "Redis",
+            "PLAINTEXT_REDIS",
+            "rediss:// (Redis over TLS)",
+        );
+    }
+
     let rest = url
         .strip_prefix("redis://")
         .ok_or("URL must start with redis://")?;

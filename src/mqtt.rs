@@ -89,6 +89,15 @@ fn parse_broker(broker: &str) -> Result<(String, u16, Option<String>, Option<Str
 /// Security: validates host, topic, and payload size. Enforces timeouts.
 /// Credentials are scrubbed from error messages (CWE-532).
 pub fn publish(broker: &str, topic: &str, payload: &str) -> MqttResult {
+    // Emit security warning for plaintext MQTT (CWE-319)
+    if !broker.starts_with("mqtts://") && !broker.starts_with("ssl://") {
+        crate::security_warnings::warn_plaintext(
+            "MQTT",
+            "PLAINTEXT_MQTT",
+            "mqtts:// or ssl:// (port 8883)",
+        );
+    }
+
     if !is_valid_topic(topic) {
         return MqttResult {
             success: false,

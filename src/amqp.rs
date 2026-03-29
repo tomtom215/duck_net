@@ -24,6 +24,15 @@ pub fn publish(
     message: &str,
     content_type: Option<&str>,
 ) -> AmqpPublishResult {
+    // Warn about plaintext AMQP connections (CWE-319)
+    if url.starts_with("amqp://") && !url.starts_with("amqps://") {
+        crate::security_warnings::warn_plaintext(
+            "AMQP",
+            "PLAINTEXT_AMQP",
+            "amqps:// (AMQP over TLS)",
+        );
+    }
+
     runtime::block_on(async {
         publish_async(url, exchange, routing_key, message, content_type).await
     })

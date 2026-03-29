@@ -5,6 +5,7 @@ use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::ldap;
+use crate::ldap_write;
 
 use super::scalars::write_varchar;
 
@@ -204,7 +205,7 @@ unsafe extern "C" fn cb_ldap_add(
         let pass = pass_reader.read_str(row as usize);
         let entry_dn = entry_dn_reader.read_str(row as usize);
         let attrs = attrs_reader.read_str(row as usize);
-        let result = ldap::add(url, dn, pass, entry_dn, attrs);
+        let result = ldap_write::add(url, dn, pass, entry_dn, attrs);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;
@@ -234,7 +235,7 @@ unsafe extern "C" fn cb_ldap_modify(
         let pass = pass_reader.read_str(row as usize);
         let entry_dn = entry_dn_reader.read_str(row as usize);
         let mods = mods_reader.read_str(row as usize);
-        let result = ldap::modify(url, dn, pass, entry_dn, mods);
+        let result = ldap_write::modify(url, dn, pass, entry_dn, mods);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;
@@ -262,7 +263,7 @@ unsafe extern "C" fn cb_ldap_delete(
         let dn = dn_reader.read_str(row as usize);
         let pass = pass_reader.read_str(row as usize);
         let entry_dn = entry_dn_reader.read_str(row as usize);
-        let result = ldap::delete(url, dn, pass, entry_dn);
+        let result = ldap_write::delete(url, dn, pass, entry_dn);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;

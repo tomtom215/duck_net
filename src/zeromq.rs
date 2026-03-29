@@ -364,6 +364,13 @@ fn read_frames(stream: &mut TcpStream) -> Result<Vec<Vec<u8>>, String> {
 /// Security: validates host and message size. Enforces connection and I/O
 /// timeouts.
 pub fn request(endpoint: &str, message: &str) -> ZmqResult {
+    // Warn about ZeroMQ NULL security mechanism (CWE-319)
+    crate::security_warnings::warn_plaintext(
+        "ZeroMQ",
+        "PLAINTEXT_ZEROMQ",
+        "ZeroMQ CURVE encryption (not yet supported by duck_net)",
+    );
+
     if message.is_empty() {
         return ZmqResult {
             success: false,

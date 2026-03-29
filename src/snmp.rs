@@ -16,6 +16,13 @@ pub struct SnmpResult {
 
 /// Perform an SNMP GET request (SNMPv2c).
 pub fn get(host: &str, oid: &str, community: &str) -> Result<SnmpResult, String> {
+    // Warn about SNMPv2c limitations (CWE-327)
+    crate::security_warnings::warn_weak_auth(
+        "SNMP",
+        "SNMPV2C_WEAK_AUTH",
+        "SNMPv2c with plaintext community strings. \
+         Consider SNMPv3 for authentication and encryption",
+    );
     validate_community(community)?;
     let request = build_get_request(oid, community)?;
     let response = send_udp(host, SNMP_PORT, &request)?;

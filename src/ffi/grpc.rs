@@ -5,6 +5,7 @@ use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::grpc;
+use crate::grpc_reflect;
 
 use super::dns::write_string_list;
 use super::scalars::write_varchar;
@@ -47,7 +48,7 @@ unsafe extern "C" fn cb_grpc_list_services(
     for row in 0..row_count {
         let url = url_reader.read_str(row as usize);
 
-        let result = grpc::list_services(url);
+        let result = grpc_reflect::list_services(url);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;

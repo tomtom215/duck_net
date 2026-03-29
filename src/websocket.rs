@@ -55,6 +55,15 @@ pub fn request(url: &str, message: &str, timeout_secs: u32) -> WsResult {
         };
     }
 
+    // Warn about plaintext WebSocket connections (CWE-319)
+    if url.starts_with("ws://") {
+        crate::security_warnings::warn_plaintext(
+            "WebSocket",
+            "PLAINTEXT_WEBSOCKET",
+            "wss:// (WebSocket over TLS)",
+        );
+    }
+
     let timeout = Duration::from_secs(timeout_secs.clamp(1, 300) as u64);
 
     match request_inner(url, message, timeout) {

@@ -273,6 +273,14 @@ pub fn get_device_id(host: &str) -> IpmiSensorResult {
 
 /// Send a Get Chassis Status command (NetFn=Chassis 0x00, Cmd=0x01) and parse the response.
 pub fn get_chassis_status(host: &str) -> IpmiChassisStatus {
+    // Warn about IPMI v1.5 unauthenticated access (CWE-306)
+    crate::security_warnings::warn_weak_auth(
+        "IPMI",
+        "IPMI_V15_NO_AUTH",
+        "IPMI v1.5 with no authentication. Commands are sent in \
+         plaintext over UDP. Consider IPMI v2.0 with RMCP+ for production",
+    );
+
     let fail = |msg: String| IpmiChassisStatus {
         success: false,
         power_on: false,

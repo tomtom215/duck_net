@@ -55,6 +55,9 @@ fn parse_host(host_str: &str) -> Result<(String, u16), String> {
 
 /// Connect to Memcached with proper timeouts.
 fn connect(host_str: &str) -> Result<BufReader<TcpStream>, String> {
+    // Emit security warning: Memcached has no built-in authentication (CWE-306)
+    crate::security_warnings::warn_no_auth("Memcached", "NO_AUTH_MEMCACHED");
+
     let (host, port) = parse_host(host_str)?;
 
     // SSRF protection: block connections to private/reserved IPs (CWE-918)

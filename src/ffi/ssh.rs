@@ -4,6 +4,7 @@
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
+use crate::scp;
 use crate::ssh;
 
 use super::scalars::write_varchar;
@@ -161,7 +162,7 @@ unsafe extern "C" fn cb_scp_read(
         let key_file = key_reader.read_str(row as usize);
         let remote_path = path_reader.read_str(row as usize);
 
-        let result = ssh::scp_read(host, 22, user, key_file, remote_path);
+        let result = scp::scp_read(host, 22, user, key_file, remote_path);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;
@@ -197,7 +198,7 @@ unsafe extern "C" fn cb_scp_read_port(
         let key_file = key_reader.read_str(row as usize);
         let remote_path = path_reader.read_str(row as usize);
 
-        let result = ssh::scp_read(host, port, user, key_file, remote_path);
+        let result = scp::scp_read(host, port, user, key_file, remote_path);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;
@@ -231,7 +232,7 @@ unsafe extern "C" fn cb_scp_read_password(
         let password = pass_reader.read_str(row as usize);
         let remote_path = path_reader.read_str(row as usize);
 
-        let result = ssh::scp_read_password(host, 22, user, password, remote_path);
+        let result = scp::scp_read_password(host, 22, user, password, remote_path);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;
@@ -266,7 +267,7 @@ unsafe extern "C" fn cb_scp_write(
         let remote_path = path_reader.read_str(row as usize);
         let data = data_reader.read_str(row as usize);
 
-        let result = ssh::scp_write(host, 22, user, key_file, remote_path, data);
+        let result = scp::scp_write(host, 22, user, key_file, remote_path, data);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;
@@ -300,7 +301,7 @@ unsafe extern "C" fn cb_scp_write_password(
         let remote_path = path_reader.read_str(row as usize);
         let data = data_reader.read_str(row as usize);
 
-        let result = ssh::scp_write_password(host, 22, user, password, remote_path, data);
+        let result = scp::scp_write_password(host, 22, user, password, remote_path, data);
 
         let sd = duckdb_vector_get_data(success_vec) as *mut bool;
         *sd.add(row as usize) = result.success;

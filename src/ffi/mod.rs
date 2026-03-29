@@ -32,7 +32,11 @@ mod radius;
 mod redis_client;
 mod s3;
 pub(crate) mod scalars;
+mod scalars_config;
 mod secrets;
+mod secrets_protocols;
+mod secrets_protocols_ext;
+mod security_warnings;
 mod sip;
 mod smtp;
 mod snmp;
@@ -132,6 +136,9 @@ pub fn register_all(con: &Connection) -> Result<(), ExtensionError> {
 
         // Security: Secrets manager + hardening configuration
         secrets::register_all(raw_con)?;
+
+        // Security warnings subsystem
+        security_warnings::register_all(raw_con)?;
     }
     Ok(())
 }
