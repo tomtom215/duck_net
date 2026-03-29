@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::process::Command;
 
 pub struct PingResult {
@@ -142,12 +145,7 @@ fn is_valid_host(host: &str) -> bool {
     }
     // Only allow alphanumeric, dots, hyphens, colons (for IPv6), and brackets
     host.chars().all(|c| {
-        c.is_ascii_alphanumeric()
-            || c == '.'
-            || c == '-'
-            || c == ':'
-            || c == '['
-            || c == ']'
+        c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == ':' || c == '[' || c == ']'
     })
 }
 
@@ -170,10 +168,7 @@ fn parse_ttl(output: &str) -> i32 {
     let lower = output.to_ascii_lowercase();
     if let Some(pos) = lower.find("ttl=") {
         let rest = &output[pos + 4..];
-        let num_str: String = rest
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .collect();
+        let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
         num_str.parse::<i32>().unwrap_or(0)
     } else {
         0

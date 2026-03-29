@@ -48,6 +48,18 @@ lapin = "2"
 rskafka = "0.5"
 chrono = "0.4"
 
+# WebSocket (one-shot)
+tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+
+# gRPC (HTTP/2 transport)
+h2 = "0.4"
+http = "1"
+bytes = "1"
+tokio-rustls = "0.26"
+
+# RADIUS authentication hashing
+md5 = "0.7"
+
 [profile.release]
 opt-level = 3
 lto = true

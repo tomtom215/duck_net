@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::net::UdpSocket;
 
 const SYSLOG_DEFAULT_PORT: u16 = 514;
@@ -81,12 +84,14 @@ pub fn send(
     // <PRI>VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED-DATA MSG
     let timestamp = rfc3339_now();
     let hostname = if hostname.is_empty() { "-" } else { hostname };
-    let app_name = if app_name.is_empty() { "duck_net" } else { app_name };
+    let app_name = if app_name.is_empty() {
+        "duck_net"
+    } else {
+        app_name
+    };
     let pid = std::process::id();
 
-    let packet = format!(
-        "<{priority}>1 {timestamp} {hostname} {app_name} {pid} - - {message}"
-    );
+    let packet = format!("<{priority}>1 {timestamp} {hostname} {app_name} {pid} - - {message}");
 
     match send_udp(host, port, packet.as_bytes()) {
         Ok(()) => SyslogResult {
@@ -101,8 +106,8 @@ pub fn send(
 }
 
 fn send_udp(host: &str, port: u16, data: &[u8]) -> Result<(), String> {
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+    let socket =
+        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     let addr = format!("{host}:{port}");
     socket
         .send_to(data, &addr)
@@ -126,9 +131,7 @@ fn rfc3339_now() -> String {
     // Approximate date calculation (good enough for syslog)
     let (year, month, day) = days_to_ymd(days);
 
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
 }
 
 fn days_to_ymd(days: u64) -> (u64, u64, u64) {

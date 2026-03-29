@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
@@ -41,7 +44,16 @@ unsafe extern "C" fn cb_aws_sigv4_sign(
         let region = region_reader.read_str(row as usize);
         let service = service_reader.read_str(row as usize);
 
-        match aws_sigv4::sign(method, url, &[], body, access_key, secret_key, region, service) {
+        match aws_sigv4::sign(
+            method,
+            url,
+            &[],
+            body,
+            access_key,
+            secret_key,
+            region,
+            service,
+        ) {
             Ok(signed) => {
                 write_varchar(auth_vec, row, &signed.authorization);
                 write_varchar(date_vec, row, &signed.x_amz_date);

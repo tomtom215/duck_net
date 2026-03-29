@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
@@ -49,9 +52,8 @@ pub fn sign(
         .collect::<Vec<_>>()
         .join(";");
 
-    let canonical_request = format!(
-        "{method}\n{path}\n{query}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
-    );
+    let canonical_request =
+        format!("{method}\n{path}\n{query}\n{canonical_headers}\n{signed_headers}\n{payload_hash}");
 
     // Step 2: Create string to sign
     let credential_scope = format!("{date}/{region}/{service}/aws4_request");

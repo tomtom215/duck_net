@@ -130,6 +130,122 @@ URL format: `ftp://[user:pass@]host[:port]/path`, `sftp://[user:pass@]host[:port
 
 FTP connections are cached with 60-second TTL for efficient bulk operations.
 
+### SSH Remote Execution
+
+| Function | Signatures | Returns |
+|----------|-----------|---------|
+| `ssh_exec` | `(host, user, key_file, command)`, `(host, port, user, key_file, command)` | `STRUCT(success BOOLEAN, exit_code INTEGER, stdout VARCHAR, stderr VARCHAR)` |
+| `ssh_exec_password` | `(host, user, password, command)` | `STRUCT(success BOOLEAN, exit_code INTEGER, stdout VARCHAR, stderr VARCHAR)` |
+
+Host key verification via `~/.ssh/known_hosts` (TOFU model). Rejects changed keys to prevent MITM attacks.
+
+### Redis
+
+| Function | Signatures | Returns |
+|----------|-----------|---------|
+| `redis_get` | `(url, key)` | `STRUCT(success BOOLEAN, value VARCHAR)` |
+| `redis_set` | `(url, key, value)`, `(url, key, value, ttl_secs BIGINT)` | `STRUCT(success BOOLEAN, value VARCHAR)` |
+| `redis_keys` | `(url, pattern)` | `STRUCT(success BOOLEAN, keys VARCHAR[], message VARCHAR)` |
+
+URL format: `redis://[password@]host[:port][/db]`. Raw RESP protocol implementation — zero external Redis dependencies.
+
+### gRPC
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `grpc_call` | `(url, service, method, json_payload)` | `STRUCT(success BOOLEAN, status_code INTEGER, body VARCHAR, grpc_status INTEGER, grpc_message VARCHAR)` |
+
+URL schemes: `grpc://host:port` (plaintext h2c), `grpcs://host:port` (TLS). Native HTTP/2 transport via `h2` crate.
+
+### WebSocket (One-Shot)
+
+| Function | Signatures | Returns |
+|----------|-----------|---------|
+| `ws_request` | `(url, message)`, `(url, message, timeout_secs INTEGER)` | `STRUCT(success BOOLEAN, response VARCHAR, message VARCHAR)` |
+
+Sends one message, waits for one response, closes. Supports `ws://` and `wss://` (TLS via rustls).
+
+### MQTT Publish
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `mqtt_publish` | `(broker, topic, payload)` | `STRUCT(success BOOLEAN, message VARCHAR)` |
+
+Fire-and-forget publish at QoS 0. Broker format: `mqtt://[user:pass@]host[:port]` or bare `host:port`. Raw MQTT 3.1.1 protocol — zero external MQTT dependencies.
+
+### Memcached
+
+| Function | Signatures | Returns |
+|----------|-----------|---------|
+| `memcached_get` | `(host, key)` | `STRUCT(success BOOLEAN, value VARCHAR, message VARCHAR)` |
+| `memcached_set` | `(host, key, value)`, `(host, key, value, ttl INTEGER)` | `STRUCT(success BOOLEAN, value VARCHAR, message VARCHAR)` |
+
+Host format: `host[:port]` (default 11211). ASCII protocol over TCP — zero external Memcached dependencies.
+
+### Prometheus
+
+| Function | Signatures | Returns |
+|----------|-----------|---------|
+| `prometheus_query` | `(url, promql)` | `STRUCT(success BOOLEAN, result_type VARCHAR, body VARCHAR, message VARCHAR)` |
+| `prometheus_query_range` | `(url, promql, start, end, step)` | `STRUCT(success BOOLEAN, result_type VARCHAR, body VARCHAR, message VARCHAR)` |
+
+Queries the Prometheus HTTP API. Returns full JSON response for ad-hoc SQL analysis.
+
+### Elasticsearch
+
+| Function | Signatures | Returns |
+|----------|-----------|---------|
+| `es_search` | `(url, index, query_json)` | `STRUCT(success BOOLEAN, body VARCHAR, message VARCHAR)` |
+| `es_count` | `(url, index, query_json)` | `STRUCT(success BOOLEAN, body VARCHAR, message VARCHAR)` |
+| `es_cat` | `(url, endpoint)` | `STRUCT(success BOOLEAN, body VARCHAR, message VARCHAR)` |
+
+Index name validation prevents path traversal. `es_cat` endpoints return JSON format.
+
+### RADIUS Authentication
+
+| Function | Signatures | Returns |
+|----------|-----------|---------|
+| `radius_auth` | `(host, secret, username, password)`, `(host, port, secret, username, password)` | `STRUCT(success BOOLEAN, code INTEGER, code_name VARCHAR, message VARCHAR)` |
+
+RFC 2865 Access-Request with password encryption. Response authenticator verification prevents spoofing.
+
+### DNS-over-HTTPS (DoH)
+
+| Function | Signatures | Returns |
+|----------|-----------|---------|
+| `doh_lookup` | `(domain, type)`, `(resolver_url, domain, type)` | `STRUCT(success BOOLEAN, records VARCHAR[], message VARCHAR)` |
+
+Privacy-aware DNS over encrypted HTTPS. Default resolver: Cloudflare. Supports A, AAAA, CNAME, MX, NS, PTR, SOA, SRV, TXT, CAA, and more.
+
+### mDNS / Bonjour (Table Function)
+
+```sql
+SELECT * FROM mdns_discover('_http._tcp.local');
+-- Returns: (instance_name VARCHAR, hostname VARCHAR, port INTEGER, ips VARCHAR[], txt VARCHAR[])
+
+SELECT * FROM mdns_discover('_ssh._tcp.local', timeout := 5);
+```
+
+Local network service discovery via multicast DNS (RFC 6762).
+
+### STUN
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `stun_lookup` | `(server VARCHAR)` | `STRUCT(success BOOLEAN, public_ip VARCHAR, public_port INTEGER, message VARCHAR)` |
+
+Discover public IP/port via a single UDP round-trip (RFC 5389). Server format: `host[:port]` or `stun://host[:port]`.
+
+### BGP Looking Glass
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `bgp_route` | `(prefix VARCHAR)` | `STRUCT(success BOOLEAN, body VARCHAR, message VARCHAR)` |
+| `bgp_prefix_overview` | `(prefix VARCHAR)` | `STRUCT(success BOOLEAN, body VARCHAR, message VARCHAR)` |
+| `bgp_asn_info` | `(asn VARCHAR)` | `STRUCT(success BOOLEAN, body VARCHAR, message VARCHAR)` |
+
+Network routing analysis via RIPE RIS public API. Prefix format: CIDR notation (e.g., `1.0.0.0/24`).
+
 ## Usage Examples
 
 ```sql
@@ -286,6 +402,59 @@ SELECT
     (http_get(url)).status AS status,
     (http_get(url)).body AS body
 FROM (VALUES ('https://httpbin.org/get'), ('https://httpbin.org/ip')) AS t(url);
+
+-- SSH remote execution
+SELECT ssh_exec('server.example.com', 'deploy', '/home/deploy/.ssh/id_ed25519', 'uptime');
+SELECT ssh_exec_password('server.example.com', 'admin', 'password', 'df -h');
+
+-- Redis cache operations
+SELECT redis_get('redis://localhost:6379', 'config:timeout');
+SELECT redis_set('redis://localhost:6379', 'session:abc', '{"user":"tom"}');
+SELECT redis_set('redis://localhost:6379', 'cache:key', 'value', 3600);  -- 1 hour TTL
+SELECT redis_keys('redis://localhost:6379', 'session:*');
+
+-- gRPC unary call
+SELECT grpc_call('grpc://localhost:50051', 'mypackage.MyService', 'GetItem', '{"id": 42}');
+
+-- WebSocket one-shot request-response
+SELECT ws_request('ws://echo.websocket.org', '{"action": "ping"}');
+SELECT ws_request('wss://api.example.com/ws', '{"subscribe": "ticker"}', 30);
+
+-- MQTT publish (IoT data pipeline)
+SELECT mqtt_publish('mqtt://broker.example.com:1883', 'sensors/temperature', '{"value": 22.5}');
+
+-- Memcached cache operations
+SELECT memcached_get('localhost:11211', 'user:profile:123');
+SELECT memcached_set('localhost:11211', 'user:profile:123', '{"name":"Tom"}', 300);
+
+-- Prometheus ad-hoc analysis
+SELECT prometheus_query('http://prometheus:9090', 'rate(http_requests_total[5m])');
+SELECT prometheus_query_range(
+    'http://prometheus:9090', 'up', '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z', '1h'
+);
+
+-- Elasticsearch queries from SQL
+SELECT es_search('http://localhost:9200', 'logs-*', '{"query":{"match":{"level":"error"}}}');
+SELECT es_count('http://localhost:9200', 'logs-*', '{"query":{"range":{"@timestamp":{"gte":"now-1h"}}}}');
+SELECT es_cat('http://localhost:9200', 'indices');
+
+-- RADIUS auth testing
+SELECT radius_auth('radius.example.com', 'shared-secret', 'testuser', 'testpass');
+
+-- DNS-over-HTTPS (privacy-aware DNS)
+SELECT doh_lookup('example.com', 'A');
+SELECT doh_lookup('https://dns.google/resolve', 'example.com', 'AAAA');
+
+-- mDNS/Bonjour service discovery
+SELECT * FROM mdns_discover('_http._tcp.local');
+
+-- STUN public IP discovery
+SELECT stun_lookup('stun.l.google.com:19302');
+
+-- BGP routing analysis
+SELECT bgp_route('8.8.8.0/24');
+SELECT bgp_prefix_overview('1.1.1.0/24');
+SELECT bgp_asn_info('AS13335');
 ```
 
 ## Response Format
@@ -340,6 +509,17 @@ duckdb -unsigned -cmd "LOAD 'target/release/libduck_net.so';"
 | **Credential scrubbing** | FTP/SFTP error messages replace `user:pass` with `***` (CWE-532) |
 | **SMTP injection prevention** | CRLF sanitization in headers, dot-stuffing in body (CWE-93) |
 | **HTTP proxy support** | Automatic — ureq reads `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` environment variables |
+| **SSH host key verification** | Reads `~/.ssh/known_hosts`, TOFU on first connect, rejects changed keys (CWE-295) |
+| **Redis auth + input validation** | URL-based auth, key validation, response size limits (16 MiB) |
+| **gRPC timeout + size limits** | 30s timeout, 16 MiB response limit, TLS via rustls |
+| **WebSocket scheme validation** | Only `ws://` and `wss://` allowed, response size limits (16 MiB), configurable timeouts |
+| **MQTT input validation** | Topic validation, payload size limits (256 MiB), credential support |
+| **Memcached key validation** | ASCII-only keys (1-250 chars), value size limits (1 MiB) |
+| **Elasticsearch path traversal prevention** | Index name validation rejects `..`, `/`, `\` |
+| **RADIUS authenticator verification** | Response authenticator checked per RFC 2865 to prevent spoofing |
+| **DNS-over-HTTPS** | Encrypted DNS queries over HTTPS, domain name validation |
+| **STUN transaction ID verification** | Response transaction ID matched to prevent spoofing |
+| **Host validation everywhere** | All protocols validate hostnames (alphanumeric + dots/hyphens/colons) |
 | **No telemetry** | Zero phone-home, zero tracking |
 
 ## Dependencies
@@ -354,10 +534,14 @@ Minimal dependency set:
 | `base64` | 0.22.0 | Base64 encoding for HTTP Basic auth |
 | `hickory-resolver` | 0.25.0 | Async DNS resolver (A, AAAA, PTR, TXT, MX) |
 | `suppaftp` | 8.0.0 | Sync FTP/FTPS client |
-| `russh` | 0.58.0 | Async SSH client (for SFTP) |
+| `russh` | 0.58.0 | Async SSH client (for SFTP + SSH exec) |
 | `russh-sftp` | 2.1.0 | SFTP subsystem over russh |
-| `rustls` | 0.23.0 | TLS for SMTP STARTTLS |
-| `tokio` | 1.x | Async runtime (shared by DNS + SFTP) |
+| `rustls` | 0.23.0 | TLS for SMTP STARTTLS, gRPC, WebSocket |
+| `tokio` | 1.x | Async runtime (shared by DNS, SFTP, SSH, gRPC) |
+| `tungstenite` | 0.24.0 | WebSocket client (one-shot request-response) |
+| `h2` | 0.4.0 | HTTP/2 transport for gRPC |
+| `tokio-rustls` | 0.26.0 | Async TLS connector for gRPC |
+| `md5` | 0.7.0 | RADIUS password hashing (RFC 2865) |
 
 ## Improvements Over query-farm/httpclient
 

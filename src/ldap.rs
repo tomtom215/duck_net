@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use crate::runtime;
 
 /// An LDAP search result entry.
@@ -48,12 +51,7 @@ fn parse_ldap_url(url: &str) -> Result<(String, u16, bool), String> {
 }
 
 /// Search LDAP directory.
-pub fn search(
-    url: &str,
-    base_dn: &str,
-    filter: &str,
-    attributes: &[&str],
-) -> LdapSearchResult {
+pub fn search(url: &str, base_dn: &str, filter: &str, attributes: &[&str]) -> LdapSearchResult {
     let (host, port, use_tls) = match parse_ldap_url(url) {
         Ok(v) => v,
         Err(e) => {
@@ -106,10 +104,7 @@ async fn search_async(
 
     let attr_vec: Vec<&str> = attributes.to_vec();
 
-    let result = match ldap
-        .search(base_dn, Scope::Subtree, filter, attr_vec)
-        .await
-    {
+    let result = match ldap.search(base_dn, Scope::Subtree, filter, attr_vec).await {
         Ok(r) => r,
         Err(e) => {
             let _ = ldap.unbind().await;
@@ -139,11 +134,7 @@ async fn search_async(
             let se = SearchEntry::construct(e);
             LdapEntry {
                 dn: se.dn,
-                attributes: se
-                    .attrs
-                    .into_iter()
-                    .map(|(k, v)| (k, v))
-                    .collect(),
+                attributes: se.attrs.into_iter().map(|(k, v)| (k, v)).collect(),
             }
         })
         .collect();

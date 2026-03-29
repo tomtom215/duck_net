@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
@@ -38,7 +41,11 @@ unsafe extern "C" fn cb_syslog_send_4(
             None => {
                 let sd = duckdb_vector_get_data(success_vec) as *mut bool;
                 *sd.add(row as usize) = false;
-                write_varchar(message_vec, row, &format!("Unknown facility: {facility_str}"));
+                write_varchar(
+                    message_vec,
+                    row,
+                    &format!("Unknown facility: {facility_str}"),
+                );
                 continue;
             }
         };
@@ -47,7 +54,11 @@ unsafe extern "C" fn cb_syslog_send_4(
             None => {
                 let sd = duckdb_vector_get_data(success_vec) as *mut bool;
                 *sd.add(row as usize) = false;
-                write_varchar(message_vec, row, &format!("Unknown severity: {severity_str}"));
+                write_varchar(
+                    message_vec,
+                    row,
+                    &format!("Unknown severity: {severity_str}"),
+                );
                 continue;
             }
         };
@@ -91,7 +102,11 @@ unsafe extern "C" fn cb_syslog_send_7(
             None => {
                 let sd = duckdb_vector_get_data(success_vec) as *mut bool;
                 *sd.add(row as usize) = false;
-                write_varchar(message_vec, row, &format!("Unknown facility: {facility_str}"));
+                write_varchar(
+                    message_vec,
+                    row,
+                    &format!("Unknown facility: {facility_str}"),
+                );
                 continue;
             }
         };
@@ -100,7 +115,11 @@ unsafe extern "C" fn cb_syslog_send_7(
             None => {
                 let sd = duckdb_vector_get_data(success_vec) as *mut bool;
                 *sd.add(row as usize) = false;
-                write_varchar(message_vec, row, &format!("Unknown severity: {severity_str}"));
+                write_varchar(
+                    message_vec,
+                    row,
+                    &format!("Unknown severity: {severity_str}"),
+                );
                 continue;
             }
         };

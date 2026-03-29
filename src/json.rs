@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 /// Extract a string value from JSON by key name.
 /// Handles: `"key": "value"` and `"key":"value"` (with/without spaces).
 /// Returns the unescaped string value, or None if not found.

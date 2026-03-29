@@ -1,9 +1,14 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::graphql;
 
-use super::scalars::{map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar};
+use super::scalars::{
+    map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar,
+};
 
 /// graphql_query(url, query) -> STRUCT (HTTP response)
 unsafe extern "C" fn cb_graphql_query_2(

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::net::UdpSocket;
 use std::time::Duration;
 
@@ -34,18 +37,16 @@ fn options_ping_inner(host: &str, port: u16) -> Result<SipResult, String> {
     let port = if port == 0 { SIP_DEFAULT_PORT } else { port };
     let addr = format!("{host}:{port}");
 
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+    let socket =
+        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
 
-    let local_addr = socket.local_addr().map_err(|e| format!("Local addr: {e}"))?;
-    let call_id = format!(
-        "{}@{}",
-        rand_hex(8),
-        local_addr.ip()
-    );
+    let local_addr = socket
+        .local_addr()
+        .map_err(|e| format!("Local addr: {e}"))?;
+    let call_id = format!("{}@{}", rand_hex(8), local_addr.ip());
     let branch = format!("z9hG4bK{}", rand_hex(8));
     let tag = rand_hex(8);
 
@@ -78,10 +79,7 @@ fn options_ping_inner(host: &str, port: u16) -> Result<SipResult, String> {
 }
 
 fn parse_sip_response(response: &str) -> Result<SipResult, String> {
-    let first_line = response
-        .lines()
-        .next()
-        .ok_or("Empty SIP response")?;
+    let first_line = response.lines().next().ok_or("Empty SIP response")?;
 
     // Parse "SIP/2.0 200 OK"
     let parts: Vec<&str> = first_line.splitn(3, ' ').collect();

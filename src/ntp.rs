@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use std::net::UdpSocket;
 use std::time::Duration;
 
@@ -22,8 +25,8 @@ pub struct NtpResult {
 pub fn query(server: &str) -> Result<NtpResult, String> {
     let addr = format!("{server}:{NTP_PORT}");
 
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+    let socket =
+        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
@@ -67,7 +70,9 @@ pub fn query(server: &str) -> Result<NtpResult, String> {
     let reference_id = if stratum <= 1 {
         // For stratum 0-1, it's an ASCII string
         let id_bytes = &response[12..16];
-        String::from_utf8_lossy(id_bytes).trim_end_matches('\0').to_string()
+        String::from_utf8_lossy(id_bytes)
+            .trim_end_matches('\0')
+            .to_string()
     } else {
         // For stratum 2+, it's an IP address
         format!(

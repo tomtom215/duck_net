@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
+
 use crate::http::{self, HttpResponse};
 
 /// A calendar event returned by CalDAV REPORT.
@@ -24,7 +27,10 @@ pub fn list_events(
     let body = build_calendar_query(time_range_start, time_range_end);
 
     let mut all_headers: Vec<(String, String)> = headers.to_vec();
-    all_headers.push(("Content-Type".into(), "application/xml; charset=utf-8".into()));
+    all_headers.push((
+        "Content-Type".into(),
+        "application/xml; charset=utf-8".into(),
+    ));
     all_headers.push(("Depth".into(), "1".into()));
 
     let resp = execute_report(url, &all_headers, &body)?;
@@ -45,7 +51,10 @@ pub fn list_contacts(
 </card:addressbook-query>"#;
 
     let mut all_headers: Vec<(String, String)> = headers.to_vec();
-    all_headers.push(("Content-Type".into(), "application/xml; charset=utf-8".into()));
+    all_headers.push((
+        "Content-Type".into(),
+        "application/xml; charset=utf-8".into(),
+    ));
     all_headers.push(("Depth".into(), "1".into()));
 
     let resp = execute_report(url, &all_headers, body)?;
@@ -64,7 +73,10 @@ pub fn discover(url: &str, headers: &[(String, String)]) -> Result<Vec<String>, 
 </d:propfind>"#;
 
     let mut all_headers: Vec<(String, String)> = headers.to_vec();
-    all_headers.push(("Content-Type".into(), "application/xml; charset=utf-8".into()));
+    all_headers.push((
+        "Content-Type".into(),
+        "application/xml; charset=utf-8".into(),
+    ));
     all_headers.push(("Depth".into(), "0".into()));
 
     let resp = execute_propfind(url, &all_headers, body)?;
@@ -87,7 +99,7 @@ fn build_calendar_query(start: Option<&str>, end: Option<&str>) -> String {
              </c:comp-filter>\n      </c:comp-filter>\n    </c:filter>"
         ),
         _ => String::from(
-            "\n    <c:filter>\n      <c:comp-filter name=\"VCALENDAR\"/>\n    </c:filter>"
+            "\n    <c:filter>\n      <c:comp-filter name=\"VCALENDAR\"/>\n    </c:filter>",
         ),
     };
 
