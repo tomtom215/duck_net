@@ -458,60 +458,55 @@ fn success_message_result_type() -> LogicalType {
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
-    // SSH with secrets
+    // SSH
     ScalarFunctionBuilder::new("ssh_exec_secret")
-        .param(v) // secret_name
-        .param(v) // host
-        .param(v) // command
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(ssh_result_type())
         .function(cb_ssh_exec_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
-    // Consul with secrets
+    // Consul
     ScalarFunctionBuilder::new("consul_get_secret")
-        .param(v) // secret_name
-        .param(v) // url
-        .param(v) // key
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(kv_result_type())
         .function(cb_consul_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
-    // InfluxDB with secrets
+    // InfluxDB
     ScalarFunctionBuilder::new("influxdb_query_secret")
-        .param(v) // secret_name
-        .param(v) // url
-        .param(v) // org
-        .param(v) // flux_query
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(influx_result_type())
         .function(cb_influxdb_query_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
-    // HTTP with secrets (bearer/basic auth from secret store)
+    // HTTP (bearer/basic auth from secret store)
     ScalarFunctionBuilder::new("http_get_secret")
-        .param(v) // secret_name
-        .param(v) // url
+        .param(v)
+        .param(v)
         .returns_logical(super::scalars::response_type())
         .function(cb_http_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
     ScalarFunctionBuilder::new("http_post_secret")
-        .param(v) // secret_name
-        .param(v) // url
-        .param(v) // body
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(super::scalars::response_type())
         .function(cb_http_post_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
-    // SNMP with secrets (community string from secret store)
+    // SNMP (community string from secret store)
     ScalarFunctionBuilder::new("snmp_get_secret")
-        .param(v) // secret_name
-        .param(v) // host
-        .param(v) // oid
+        .param(v)
+        .param(v)
+        .param(v)
         .returns_logical(LogicalType::struct_type_from_logical(&[
             ("success", LogicalType::new(TypeId::Boolean)),
             ("value", LogicalType::new(TypeId::Varchar)),
@@ -519,24 +514,22 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .function(cb_snmp_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
-    // RADIUS with secrets (shared secret from secret store)
+    // RADIUS (shared secret from secret store)
     ScalarFunctionBuilder::new("radius_auth_secret")
-        .param(v) // secret_name (for shared_secret)
-        .param(v) // host
-        .param(v) // username
-        .param(v) // password
-        .returns_logical(success_message_result_type()) // same shape: (success, message)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .returns_logical(success_message_result_type())
         .function(cb_radius_auth_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
-    // IMAP with secrets (username/password from secret store)
+    // IMAP (username/password from secret store)
     ScalarFunctionBuilder::new("imap_fetch_secret")
-        .param(v) // secret_name
-        .param(v) // url
-        .param(v) // mailbox
-        .param(TypeId::BigInt) // uid
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(TypeId::BigInt)
         .returns_logical(LogicalType::struct_type_from_logical(&[
             ("success", LogicalType::new(TypeId::Boolean)),
             ("body", LogicalType::new(TypeId::Varchar)),
@@ -545,14 +538,13 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .function(cb_imap_fetch_secret)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
-
-    // LDAP with secrets (bind credentials from secret store)
+    // LDAP (bind credentials from secret store)
     ScalarFunctionBuilder::new("ldap_search_secret")
-        .param(v) // secret_name
-        .param(v) // url
-        .param(v) // base_dn
-        .param(v) // filter
-        .param(v) // attributes (comma-separated)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
+        .param(v)
         .returns(TypeId::Varchar)
         .function(cb_ldap_search_secret)
         .null_handling(NullHandling::SpecialNullHandling)
