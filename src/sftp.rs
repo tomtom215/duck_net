@@ -248,6 +248,10 @@ async fn connect_sftp(
 }
 
 pub fn list(url: &str, key_file: Option<&str>) -> Result<Vec<SftpEntry>, String> {
+    // Validate path component for traversal (CWE-22)
+    if let Ok((_, _, _, _, ref path)) = parse_url(url) {
+        crate::security::validate_path_no_traversal(path)?;
+    }
     runtime::block_on(list_async(url, key_file))
 }
 
@@ -276,6 +280,17 @@ async fn list_async(url: &str, key_file: Option<&str>) -> Result<Vec<SftpEntry>,
 }
 
 pub fn read(url: &str, key_file: Option<&str>) -> SftpReadResult {
+    // Validate path component for traversal (CWE-22)
+    if let Ok((_, _, _, _, ref path)) = parse_url(url) {
+        if let Err(e) = crate::security::validate_path_no_traversal(path) {
+            return SftpReadResult {
+                success: false,
+                content: String::new(),
+                size: 0,
+                message: e,
+            };
+        }
+    }
     match runtime::block_on(read_async(url, key_file)) {
         Ok(r) => r,
         Err(msg) => SftpReadResult {
@@ -311,6 +326,17 @@ async fn read_async(url: &str, key_file: Option<&str>) -> Result<SftpReadResult,
 
 /// Read a file as raw bytes (binary).
 pub fn read_blob(url: &str, key_file: Option<&str>) -> SftpReadBlobResult {
+    // Validate path component for traversal (CWE-22)
+    if let Ok((_, _, _, _, ref path)) = parse_url(url) {
+        if let Err(e) = crate::security::validate_path_no_traversal(path) {
+            return SftpReadBlobResult {
+                success: false,
+                data: vec![],
+                size: 0,
+                message: e,
+            };
+        }
+    }
     match runtime::block_on(read_blob_async(url, key_file)) {
         Ok(r) => r,
         Err(msg) => SftpReadBlobResult {
@@ -342,6 +368,16 @@ async fn read_blob_async(url: &str, key_file: Option<&str>) -> Result<SftpReadBl
 }
 
 pub fn write(url: &str, content: &str, key_file: Option<&str>) -> SftpWriteResult {
+    // Validate path component for traversal (CWE-22)
+    if let Ok((_, _, _, _, ref path)) = parse_url(url) {
+        if let Err(e) = crate::security::validate_path_no_traversal(path) {
+            return SftpWriteResult {
+                success: false,
+                bytes_written: 0,
+                message: e,
+            };
+        }
+    }
     match runtime::block_on(write_async(url, content, key_file)) {
         Ok(r) => r,
         Err(msg) => SftpWriteResult {
@@ -375,6 +411,15 @@ async fn write_async(
 }
 
 pub fn delete(url: &str, key_file: Option<&str>) -> SftpResult {
+    // Validate path component for traversal (CWE-22)
+    if let Ok((_, _, _, _, ref path)) = parse_url(url) {
+        if let Err(e) = crate::security::validate_path_no_traversal(path) {
+            return SftpResult {
+                success: false,
+                message: e,
+            };
+        }
+    }
     match runtime::block_on(delete_async(url, key_file)) {
         Ok(msg) => SftpResult {
             success: true,

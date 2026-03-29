@@ -28,6 +28,7 @@ const MAX_WRITE_BODY_BYTES: usize = 1024 * 1024;
 // ---------------------------------------------------------------------------
 
 /// Validate a Vault base URL: must be HTTP or HTTPS, at most 2048 characters.
+/// Also checks SSRF protection (CWE-918).
 fn validate_url(url: &str) -> Result<(), String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("Vault URL must start with http:// or https://".to_string());
@@ -35,6 +36,7 @@ fn validate_url(url: &str) -> Result<(), String> {
     if url.len() > 2048 {
         return Err("URL too long (max 2048 characters)".to_string());
     }
+    crate::security::validate_no_ssrf(url)?;
     Ok(())
 }
 

@@ -158,17 +158,20 @@ impl RetryConfig {
     }
 }
 
-/// Validate URL scheme. Only allow http:// and https:// (CWE-918 SSRF mitigation).
+/// Validate URL scheme and check for SSRF (CWE-918).
+/// Only allows http:// and https://, and blocks private/reserved IPs when
+/// SSRF protection is enabled.
 fn validate_url(url: &str) -> Result<(), String> {
     let lower = url.to_ascii_lowercase();
-    if lower.starts_with("http://") || lower.starts_with("https://") {
-        Ok(())
-    } else {
-        Err(format!(
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return Err(format!(
             "Invalid URL scheme: only http:// and https:// are allowed, got: {}",
             url.split("://").next().unwrap_or("(none)")
-        ))
+        ));
     }
+    // SSRF protection: block requests to private/reserved IP addresses
+    crate::security::validate_no_ssrf(url)?;
+    Ok(())
 }
 
 /// Read a response body with a size limit to prevent OOM (CWE-400).

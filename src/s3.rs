@@ -177,6 +177,15 @@ pub fn s3_get(
             message: e,
         };
     }
+    // SSRF protection for S3 endpoint
+    if let Err(e) = crate::security::validate_no_ssrf(endpoint) {
+        return S3Result {
+            success: false,
+            body: String::new(),
+            status: 0,
+            message: e,
+        };
+    }
     if let Err(e) = validate_bucket(bucket) {
         return S3Result {
             success: false,
@@ -192,6 +201,13 @@ pub fn s3_get(
             status: 0,
             message: "Object key cannot be empty".to_string(),
         };
+    }
+    // Validate credential lengths (CWE-400)
+    if let Err(e) = crate::security::validate_credential_length("access_key", access_key, 256) {
+        return S3Result { success: false, body: String::new(), status: 0, message: e };
+    }
+    if let Err(e) = crate::security::validate_credential_length("secret_key", secret_key, 256) {
+        return S3Result { success: false, body: String::new(), status: 0, message: e };
     }
 
     let base = endpoint.trim_end_matches('/');
@@ -250,6 +266,22 @@ pub fn s3_put(
             status: 0,
             message: e,
         };
+    }
+    // SSRF protection for S3 endpoint
+    if let Err(e) = crate::security::validate_no_ssrf(endpoint) {
+        return S3Result {
+            success: false,
+            body: String::new(),
+            status: 0,
+            message: e,
+        };
+    }
+    // Validate credential lengths (CWE-400)
+    if let Err(e) = crate::security::validate_credential_length("access_key", access_key, 256) {
+        return S3Result { success: false, body: String::new(), status: 0, message: e };
+    }
+    if let Err(e) = crate::security::validate_credential_length("secret_key", secret_key, 256) {
+        return S3Result { success: false, body: String::new(), status: 0, message: e };
     }
     if let Err(e) = validate_bucket(bucket) {
         return S3Result {
@@ -334,6 +366,21 @@ pub fn s3_list(
             keys: Vec::new(),
             message: e,
         };
+    }
+    // SSRF protection for S3 endpoint
+    if let Err(e) = crate::security::validate_no_ssrf(endpoint) {
+        return S3ListResult {
+            success: false,
+            keys: Vec::new(),
+            message: e,
+        };
+    }
+    // Validate credential lengths (CWE-400)
+    if let Err(e) = crate::security::validate_credential_length("access_key", access_key, 256) {
+        return S3ListResult { success: false, keys: Vec::new(), message: e };
+    }
+    if let Err(e) = crate::security::validate_credential_length("secret_key", secret_key, 256) {
+        return S3ListResult { success: false, keys: Vec::new(), message: e };
     }
     if let Err(e) = validate_bucket(bucket) {
         return S3ListResult {
