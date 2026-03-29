@@ -365,3 +365,178 @@ pub fn keys(url: &str, pattern: &str) -> RedisKeysResult {
         },
     }
 }
+
+/// DEL a key from Redis. Returns the count of deleted keys.
+pub fn del(url: &str, key: &str) -> RedisResult {
+    if key.is_empty() {
+        return RedisResult {
+            success: false,
+            value: "Key cannot be empty".to_string(),
+        };
+    }
+
+    match connect(url) {
+        Ok(mut reader) => {
+            if let Err(e) = send_command(reader.get_mut(), &["DEL", key]) {
+                return RedisResult {
+                    success: false,
+                    value: e,
+                };
+            }
+            match read_response(&mut reader) {
+                Ok(v) if v.starts_with(':') => RedisResult {
+                    success: true,
+                    value: v[1..].to_string(),
+                },
+                Ok(v) => RedisResult {
+                    success: false,
+                    value: format!("Unexpected response from DEL: {v}"),
+                },
+                Err(e) => RedisResult {
+                    success: false,
+                    value: e,
+                },
+            }
+        }
+        Err(e) => RedisResult {
+            success: false,
+            value: e,
+        },
+    }
+}
+
+/// Set a TTL (in seconds) on a key. Returns "1" if timeout was set, "0" if key does not exist.
+pub fn expire(url: &str, key: &str, ttl_secs: i64) -> RedisResult {
+    if key.is_empty() {
+        return RedisResult {
+            success: false,
+            value: "Key cannot be empty".to_string(),
+        };
+    }
+    if ttl_secs <= 0 {
+        return RedisResult {
+            success: false,
+            value: "TTL must be positive".to_string(),
+        };
+    }
+
+    match connect(url) {
+        Ok(mut reader) => {
+            let ttl_str = ttl_secs.to_string();
+            if let Err(e) = send_command(reader.get_mut(), &["EXPIRE", key, &ttl_str]) {
+                return RedisResult {
+                    success: false,
+                    value: e,
+                };
+            }
+            match read_response(&mut reader) {
+                Ok(v) if v.starts_with(':') => RedisResult {
+                    success: true,
+                    value: v[1..].to_string(),
+                },
+                Ok(v) => RedisResult {
+                    success: false,
+                    value: format!("Unexpected response from EXPIRE: {v}"),
+                },
+                Err(e) => RedisResult {
+                    success: false,
+                    value: e,
+                },
+            }
+        }
+        Err(e) => RedisResult {
+            success: false,
+            value: e,
+        },
+    }
+}
+
+/// HGET a field from a Redis hash.
+pub fn hget(url: &str, key: &str, field: &str) -> RedisResult {
+    if key.is_empty() {
+        return RedisResult {
+            success: false,
+            value: "Key cannot be empty".to_string(),
+        };
+    }
+    if field.is_empty() {
+        return RedisResult {
+            success: false,
+            value: "Field cannot be empty".to_string(),
+        };
+    }
+
+    match connect(url) {
+        Ok(mut reader) => {
+            if let Err(e) = send_command(reader.get_mut(), &["HGET", key, field]) {
+                return RedisResult {
+                    success: false,
+                    value: e,
+                };
+            }
+            match read_response(&mut reader) {
+                Ok(v) if v == "$-1" => RedisResult {
+                    success: true,
+                    value: String::new(), // Field not found
+                },
+                Ok(v) => RedisResult {
+                    success: true,
+                    value: v,
+                },
+                Err(e) => RedisResult {
+                    success: false,
+                    value: e,
+                },
+            }
+        }
+        Err(e) => RedisResult {
+            success: false,
+            value: e,
+        },
+    }
+}
+
+/// HSET a field in a Redis hash. Returns "1" if field was created, "0" if updated.
+pub fn hset(url: &str, key: &str, field: &str, value: &str) -> RedisResult {
+    if key.is_empty() {
+        return RedisResult {
+            success: false,
+            value: "Key cannot be empty".to_string(),
+        };
+    }
+    if field.is_empty() {
+        return RedisResult {
+            success: false,
+            value: "Field cannot be empty".to_string(),
+        };
+    }
+
+    match connect(url) {
+        Ok(mut reader) => {
+            if let Err(e) = send_command(reader.get_mut(), &["HSET", key, field, value]) {
+                return RedisResult {
+                    success: false,
+                    value: e,
+                };
+            }
+            match read_response(&mut reader) {
+                Ok(v) if v.starts_with(':') => RedisResult {
+                    success: true,
+                    value: v[1..].to_string(),
+                },
+                Ok(v) => RedisResult {
+                    success: false,
+                    value: format!("Unexpected response from HSET: {v}"),
+                },
+                Err(e) => RedisResult {
+                    success: false,
+                    value: e,
+                },
+            }
+        }
+        Err(e) => RedisResult {
+            success: false,
+            value: e,
+        },
+    }
+}

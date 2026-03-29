@@ -302,3 +302,145 @@ fn encode_remaining_length(buf: &mut Vec<u8>, mut length: usize) {
         }
     }
 }
+
+/// Read and validate PUBACK response.
+fn read_puback(stream: &mut TcpStream, expected_id: u16) -> Result<(), String> {
+    let mut buf = [0u8; 4];
+    stream
+        .read_exact(&mut buf)
+        .map_err(|e| format!("MQTT PUBACK read failed: {e}"))?;
+
+    // Byte 0: packet type 0x40 (PUBACK)
+    if buf[0] != 0x40 {
+        return Err(format!(
+            "Expected PUBACK, got packet type 0x{:02x}",
+            buf[0]
+        ));
+    }
+
+    // Byte 1: remaining length (should be 2)
+    if buf[1] != 0x02 {
+        return Err("Invalid PUBACK length".to_string());
+    }
+
+    // Bytes 2-3: packet identifier
+    let received_id = u16::from_be_bytes([buf[2], buf[3]]);
+    if received_id != expected_id {
+        return Err(format!(
+            "PUBACK packet ID mismatch: expected 0x{expected_id:04x}, got 0x{received_id:04x}"
+        ));
+    }
+
+    Ok(())
+}
+
+/// MQTT publish with QoS 1 (at-least-once delivery) and optional retain flag.
+///
+/// QoS 1 requires waiting for a PUBACK response from the broker,
+/// guaranteeing the message was received. The retain flag tells the
+/// broker to store the message for future subscribers.
+///
+/// Security: validates host, topic, payload size. Enforces timeouts.
+pub fn publish_qos1(broker: &str, topic: &str, payload: &str, retain: bool) -> MqttResult {
+    if !is_valid_topic(topic) {
+        return MqttResult {
+            success: false,
+            message: "Invalid MQTT topic".to_string(),
+        };
+    }
+
+    if payload.len() > MAX_PAYLOAD_SIZE {
+        return MqttResult {
+            success: false,
+            message: format!(
+                "Payload too large: {} bytes (max {})",
+                payload.len(),
+                MAX_PAYLOAD_SIZE
+            ),
+        };
+    }
+
+    match publish_qos1_inner(broker, topic, payload, retain) {
+        Ok(msg) => MqttResult {
+            success: true,
+            message: msg,
+        },
+        Err(e) => MqttResult {
+            success: false,
+            message: e,
+        },
+    }
+}
+
+fn publish_qos1_inner(
+    broker: &str,
+    topic: &str,
+    payload: &str,
+    retain: bool,
+) -> Result<String, String> {
+    let (host, port, username, password) = parse_broker(broker)?;
+
+    let addr = format!("{host}:{port}");
+    let mut stream = TcpStream::connect_timeout(
+        &addr
+            .parse()
+            .map_err(|e| format!("Invalid broker address: {e}"))?,
+        Duration::from_secs(CONNECT_TIMEOUT_SECS),
+    )
+    .map_err(|e| format!("MQTT connection failed: {e}"))?;
+
+    stream
+        .set_read_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
+        .map_err(|e| format!("Failed to set timeout: {e}"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
+        .map_err(|e| format!("Failed to set timeout: {e}"))?;
+
+    // 1. Send CONNECT packet
+    send_connect(&mut stream, username.as_deref(), password.as_deref())?;
+
+    // 2. Read CONNACK
+    read_connack(&mut stream)?;
+
+    // 3. Send PUBLISH (QoS 1)
+    let topic_bytes = topic.as_bytes();
+    let payload_bytes = payload.as_bytes();
+    let packet_id: u16 = 0x0001;
+
+    let remaining = 2 + topic_bytes.len() + 2 + payload_bytes.len(); // topic length (2) + topic + packet id (2) + payload
+
+    let mut packet = Vec::new();
+    let mut type_byte: u8 = 0x32; // PUBLISH, QoS 1 (0x30 | 0x02)
+    if retain {
+        type_byte |= 0x01;
+    }
+    packet.push(type_byte);
+    encode_remaining_length(&mut packet, remaining);
+
+    // Topic
+    packet.extend_from_slice(&(topic_bytes.len() as u16).to_be_bytes());
+    packet.extend_from_slice(topic_bytes);
+
+    // Packet Identifier (required for QoS 1)
+    packet.extend_from_slice(&packet_id.to_be_bytes());
+
+    // Payload
+    packet.extend_from_slice(payload_bytes);
+
+    stream
+        .write_all(&packet)
+        .map_err(|e| format!("MQTT PUBLISH send failed: {e}"))?;
+
+    // 4. Read PUBACK
+    read_puback(&mut stream, packet_id)?;
+
+    // 5. Send DISCONNECT
+    send_disconnect(&mut stream)?;
+
+    Ok(format!(
+        "Published {} bytes to topic '{}' (QoS 1, retain={})",
+        payload.len(),
+        topic,
+        retain
+    ))
+}

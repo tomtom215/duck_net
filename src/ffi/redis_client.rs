@@ -136,6 +136,114 @@ unsafe extern "C" fn cb_redis_keys(
     }
 }
 
+/// redis_del(url, key) -> STRUCT(success, value)
+unsafe extern "C" fn cb_redis_del(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let key_reader = VectorReader::new(input, 1);
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let value_vec = duckdb_struct_vector_get_child(output, 1);
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+        let key = key_reader.read_str(row as usize);
+
+        let result = redis_client::del(url, key);
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_varchar(value_vec, row, &result.value);
+    }
+}
+
+/// redis_expire(url, key, ttl_secs) -> STRUCT(success, value)
+unsafe extern "C" fn cb_redis_expire(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let key_reader = VectorReader::new(input, 1);
+    let ttl_data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 2)) as *const i64;
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let value_vec = duckdb_struct_vector_get_child(output, 1);
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+        let key = key_reader.read_str(row as usize);
+        let ttl = *ttl_data.add(row as usize);
+
+        let result = redis_client::expire(url, key, ttl);
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_varchar(value_vec, row, &result.value);
+    }
+}
+
+/// redis_hget(url, key, field) -> STRUCT(success, value)
+unsafe extern "C" fn cb_redis_hget(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let key_reader = VectorReader::new(input, 1);
+    let field_reader = VectorReader::new(input, 2);
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let value_vec = duckdb_struct_vector_get_child(output, 1);
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+        let key = key_reader.read_str(row as usize);
+        let field = field_reader.read_str(row as usize);
+
+        let result = redis_client::hget(url, key, field);
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_varchar(value_vec, row, &result.value);
+    }
+}
+
+/// redis_hset(url, key, field, value) -> STRUCT(success, value)
+unsafe extern "C" fn cb_redis_hset(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+    let key_reader = VectorReader::new(input, 1);
+    let field_reader = VectorReader::new(input, 2);
+    let value_reader = VectorReader::new(input, 3);
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let value_vec = duckdb_struct_vector_get_child(output, 1);
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+        let key = key_reader.read_str(row as usize);
+        let field = field_reader.read_str(row as usize);
+        let value = value_reader.read_str(row as usize);
+
+        let result = redis_client::hset(url, key, field, value);
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_varchar(value_vec, row, &result.value);
+    }
+}
+
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
@@ -177,6 +285,38 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(v) // pattern
         .returns_logical(redis_keys_result_type())
         .function(cb_redis_keys)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // redis_del(url, key) -> STRUCT
+    ScalarFunctionBuilder::new("redis_del")
+        .param(v).param(v)
+        .returns_logical(redis_result_type())
+        .function(cb_redis_del)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // redis_expire(url, key, ttl_secs) -> STRUCT
+    ScalarFunctionBuilder::new("redis_expire")
+        .param(v).param(v).param(TypeId::BigInt)
+        .returns_logical(redis_result_type())
+        .function(cb_redis_expire)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // redis_hget(url, key, field) -> STRUCT
+    ScalarFunctionBuilder::new("redis_hget")
+        .param(v).param(v).param(v)
+        .returns_logical(redis_result_type())
+        .function(cb_redis_hget)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // redis_hset(url, key, field, value) -> STRUCT
+    ScalarFunctionBuilder::new("redis_hset")
+        .param(v).param(v).param(v).param(v)
+        .returns_logical(redis_result_type())
+        .function(cb_redis_hset)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 

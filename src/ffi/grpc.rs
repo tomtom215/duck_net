@@ -6,6 +6,7 @@ use quack_rs::prelude::*;
 
 use crate::grpc;
 
+use super::dns::write_string_list;
 use super::scalars::write_varchar;
 
 fn grpc_result_type() -> LogicalType {
@@ -16,6 +17,40 @@ fn grpc_result_type() -> LogicalType {
         ("grpc_status", LogicalType::new(TypeId::Integer)),
         ("grpc_message", LogicalType::new(TypeId::Varchar)),
     ])
+}
+
+fn grpc_reflection_result_type() -> LogicalType {
+    LogicalType::struct_type_from_logical(&[
+        ("success", LogicalType::new(TypeId::Boolean)),
+        ("services", LogicalType::list_from_logical(&LogicalType::new(TypeId::Varchar))),
+        ("message", LogicalType::new(TypeId::Varchar)),
+    ])
+}
+
+/// grpc_list_services(url) -> STRUCT
+unsafe extern "C" fn cb_grpc_list_services(
+    _info: duckdb_function_info,
+    input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let row_count = duckdb_data_chunk_get_size(input);
+    let url_reader = VectorReader::new(input, 0);
+
+    let success_vec = duckdb_struct_vector_get_child(output, 0);
+    let services_vec = duckdb_struct_vector_get_child(output, 1);
+    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut list_offset: idx_t = 0;
+
+    for row in 0..row_count {
+        let url = url_reader.read_str(row as usize);
+
+        let result = grpc::list_services(url);
+
+        let sd = duckdb_vector_get_data(success_vec) as *mut bool;
+        *sd.add(row as usize) = result.success;
+        write_string_list(services_vec, row, &result.services, &mut list_offset);
+        write_varchar(message_vec, row, &result.message);
+    }
 }
 
 /// grpc_call(url, service, method, payload) -> STRUCT
@@ -57,6 +92,13 @@ unsafe extern "C" fn cb_grpc_call(
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
+
+    ScalarFunctionBuilder::new("grpc_list_services")
+        .param(v)
+        .returns_logical(grpc_reflection_result_type())
+        .function(cb_grpc_list_services)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
 
     ScalarFunctionBuilder::new("grpc_call")
         .param(v) // url
