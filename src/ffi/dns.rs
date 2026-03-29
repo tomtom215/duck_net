@@ -7,7 +7,7 @@ use super::scalars::write_varchar;
 
 // ===== Helper: write a Vec<String> to a LIST(VARCHAR) vector =====
 
-unsafe fn write_string_list(
+pub(crate) unsafe fn write_string_list(
     output: duckdb_vector,
     row: idx_t,
     items: &[String],

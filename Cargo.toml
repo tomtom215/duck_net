@@ -1,10 +1,10 @@
 [package]
 name = "duck_net"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
-description = "DuckDB extension for comprehensive HTTP/HTTPS network client operations"
+description = "DuckDB extension for comprehensive network client operations"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -15,9 +15,12 @@ libduckdb-sys = { version = "=1.10501.0", features = ["loadable-extension"] }
 ureq = { version = "3.3", features = ["multipart", "platform-verifier"] }
 base64 = "0.22"
 
-# TLS (for SMTP STARTTLS)
+# TLS (for SMTP STARTTLS + TLS inspection)
 rustls = "0.23"
 webpki-roots = "1"
+
+# X.509 certificate parsing (TLS inspection)
+x509-parser = "0.16"
 
 # DNS resolution
 hickory-resolver = { version = "0.25", features = ["system-config"] }
@@ -30,6 +33,20 @@ russh = "0.58"
 russh-sftp = "2.1"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros"] }
+
+# LDAP
+ldap3 = "0.11"
+
+# AWS SigV4 signing
+hmac = "0.12"
+sha2 = "0.10"
+
+# AMQP (RabbitMQ)
+lapin = "2"
+
+# Kafka
+rskafka = "0.5"
+chrono = "0.4"
 
 [profile.release]
 opt-level = 3

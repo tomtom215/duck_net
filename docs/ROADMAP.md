@@ -19,6 +19,42 @@ Protocols that are request-response and stateless are excellent fits. Protocols 
 - Connection pooling (ureq Agent)
 - rustls TLS (pure Rust, no OpenSSL)
 
+## v0.2.0 — Shipped
+
+17 new protocol modules across three tiers, expanding duck_net from a pure HTTP extension into a comprehensive networking toolkit.
+
+### Tier 1: High-Value Business Protocols
+
+| Module | Functions | Description |
+|--------|-----------|-------------|
+| **GraphQL** | `graphql_query(url, query, [variables])`, `graphql_has_errors`, `graphql_extract_errors` | Query GraphQL APIs with optional variables and error inspection |
+| **WebDAV** | `webdav_list` (table), `webdav_read`, `webdav_write`, `webdav_delete`, `webdav_mkcol` | Full WebDAV file management via PROPFIND, GET, PUT, DELETE, MKCOL |
+| **LDAP** | `ldap_search` (table), `ldap_bind` | LDAP directory search (flattened dn/attribute/value) and bind authentication |
+| **TLS Inspect** | `tls_inspect(host, [port])` | Connect to a TLS server and extract X.509 certificate details (subject, issuer, SANs, expiry, algorithms) |
+| **WHOIS** | `whois_lookup`, `whois_query` | Raw WHOIS text and structured domain info (registrar, dates, nameservers, status) |
+| **OData** | `odata_query`, `odata_paginate` (table) | OData v4 queries with $filter/$select/$top/$orderby/$expand and automatic pagination via @odata.nextLink |
+| **JSON-RPC / XML-RPC** | `jsonrpc_call(url, method, [params])`, `xmlrpc_call` | JSON-RPC 2.0 and XML-RPC remote procedure calls |
+
+### Tier 2: Infrastructure & Monitoring
+
+| Module | Functions | Description |
+|--------|-----------|-------------|
+| **IMAP** | `imap_list` (table), `imap_fetch` | List and fetch email messages from IMAP servers (plain and TLS) |
+| **SNMP** | `snmp_get`, `snmp_walk` (table) | SNMPv2c GET and GETNEXT walk for network device monitoring. Hand-rolled BER/ASN.1 encoding |
+| **Ping / Traceroute** | `ping(host, [timeout])`, `traceroute` (table) | ICMP ping and traceroute via system commands with input validation |
+
+### Tier 3: Specialized Protocols
+
+| Module | Functions | Description |
+|--------|-----------|-------------|
+| **NTP** | `ntp_query` | Query NTP servers for time offset, delay, stratum, and reference ID |
+| **SIP** | `sip_options(host, [port])` | SIP OPTIONS ping to check VoIP server availability |
+| **CalDAV / CardDAV** | `caldav_events` (table), `carddav_contacts` (table) | List calendar events (with time-range filter) and address book contacts |
+| **Syslog** | `syslog_send(host, message, [facility, severity, ...])` | Send RFC 5424 syslog messages over UDP |
+| **AWS SigV4** | `aws_sigv4_sign(method, url, headers, body, access_key, secret_key, region)` | Sign HTTP requests with AWS Signature Version 4 |
+| **AMQP** | `amqp_publish(url, exchange, routing_key, message, [content_type])` | Publish messages to RabbitMQ/AMQP brokers |
+| **Kafka** | `kafka_produce(brokers, topic, [key], value)` | Produce messages to Apache Kafka topics |
+
 ## Priority 1: Production-Grade HTTP (REST + SOAP)
 
 ### 1a. Retry with Configurable Backoff
@@ -75,6 +111,8 @@ Fire-and-forget email sending from SQL. Useful for alerting on query results.
 | MQTT Publish | Feasible but extremely niche. Who publishes MQTT from SQL? |
 | XMPP | Deeply stateful, session-oriented, streaming. Zero SQL use case. |
 | gRPC | Request-response fits, but protobuf handling is enormous complexity for marginal gain over HTTP+JSON. Revisit if demand materializes. |
+| QUIC / HTTP/3 | Transport-layer protocol. DuckDB doesn't control socket-level details; ureq handles connections. No user-facing benefit. |
+| Raw TCP/UDP | Too low-level for SQL. Specific protocols (WHOIS, NTP, SIP, SNMP) already use raw sockets internally. |
 
 ## Implementation Guides
 
