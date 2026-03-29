@@ -12,7 +12,7 @@ pub struct DohResult {
     pub message: String,
 }
 
-/// Validate DoH resolver URL.
+/// Validate DoH resolver URL, with SSRF protection (CWE-918).
 fn validate_url(url: &str) -> Result<(), String> {
     if !url.starts_with("https://") && !url.starts_with("http://") {
         return Err("DoH resolver URL must start with https:// or http://".to_string());
@@ -20,6 +20,7 @@ fn validate_url(url: &str) -> Result<(), String> {
     if url.len() > 2048 {
         return Err("URL too long (max 2048 characters)".to_string());
     }
+    crate::security::validate_no_ssrf(url)?;
     Ok(())
 }
 

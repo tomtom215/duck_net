@@ -32,6 +32,7 @@ mod radius;
 mod redis_client;
 mod s3;
 pub(crate) mod scalars;
+mod secrets;
 mod sip;
 mod smtp;
 mod snmp;
@@ -128,6 +129,9 @@ pub fn register_all(con: &Connection) -> Result<(), ExtensionError> {
 
         // Hardware: IPMI
         ipmi::register_all(raw_con)?;
+
+        // Security: Secrets manager + hardening configuration
+        secrets::register_all(raw_con)?;
     }
     Ok(())
 }

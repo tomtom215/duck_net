@@ -15,7 +15,7 @@ pub struct WsResult {
     pub message: String,
 }
 
-/// Validate WebSocket URL scheme.
+/// Validate WebSocket URL scheme, with SSRF protection (CWE-918).
 fn validate_url(url: &str) -> Result<(), String> {
     if !url.starts_with("ws://") && !url.starts_with("wss://") {
         return Err("URL must start with ws:// or wss://".to_string());
@@ -25,6 +25,14 @@ fn validate_url(url: &str) -> Result<(), String> {
     if url.len() > 2048 {
         return Err("URL too long (max 2048 characters)".to_string());
     }
+
+    // Convert ws:// to http:// for SSRF hostname checking
+    let http_url = if url.starts_with("wss://") {
+        format!("https://{}", &url[6..])
+    } else {
+        format!("http://{}", &url[5..])
+    };
+    crate::security::validate_no_ssrf(&http_url)?;
 
     Ok(())
 }

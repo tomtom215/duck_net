@@ -13,7 +13,8 @@ pub struct KvResult {
 
 // ===== Validation helpers =====
 
-/// Validate that a URL starts with http:// or https:// and is not too long.
+/// Validate that a URL starts with http:// or https://, is not too long,
+/// and does not target private/reserved IPs (SSRF protection, CWE-918).
 fn validate_url(url: &str) -> Result<(), String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("URL must start with http:// or https://".to_string());
@@ -21,6 +22,7 @@ fn validate_url(url: &str) -> Result<(), String> {
     if url.len() > 2048 {
         return Err("URL too long (max 2048 characters)".to_string());
     }
+    crate::security::validate_no_ssrf(url)?;
     Ok(())
 }
 

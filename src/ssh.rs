@@ -66,12 +66,16 @@ pub fn exec(host: &str, port: u16, user: &str, key_file: &str, command: &str) ->
         };
     }
 
-    if command.is_empty() {
+    // Validate command for injection attacks (CWE-78)
+    if let Err(e) = crate::security::validate_ssh_command(
+        command,
+        crate::security::ssh_strict_commands(),
+    ) {
         return SshExecResult {
             success: false,
             exit_code: -1,
             stdout: String::new(),
-            stderr: "Command cannot be empty".to_string(),
+            stderr: e,
         };
     }
 
@@ -113,12 +117,16 @@ pub fn exec_password(
         };
     }
 
-    if command.is_empty() {
+    // Validate command for injection attacks (CWE-78)
+    if let Err(e) = crate::security::validate_ssh_command(
+        command,
+        crate::security::ssh_strict_commands(),
+    ) {
         return SshExecResult {
             success: false,
             exit_code: -1,
             stdout: String::new(),
-            stderr: "Command cannot be empty".to_string(),
+            stderr: e,
         };
     }
 
@@ -392,17 +400,10 @@ fn shell_escape_path(path: &str) -> String {
 }
 
 /// Validate a remote file path for SCP operations.
+/// Includes path traversal prevention (CWE-22).
 fn validate_remote_path(path: &str) -> Result<(), String> {
-    if path.is_empty() {
-        return Err("Remote path cannot be empty".to_string());
-    }
-    if path.len() > 4096 {
-        return Err("Remote path exceeds maximum length of 4096".to_string());
-    }
-    if path.contains('\0') {
-        return Err("Remote path must not contain null bytes".to_string());
-    }
-    Ok(())
+    // Use centralized path traversal validation
+    crate::security::validate_path_no_traversal(path)
 }
 
 /// Read a remote file via SCP (key-based authentication).

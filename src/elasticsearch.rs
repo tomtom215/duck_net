@@ -9,7 +9,7 @@ pub struct EsResult {
     pub message: String,
 }
 
-/// Validate Elasticsearch URL: must be HTTP/HTTPS.
+/// Validate Elasticsearch URL: must be HTTP/HTTPS, with SSRF protection (CWE-918).
 fn validate_url(url: &str) -> Result<(), String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("Elasticsearch URL must start with http:// or https://".to_string());
@@ -17,6 +17,7 @@ fn validate_url(url: &str) -> Result<(), String> {
     if url.len() > 2048 {
         return Err("URL too long (max 2048 characters)".to_string());
     }
+    crate::security::validate_no_ssrf(url)?;
     Ok(())
 }
 

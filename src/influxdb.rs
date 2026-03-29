@@ -12,7 +12,8 @@ pub struct InfluxResult {
 /// Maximum body size for write requests: 256 MiB.
 const MAX_WRITE_BODY_SIZE: usize = 256 * 1024 * 1024;
 
-/// Validate InfluxDB URL: must be HTTP/HTTPS and within length limit.
+/// Validate InfluxDB URL: must be HTTP/HTTPS, within length limit,
+/// and not targeting private/reserved IPs (SSRF protection, CWE-918).
 fn validate_url(url: &str) -> Result<(), String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("InfluxDB URL must start with http:// or https://".to_string());
@@ -20,6 +21,7 @@ fn validate_url(url: &str) -> Result<(), String> {
     if url.len() > 2048 {
         return Err("URL too long (max 2048 characters)".to_string());
     }
+    crate::security::validate_no_ssrf(url)?;
     Ok(())
 }
 
