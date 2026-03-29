@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-//! Protocol-specific secrets-aware FFI overloads (Redis, LDAP, S3, SMTP,
-//! Vault) and the secrets list table function.
+//! Extended secrets-aware FFI overloads (Redis, S3, SMTP, Vault) and the
+//! secrets list table function.
 
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
