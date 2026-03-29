@@ -239,6 +239,38 @@ unsafe extern "C" fn cb_set_ssh_strict(
     }
 }
 
+/// duck_net_security_status() -> VARCHAR
+/// Returns a JSON summary of current security configuration for auditing.
+unsafe extern "C" fn cb_security_status(
+    _info: duckdb_function_info,
+    _input: duckdb_data_chunk,
+    output: duckdb_vector,
+) {
+    let ssrf = security::ssrf_protection_enabled();
+    let ssh_strict = security::ssh_strict_commands();
+    let secrets_count = secrets::list_secrets().len();
+    let rate_limit = crate::rate_limit::get_global_rps();
+    let timeout = crate::http::get_timeout_secs();
+    let retries = crate::http::get_max_retries();
+
+    let status = format!(
+        concat!(
+            "{{",
+            "\"ssrf_protection\":{},",
+            "\"ssh_strict_commands\":{},",
+            "\"secrets_stored\":{},",
+            "\"global_rate_limit_rps\":{},",
+            "\"http_timeout_secs\":{},",
+            "\"http_max_retries\":{},",
+            "\"duckdb_native_secrets\":\"Use CREATE SECRET (TYPE s3/http) for S3 and HTTP protocols\",",
+            "\"duck_net_secrets\":\"Use duck_net_add_secret() for SMTP, SSH, LDAP, Redis, MQTT, etc.\"",
+            "}}"
+        ),
+        ssrf, ssh_strict, secrets_count, rate_limit, timeout, retries,
+    );
+    write_varchar(output, 0, &status);
+}
+
 // ---------------------------------------------------------------------------
 // Secrets-Aware S3 Overloads
 // ---------------------------------------------------------------------------
@@ -1027,6 +1059,12 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .register(con)?;
 
     // --- Security Configuration Functions ---
+
+    // duck_net_security_status() -> VARCHAR (audit current security config)
+    ScalarFunctionBuilder::new("duck_net_security_status")
+        .returns(TypeId::Varchar)
+        .function(cb_security_status)
+        .register(con)?;
 
     // duck_net_set_ssrf_protection(enabled BOOLEAN) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_ssrf_protection")

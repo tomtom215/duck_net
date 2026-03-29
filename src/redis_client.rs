@@ -82,9 +82,17 @@ fn parse_url(url: &str) -> Result<(String, u16, Option<String>, Option<u32>), St
     Ok((host, port, password, db))
 }
 
+/// Scrub credentials from a Redis URL for safe inclusion in error messages (CWE-532).
+fn scrub_url(url: &str) -> String {
+    crate::security::scrub_url(url)
+}
+
 /// Connect to Redis and optionally authenticate + select database.
 fn connect(url: &str) -> Result<BufReader<TcpStream>, String> {
     let (host, port, password, db) = parse_url(url)?;
+
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
 
     let addr = format!("{host}:{port}");
     let stream = TcpStream::connect_timeout(
@@ -93,7 +101,7 @@ fn connect(url: &str) -> Result<BufReader<TcpStream>, String> {
             .map_err(|e| format!("Invalid address {addr}: {e}"))?,
         Duration::from_secs(CONNECT_TIMEOUT_SECS),
     )
-    .map_err(|e| format!("Redis connection failed: {e}"))?;
+    .map_err(|e| format!("Redis connection failed: {}", scrub_url(&e.to_string())))?;
 
     stream
         .set_read_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))

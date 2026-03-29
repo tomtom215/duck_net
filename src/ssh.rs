@@ -231,6 +231,9 @@ async fn connect_ssh(
     user: &str,
     auth: SshAuth<'_>,
 ) -> Result<russh::client::Handle<SshHandler>, String> {
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(host)?;
+
     let config = russh::client::Config {
         inactivity_timeout: Some(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
         ..Default::default()

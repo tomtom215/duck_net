@@ -218,6 +218,9 @@ pub fn publish(url: &str, subject: &str, payload: &str) -> NatsResult {
 fn publish_inner(url: &str, subject: &str, payload: &str) -> Result<String, String> {
     let (host, port, username, password) = parse_nats_url(url)?;
 
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
+
     let addr = format!("{host}:{port}");
     let stream = TcpStream::connect_timeout(
         &addr
@@ -319,6 +322,9 @@ fn request_inner(
     timeout_ms: u32,
 ) -> Result<(String, String), String> {
     let (host, port, username, password) = parse_nats_url(url)?;
+
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
 
     // Clamp timeout to 100..30000 ms
     let timeout_ms = timeout_ms.clamp(100, 30000);

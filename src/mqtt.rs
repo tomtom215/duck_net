@@ -106,6 +106,16 @@ pub fn publish(broker: &str, topic: &str, payload: &str) -> MqttResult {
         };
     }
 
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    if let Ok((host, _, _, _)) = parse_broker(broker) {
+        if let Err(e) = crate::security::validate_no_ssrf_host(&host) {
+            return MqttResult {
+                success: false,
+                message: e,
+            };
+        }
+    }
+
     match publish_inner(broker, topic, payload) {
         Ok(msg) => MqttResult {
             success: true,

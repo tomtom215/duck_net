@@ -79,6 +79,9 @@ pub fn send(config: &SmtpConfig) -> SmtpResult {
 }
 
 fn send_inner(config: &SmtpConfig) -> Result<String, String> {
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&config.host)?;
+
     let addr = format!("{}:{}", config.host, config.port);
     let stream = TcpStream::connect_timeout(
         &addr
@@ -129,7 +132,17 @@ fn send_with_starttls(config: &SmtpConfig, stream: TcpStream) -> Result<String, 
         return send_over_tls(config, writer);
     }
 
-    // Continue in plaintext (only if no auth needed)
+    // Refuse plaintext AUTH: if credentials are provided but STARTTLS is not
+    // available, abort to prevent sending credentials in cleartext (CWE-319).
+    if config.username.is_some() && config.password.is_some() {
+        return Err(
+            "SMTP server does not support STARTTLS; refusing to send credentials in plaintext. \
+             Use smtps:// (direct TLS on port 465) or configure the server for STARTTLS."
+                .to_string(),
+        );
+    }
+
+    // Continue in plaintext (no auth needed)
     send_mail_commands(&mut reader, &mut writer, config)
 }
 

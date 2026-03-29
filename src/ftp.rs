@@ -102,8 +102,15 @@ struct FtpConn {
     path: String,
 }
 
+/// Maximum file read size: 256 MiB. Prevents OOM from unbounded reads (CWE-400).
+const MAX_READ_BYTES: usize = 256 * 1024 * 1024;
+
 fn connect_and_login(url: &str) -> Result<FtpConn, String> {
     let (host, port, user, pass, path) = parse_url(url)?;
+
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
+
     let username = user.unwrap_or_else(|| "anonymous".to_string());
     let password = pass.unwrap_or_else(|| "duck_net@".to_string());
 
@@ -165,6 +172,14 @@ fn read_inner(url: &str) -> Result<FtpReadResult, String> {
         .map_err(|e| format!("FTP read failed: {e}"))?;
 
     let buf = data.into_inner();
+    if buf.len() > MAX_READ_BYTES {
+        conn.return_to_cache();
+        return Err(format!(
+            "FTP file too large: {} bytes (max {} bytes)",
+            buf.len(),
+            MAX_READ_BYTES
+        ));
+    }
     let size = buf.len() as i64;
     let content =
         String::from_utf8(buf).map_err(|e| format!("FTP file is not valid UTF-8: {e}"))?;
@@ -200,6 +215,14 @@ fn read_blob_inner(url: &str) -> Result<FtpReadBlobResult, String> {
         .map_err(|e| format!("FTP read failed: {e}"))?;
 
     let buf = data.into_inner();
+    if buf.len() > MAX_READ_BYTES {
+        conn.return_to_cache();
+        return Err(format!(
+            "FTP file too large: {} bytes (max {} bytes)",
+            buf.len(),
+            MAX_READ_BYTES
+        ));
+    }
     let size = buf.len() as i64;
     conn.return_to_cache();
     Ok(FtpReadBlobResult {

@@ -53,8 +53,7 @@ pub fn get_retry_backoff_ms() -> u64 {
 pub fn set_timeout_secs(s: u64) {
     GLOBAL_TIMEOUT_SECS.store(s, std::sync::atomic::Ordering::Relaxed);
 }
-#[allow(dead_code)]
-pub(crate) fn get_timeout_secs() -> u64 {
+pub fn get_timeout_secs() -> u64 {
     GLOBAL_TIMEOUT_SECS.load(std::sync::atomic::Ordering::Relaxed)
 }
 

@@ -7,6 +7,9 @@ use base64::Engine as _;
 
 use crate::runtime;
 
+/// Maximum file read size: 256 MiB. Prevents OOM from unbounded reads (CWE-400).
+const MAX_READ_BYTES: usize = 256 * 1024 * 1024;
+
 /// Scrub credentials from a URL for safe inclusion in error messages (CWE-532).
 #[allow(dead_code)]
 fn scrub_url(url: &str) -> String {
@@ -196,6 +199,9 @@ async fn connect_sftp(
     pass: Option<&str>,
     key_file: Option<&str>,
 ) -> Result<russh_sftp::client::SftpSession, String> {
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(host)?;
+
     let config = russh::client::Config::default();
     let handler = SshHandler {
         expected_host: host.to_string(),
@@ -312,6 +318,14 @@ async fn read_async(url: &str, key_file: Option<&str>) -> Result<SftpReadResult,
         .await
         .map_err(|e| format!("SFTP read failed: {e}"))?;
 
+    if data.len() > MAX_READ_BYTES {
+        return Err(format!(
+            "SFTP file too large: {} bytes (max {} bytes)",
+            data.len(),
+            MAX_READ_BYTES
+        ));
+    }
+
     let size = data.len() as i64;
     let content =
         String::from_utf8(data).map_err(|e| format!("SFTP file is not valid UTF-8: {e}"))?;
@@ -357,6 +371,14 @@ async fn read_blob_async(url: &str, key_file: Option<&str>) -> Result<SftpReadBl
         .read(&path)
         .await
         .map_err(|e| format!("SFTP read failed: {e}"))?;
+
+    if data.len() > MAX_READ_BYTES {
+        return Err(format!(
+            "SFTP file too large: {} bytes (max {} bytes)",
+            data.len(),
+            MAX_READ_BYTES
+        ));
+    }
 
     let size = data.len() as i64;
     Ok(SftpReadBlobResult {
