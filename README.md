@@ -68,15 +68,15 @@ Full documentation is available in the [docs/](docs/) directory:
 
 | Protection | Description |
 |-----------|-------------|
-| SSRF protection | Blocks private/reserved IPs across all protocols (CWE-918) |
-| Secrets manager | In-memory credentials with zeroization; never on disk |
-| DuckDB secrets | Native `CREATE SECRET` for S3/HTTP/GCS/R2 |
+| SSRF protection | Blocks private/reserved IPs across all 49+ protocols (CWE-918) |
+| Secrets manager | In-memory credentials with `zeroize` crate (compiler-resistant zeroing) |
+| DuckDB secrets | Native `CREATE SECRET` for S3/HTTP/GCS/R2 with scoped + persistent support |
 | Security warnings | Runtime alerts for plaintext protocols, missing auth, weak crypto |
-| Input validation | URL length, hostname format, path traversal, injection prevention |
+| Input validation | URL length, hostname format, path traversal, LDAP filter, query size limits |
 | TLS everywhere | Pure Rust `rustls`; no OpenSSL dependency |
-| Response limits | 256 MiB HTTP, 16 MiB gRPC/WS/Redis, 10 MiB IMAP |
+| Response limits | 256 MiB HTTP, 16 MiB gRPC/WS/Redis, 10 MiB IMAP, 1 MiB query payloads |
 | CSPRNG | OS entropy via `getrandom`; panics instead of weak fallback |
-| Credential scrubbing | Passwords/tokens redacted in all error messages |
+| Credential scrubbing | Passwords, tokens, Authorization headers redacted in all error messages |
 
 ```sql
 -- Security audit

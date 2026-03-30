@@ -27,20 +27,20 @@ quack_rs::scalar_callback!(cb_snmp_get, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let oid = unsafe { oid_reader.read_str(row as usize) };
-        let community = unsafe { comm_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let oid = unsafe { oid_reader.read_str(row) };
+        let community = unsafe { comm_reader.read_str(row) };
 
         match snmp::get(host, oid, community) {
             Ok(result) => {
-                unsafe { sw.write_varchar(row as usize, 0, &result.oid) };
-                unsafe { sw.write_varchar(row as usize, 1, &result.value) };
-                unsafe { sw.write_varchar(row as usize, 2, &result.value_type) };
+                unsafe { sw.write_varchar(row, 0, &result.oid) };
+                unsafe { sw.write_varchar(row, 1, &result.value) };
+                unsafe { sw.write_varchar(row, 2, &result.value_type) };
             }
             Err(e) => {
-                unsafe { sw.write_varchar(row as usize, 0, oid) };
-                unsafe { sw.write_varchar(row as usize, 1, &format!("Error: {e}")) };
-                unsafe { sw.write_varchar(row as usize, 2, "ERROR") };
+                unsafe { sw.write_varchar(row, 0, oid) };
+                unsafe { sw.write_varchar(row, 1, &format!("Error: {e}")) };
+                unsafe { sw.write_varchar(row, 2, "ERROR") };
             }
         }
     }

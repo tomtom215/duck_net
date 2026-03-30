@@ -24,43 +24,31 @@ quack_rs::scalar_callback!(cb_syslog_send_4, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let facility_str = unsafe { facility_reader.read_str(row as usize) };
-        let severity_str = unsafe { severity_reader.read_str(row as usize) };
-        let msg = unsafe { msg_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let facility_str = unsafe { facility_reader.read_str(row) };
+        let severity_str = unsafe { severity_reader.read_str(row) };
+        let msg = unsafe { msg_reader.read_str(row) };
 
         let facility = match syslog::facility_from_name(facility_str) {
             Some(f) => f,
             None => {
-                unsafe { sw.write_bool(row as usize, 0, false) };
-                unsafe {
-                    sw.write_varchar(
-                        row as usize,
-                        1,
-                        &format!("Unknown facility: {facility_str}"),
-                    )
-                };
+                unsafe { sw.write_bool(row, 0, false) };
+                unsafe { sw.write_varchar(row, 1, &format!("Unknown facility: {facility_str}")) };
                 continue;
             }
         };
         let severity = match syslog::severity_from_name(severity_str) {
             Some(s) => s,
             None => {
-                unsafe { sw.write_bool(row as usize, 0, false) };
-                unsafe {
-                    sw.write_varchar(
-                        row as usize,
-                        1,
-                        &format!("Unknown severity: {severity_str}"),
-                    )
-                };
+                unsafe { sw.write_bool(row, 0, false) };
+                unsafe { sw.write_varchar(row, 1, &format!("Unknown severity: {severity_str}")) };
                 continue;
             }
         };
 
         let result = syslog::send(host, 0, facility, severity, "", "", msg);
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 
@@ -79,46 +67,34 @@ quack_rs::scalar_callback!(cb_syslog_send_7, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let port = unsafe { port_reader.read_i32(row as usize) } as u16;
-        let facility_str = unsafe { facility_reader.read_str(row as usize) };
-        let severity_str = unsafe { severity_reader.read_str(row as usize) };
-        let hostname = unsafe { hostname_reader.read_str(row as usize) };
-        let app_name = unsafe { app_reader.read_str(row as usize) };
-        let msg = unsafe { msg_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let port = unsafe { port_reader.read_i32(row) } as u16;
+        let facility_str = unsafe { facility_reader.read_str(row) };
+        let severity_str = unsafe { severity_reader.read_str(row) };
+        let hostname = unsafe { hostname_reader.read_str(row) };
+        let app_name = unsafe { app_reader.read_str(row) };
+        let msg = unsafe { msg_reader.read_str(row) };
 
         let facility = match syslog::facility_from_name(facility_str) {
             Some(f) => f,
             None => {
-                unsafe { sw.write_bool(row as usize, 0, false) };
-                unsafe {
-                    sw.write_varchar(
-                        row as usize,
-                        1,
-                        &format!("Unknown facility: {facility_str}"),
-                    )
-                };
+                unsafe { sw.write_bool(row, 0, false) };
+                unsafe { sw.write_varchar(row, 1, &format!("Unknown facility: {facility_str}")) };
                 continue;
             }
         };
         let severity = match syslog::severity_from_name(severity_str) {
             Some(s) => s,
             None => {
-                unsafe { sw.write_bool(row as usize, 0, false) };
-                unsafe {
-                    sw.write_varchar(
-                        row as usize,
-                        1,
-                        &format!("Unknown severity: {severity_str}"),
-                    )
-                };
+                unsafe { sw.write_bool(row, 0, false) };
+                unsafe { sw.write_varchar(row, 1, &format!("Unknown severity: {severity_str}")) };
                 continue;
             }
         };
 
         let result = syslog::send(host, port, facility, severity, hostname, app_name, msg);
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 

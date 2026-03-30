@@ -58,6 +58,13 @@ pub fn walk(
     community: &str,
     max_entries: usize,
 ) -> Result<Vec<SnmpResult>, String> {
+    // Warn about SNMPv2c limitations (CWE-327)
+    crate::security_warnings::warn_weak_auth(
+        "SNMP",
+        "SNMPV2C_WEAK_AUTH",
+        "SNMPv2c with plaintext community strings. \
+         Consider SNMPv3 for authentication and encryption",
+    );
     validate_community(community)?;
     // Clamp max_entries to prevent unbounded iteration
     let max_entries = max_entries.min(MAX_WALK_ENTRIES);

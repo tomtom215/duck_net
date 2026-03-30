@@ -47,6 +47,15 @@ pub fn scp_read(
             message: "Invalid hostname: contains disallowed characters".to_string(),
         };
     }
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return ScpReadResult {
+            success: false,
+            data: String::new(),
+            size: 0,
+            message: e,
+        };
+    }
     if !is_valid_user(user) {
         return ScpReadResult {
             success: false,
@@ -97,6 +106,15 @@ pub fn scp_read_password(
             message: "Invalid hostname: contains disallowed characters".to_string(),
         };
     }
+    // SSRF protection (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return ScpReadResult {
+            success: false,
+            data: String::new(),
+            size: 0,
+            message: e,
+        };
+    }
     if !is_valid_user(user) {
         return ScpReadResult {
             success: false,
@@ -145,6 +163,14 @@ pub fn scp_write(
             success: false,
             bytes_written: 0,
             message: "Invalid hostname: contains disallowed characters".to_string(),
+        };
+    }
+    // SSRF protection (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return ScpWriteResult {
+            success: false,
+            bytes_written: 0,
+            message: e,
         };
     }
     if !is_valid_user(user) {
@@ -204,6 +230,14 @@ pub fn scp_write_password(
             success: false,
             bytes_written: 0,
             message: "Invalid hostname: contains disallowed characters".to_string(),
+        };
+    }
+    // SSRF protection (CWE-918)
+    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        return ScpWriteResult {
+            success: false,
+            bytes_written: 0,
+            message: e,
         };
     }
     if !is_valid_user(user) {

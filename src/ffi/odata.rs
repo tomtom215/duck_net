@@ -48,22 +48,46 @@ unsafe extern "C" fn odata_paginate_bind(info: duckdb_bind_info) {
     let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
 
     let filter_val = bind.get_named_parameter_value("filter");
-    let filter = if filter_val.is_null() { None } else { filter_val.as_str().ok() };
+    let filter = if filter_val.is_null() {
+        None
+    } else {
+        filter_val.as_str().ok()
+    };
 
     let select_val = bind.get_named_parameter_value("select");
-    let select = if select_val.is_null() { None } else { select_val.as_str().ok() };
+    let select = if select_val.is_null() {
+        None
+    } else {
+        select_val.as_str().ok()
+    };
 
     let orderby_val = bind.get_named_parameter_value("orderby");
-    let orderby = if orderby_val.is_null() { None } else { orderby_val.as_str().ok() };
+    let orderby = if orderby_val.is_null() {
+        None
+    } else {
+        orderby_val.as_str().ok()
+    };
 
     let expand_val = bind.get_named_parameter_value("expand");
-    let expand = if expand_val.is_null() { None } else { expand_val.as_str().ok() };
+    let expand = if expand_val.is_null() {
+        None
+    } else {
+        expand_val.as_str().ok()
+    };
 
     let top_val = bind.get_named_parameter_value("top");
-    let top = if top_val.is_null() { None } else { Some(top_val.as_i64()) };
+    let top = if top_val.is_null() {
+        None
+    } else {
+        Some(top_val.as_i64())
+    };
 
     let max_pages_val = bind.get_named_parameter_value("max_pages");
-    let max_pages = if max_pages_val.is_null() { 100 } else { max_pages_val.as_i64() };
+    let max_pages = if max_pages_val.is_null() {
+        100
+    } else {
+        max_pages_val.as_i64()
+    };
 
     bind.add_result_column("page", TypeId::Integer);
     bind.add_result_column("status", TypeId::Integer);

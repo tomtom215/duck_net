@@ -23,14 +23,14 @@ quack_rs::scalar_callback!(cb_ws_request, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let msg = unsafe { msg_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let msg = unsafe { msg_reader.read_str(row) };
 
         let result = websocket::request_default_timeout(url, msg);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.response) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.response) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -45,15 +45,15 @@ quack_rs::scalar_callback!(cb_ws_request_timeout, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let msg = unsafe { msg_reader.read_str(row as usize) };
-        let timeout = unsafe { timeout_reader.read_i32(row as usize) } as u32;
+        let url = unsafe { url_reader.read_str(row) };
+        let msg = unsafe { msg_reader.read_str(row) };
+        let timeout = unsafe { timeout_reader.read_i32(row) } as u32;
 
         let result = websocket::request(url, msg, timeout);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.response) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.response) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -78,9 +78,9 @@ quack_rs::scalar_callback!(cb_ws_multi_request, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let msgs_str = unsafe { msgs_reader.read_str(row as usize) };
-        let timeout = unsafe { timeout_reader.read_i32(row as usize) } as u32;
+        let url = unsafe { url_reader.read_str(row) };
+        let msgs_str = unsafe { msgs_reader.read_str(row) };
+        let timeout = unsafe { timeout_reader.read_i32(row) } as u32;
 
         let msgs: Vec<String> = msgs_str
             .split('\n')
@@ -90,10 +90,10 @@ quack_rs::scalar_callback!(cb_ws_multi_request, |_info, input, output| {
 
         let result = websocket::multi_request(url, &msgs, timeout);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.responses.join("\n")) };
-        unsafe { sw.write_i32(row as usize, 2, result.responses.len() as i32) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.responses.join("\n")) };
+        unsafe { sw.write_i32(row, 2, result.responses.len() as i32) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 

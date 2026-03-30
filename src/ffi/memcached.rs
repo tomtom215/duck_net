@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::memcached;
 
-
 fn memcached_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),
@@ -25,14 +24,14 @@ quack_rs::scalar_callback!(cb_memcached_get, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
 
         let result = memcached::get(host, key);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -47,15 +46,15 @@ quack_rs::scalar_callback!(cb_memcached_set, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let value = unsafe { value_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let value = unsafe { value_reader.read_str(row) };
 
         let result = memcached::set(host, key, value, 0);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -71,16 +70,16 @@ quack_rs::scalar_callback!(cb_memcached_set_ttl, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let value = unsafe { value_reader.read_str(row as usize) };
-        let ttl = unsafe { ttl_reader.read_i32(row as usize) } as u32;
+        let host = unsafe { host_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let value = unsafe { value_reader.read_str(row) };
+        let ttl = unsafe { ttl_reader.read_i32(row) } as u32;
 
         let result = memcached::set(host, key, value, ttl);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 

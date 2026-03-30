@@ -41,13 +41,13 @@ quack_rs::scalar_callback!(cb_grpc_list_services, |_info, input, output| {
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
 
         let result = grpc_reflect::list_services(url);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_bool(row, 0, result.success) };
         unsafe { write_string_list(services_vec, row, &result.services, &mut list_offset) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -63,18 +63,18 @@ quack_rs::scalar_callback!(cb_grpc_call, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 5) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let service = unsafe { svc_reader.read_str(row as usize) };
-        let method = unsafe { method_reader.read_str(row as usize) };
-        let payload = unsafe { payload_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let service = unsafe { svc_reader.read_str(row) };
+        let method = unsafe { method_reader.read_str(row) };
+        let payload = unsafe { payload_reader.read_str(row) };
 
         let result = grpc::call(url, service, method, payload);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i32(row as usize, 1, result.status_code) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.body) };
-        unsafe { sw.write_i32(row as usize, 3, result.grpc_status) };
-        unsafe { sw.write_varchar(row as usize, 4, &result.grpc_message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i32(row, 1, result.status_code) };
+        unsafe { sw.write_varchar(row, 2, &result.body) };
+        unsafe { sw.write_i32(row, 3, result.grpc_status) };
+        unsafe { sw.write_varchar(row, 4, &result.grpc_message) };
     }
 });
 

@@ -190,19 +190,29 @@ pub fn scrub_url(url: &str) -> String {
 }
 
 /// Scrub known sensitive parameter values from an error message.
-/// Replaces patterns like `password=value` or `secret_key=value` with redacted forms.
+///
+/// Replaces patterns like `password=value` or `secret_key=value` with
+/// redacted forms. Also scrubs Base64-encoded `Authorization` and
+/// `Bearer` header values that may leak through error messages (CWE-532).
 pub fn scrub_error(msg: &str) -> String {
     let mut result = msg.to_string();
 
     // Scrub patterns like key=value in error messages
-    for &key in &[
+    let sensitive_keys = [
         "password",
         "secret",
         "token",
         "api_key",
         "secret_key",
         "access_key",
-    ] {
+        "bearer_token",
+        "private_key",
+        "client_secret",
+        "community",
+        "shared_secret",
+    ];
+
+    for &key in &sensitive_keys {
         // Pattern: key=somevalue (until whitespace or end)
         let pattern = format!("{}=", key);
         if let Some(start) = result.to_lowercase().find(&pattern) {
@@ -213,6 +223,28 @@ pub fn scrub_error(msg: &str) -> String {
                 .unwrap_or(result.len());
             result = format!("{}{}=********{}", &result[..start], key, &result[end..]);
         }
+    }
+
+    // Scrub Authorization header values (Basic/Bearer)
+    for prefix in &["Authorization: Bearer ", "Authorization: Basic "] {
+        if let Some(start) = result.find(prefix) {
+            let after = start + prefix.len();
+            let end = result[after..]
+                .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+                .map(|p| after + p)
+                .unwrap_or(result.len());
+            result = format!("{}{}********{}", &result[..start], prefix, &result[end..]);
+        }
+    }
+
+    // Scrub AUTH PLAIN base64 payloads
+    if let Some(start) = result.find("AUTH PLAIN ") {
+        let after = start + "AUTH PLAIN ".len();
+        let end = result[after..]
+            .find(|c: char| c.is_whitespace() || c == '\r' || c == '\n')
+            .map(|p| after + p)
+            .unwrap_or(result.len());
+        result = format!("{}AUTH PLAIN ********{}", &result[..start], &result[end..]);
     }
 
     result
@@ -373,78 +405,26 @@ pub fn validate_port(port: u16) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// LDAP Filter Escaping (CWE-90, RFC 4515)
+// Re-exports from security_validate
 // ---------------------------------------------------------------------------
 
-/// Escape special characters in LDAP filter values per RFC 4515.
-///
-/// Characters that MUST be escaped: `*`, `(`, `)`, `\`, NUL.
-/// This prevents LDAP injection attacks (CWE-90).
+/// Escape special characters in LDAP filter values per RFC 4515 (CWE-90).
+/// See [`crate::security_validate::ldap_escape_filter_value`].
 #[allow(dead_code)]
 pub fn ldap_escape_filter_value(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len() + 16);
-    for byte in value.bytes() {
-        match byte {
-            b'*' => escaped.push_str("\\2a"),
-            b'(' => escaped.push_str("\\28"),
-            b')' => escaped.push_str("\\29"),
-            b'\\' => escaped.push_str("\\5c"),
-            0x00 => escaped.push_str("\\00"),
-            _ => escaped.push(byte as char),
-        }
-    }
-    escaped
+    crate::security_validate::ldap_escape_filter_value(value)
 }
 
-// ---------------------------------------------------------------------------
-// JSON String Escaping (CWE-116)
-// ---------------------------------------------------------------------------
-
-/// Escape a string for safe inclusion in a JSON string value.
-/// Handles all control characters per RFC 8259.
+/// Escape a string for safe inclusion in a JSON string value (CWE-116).
+/// See [`crate::security_validate::json_escape`].
 pub fn json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 16);
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\x08' => out.push_str("\\b"),
-            '\x0C' => out.push_str("\\f"),
-            c if c < '\x20' => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out
+    crate::security_validate::json_escape(s)
 }
 
-// ---------------------------------------------------------------------------
-// CalDAV/XML Timestamp Validation (CWE-91)
-// ---------------------------------------------------------------------------
-
-/// Validate an iCalendar timestamp format (ISO 8601 / RFC 3339 subset).
-///
-/// Accepts formats like: `20230101T000000Z` or `2023-01-01T00:00:00Z`.
-/// Rejects values containing XML-unsafe characters to prevent XML injection.
+/// Validate an iCalendar timestamp format (CWE-91).
+/// See [`crate::security_validate::validate_ical_timestamp`].
 pub fn validate_ical_timestamp(value: &str) -> Result<(), String> {
-    if value.is_empty() || value.len() > 32 {
-        return Err("Timestamp must be 1-32 characters".to_string());
-    }
-    // Only allow digits, T, Z, :, -, + (ISO 8601 characters)
-    if !value
-        .chars()
-        .all(|c| c.is_ascii_digit() || matches!(c, 'T' | 'Z' | ':' | '-' | '+' | '.'))
-    {
-        return Err(format!(
-            "Invalid timestamp format: only ISO 8601 characters allowed, got '{}'",
-            value
-        ));
-    }
-    Ok(())
+    crate::security_validate::validate_ical_timestamp(value)
 }
 
 // ---------------------------------------------------------------------------
@@ -486,7 +466,8 @@ fn random_bytes_vec(n: usize) -> Vec<u8> {
 
 /// Validate a hostname or IP address for safe use in network connections.
 ///
-/// Allows: alphanumeric, dots, hyphens, colons (IPv6), brackets (IPv6).
+/// Allows: alphanumeric, dots, hyphens, colons (IPv6), brackets (IPv6),
+/// underscores (common in internal DNS names).
 /// Rejects: empty, too long (>253), or containing other characters.
 pub fn validate_host(host: &str) -> Result<(), String> {
     if host.is_empty() {
@@ -497,7 +478,7 @@ pub fn validate_host(host: &str) -> Result<(), String> {
     }
     if !host
         .chars()
-        .all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+        .all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']' | '_'))
     {
         return Err(format!("Hostname contains invalid characters: '{}'", host));
     }

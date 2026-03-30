@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::scp;
 use crate::ssh;
 
-
 fn ssh_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),
@@ -46,17 +45,17 @@ quack_rs::scalar_callback!(cb_ssh_exec, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let key_file = unsafe { key_reader.read_str(row as usize) };
-        let command = unsafe { cmd_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let key_file = unsafe { key_reader.read_str(row) };
+        let command = unsafe { cmd_reader.read_str(row) };
 
         let result = ssh::exec(host, 22, user, key_file, command);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i32(row as usize, 1, result.exit_code) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.stdout) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.stderr) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i32(row, 1, result.exit_code) };
+        unsafe { sw.write_varchar(row, 2, &result.stdout) };
+        unsafe { sw.write_varchar(row, 3, &result.stderr) };
     }
 });
 
@@ -73,18 +72,18 @@ quack_rs::scalar_callback!(cb_ssh_exec_port, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let port = unsafe { port_reader.read_i32(row as usize) } as u16;
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let key_file = unsafe { key_reader.read_str(row as usize) };
-        let command = unsafe { cmd_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let port = unsafe { port_reader.read_i32(row) } as u16;
+        let user = unsafe { user_reader.read_str(row) };
+        let key_file = unsafe { key_reader.read_str(row) };
+        let command = unsafe { cmd_reader.read_str(row) };
 
         let result = ssh::exec(host, port, user, key_file, command);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i32(row as usize, 1, result.exit_code) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.stdout) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.stderr) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i32(row, 1, result.exit_code) };
+        unsafe { sw.write_varchar(row, 2, &result.stdout) };
+        unsafe { sw.write_varchar(row, 3, &result.stderr) };
     }
 });
 
@@ -100,17 +99,17 @@ quack_rs::scalar_callback!(cb_ssh_exec_password, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let password = unsafe { pass_reader.read_str(row as usize) };
-        let command = unsafe { cmd_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let password = unsafe { pass_reader.read_str(row) };
+        let command = unsafe { cmd_reader.read_str(row) };
 
         let result = ssh::exec_password(host, 22, user, password, command);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i32(row as usize, 1, result.exit_code) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.stdout) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.stderr) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i32(row, 1, result.exit_code) };
+        unsafe { sw.write_varchar(row, 2, &result.stdout) };
+        unsafe { sw.write_varchar(row, 3, &result.stderr) };
     }
 });
 
@@ -126,17 +125,17 @@ quack_rs::scalar_callback!(cb_scp_read, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let key_file = unsafe { key_reader.read_str(row as usize) };
-        let remote_path = unsafe { path_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let key_file = unsafe { key_reader.read_str(row) };
+        let remote_path = unsafe { path_reader.read_str(row) };
 
         let result = scp::scp_read(host, 22, user, key_file, remote_path);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.data) };
-        unsafe { sw.write_i64(row as usize, 2, result.size) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.data) };
+        unsafe { sw.write_i64(row, 2, result.size) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 
@@ -153,18 +152,18 @@ quack_rs::scalar_callback!(cb_scp_read_port, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let port = unsafe { port_reader.read_i32(row as usize) } as u16;
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let key_file = unsafe { key_reader.read_str(row as usize) };
-        let remote_path = unsafe { path_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let port = unsafe { port_reader.read_i32(row) } as u16;
+        let user = unsafe { user_reader.read_str(row) };
+        let key_file = unsafe { key_reader.read_str(row) };
+        let remote_path = unsafe { path_reader.read_str(row) };
 
         let result = scp::scp_read(host, port, user, key_file, remote_path);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.data) };
-        unsafe { sw.write_i64(row as usize, 2, result.size) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.data) };
+        unsafe { sw.write_i64(row, 2, result.size) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 
@@ -180,17 +179,17 @@ quack_rs::scalar_callback!(cb_scp_read_password, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let password = unsafe { pass_reader.read_str(row as usize) };
-        let remote_path = unsafe { path_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let password = unsafe { pass_reader.read_str(row) };
+        let remote_path = unsafe { path_reader.read_str(row) };
 
         let result = scp::scp_read_password(host, 22, user, password, remote_path);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.data) };
-        unsafe { sw.write_i64(row as usize, 2, result.size) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.data) };
+        unsafe { sw.write_i64(row, 2, result.size) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 
@@ -207,17 +206,17 @@ quack_rs::scalar_callback!(cb_scp_write, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let key_file = unsafe { key_reader.read_str(row as usize) };
-        let remote_path = unsafe { path_reader.read_str(row as usize) };
-        let data = unsafe { data_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let key_file = unsafe { key_reader.read_str(row) };
+        let remote_path = unsafe { path_reader.read_str(row) };
+        let data = unsafe { data_reader.read_str(row) };
 
         let result = scp::scp_write(host, 22, user, key_file, remote_path, data);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i64(row as usize, 1, result.bytes_written) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i64(row, 1, result.bytes_written) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -234,17 +233,17 @@ quack_rs::scalar_callback!(cb_scp_write_password, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let password = unsafe { pass_reader.read_str(row as usize) };
-        let remote_path = unsafe { path_reader.read_str(row as usize) };
-        let data = unsafe { data_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let password = unsafe { pass_reader.read_str(row) };
+        let remote_path = unsafe { path_reader.read_str(row) };
+        let data = unsafe { data_reader.read_str(row) };
 
         let result = scp::scp_write_password(host, 22, user, password, remote_path, data);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i64(row as usize, 1, result.bytes_written) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i64(row, 1, result.bytes_written) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 

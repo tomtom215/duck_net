@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::vault;
 
-
 // ===== Return Types =====
 
 fn vault_result_type() -> LogicalType {

@@ -8,7 +8,6 @@ use quack_rs::prelude::*;
 
 use crate::ping as ping_mod;
 
-
 fn ping_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("alive", LogicalType::new(TypeId::Boolean)),
@@ -27,13 +26,13 @@ quack_rs::scalar_callback!(cb_ping, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
         let result = ping_mod::ping(host, 5);
 
-        unsafe { sw.write_bool(row as usize, 0, result.alive) };
-        unsafe { sw.write_f64(row as usize, 1, result.latency_ms) };
-        unsafe { sw.write_i32(row as usize, 2, result.ttl) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.alive) };
+        unsafe { sw.write_f64(row, 1, result.latency_ms) };
+        unsafe { sw.write_i32(row, 2, result.ttl) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 
@@ -47,14 +46,14 @@ quack_rs::scalar_callback!(cb_ping_timeout, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let timeout = unsafe { timeout_reader.read_i32(row as usize) } as u32;
+        let host = unsafe { host_reader.read_str(row) };
+        let timeout = unsafe { timeout_reader.read_i32(row) } as u32;
         let result = ping_mod::ping(host, timeout);
 
-        unsafe { sw.write_bool(row as usize, 0, result.alive) };
-        unsafe { sw.write_f64(row as usize, 1, result.latency_ms) };
-        unsafe { sw.write_i32(row as usize, 2, result.ttl) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.alive) };
+        unsafe { sw.write_f64(row, 1, result.latency_ms) };
+        unsafe { sw.write_i32(row, 2, result.ttl) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 

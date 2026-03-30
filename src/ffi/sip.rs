@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::sip;
 
-
 fn sip_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("alive", LogicalType::new(TypeId::Boolean)),
@@ -26,14 +25,14 @@ quack_rs::scalar_callback!(cb_sip_options, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 5) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
         let result = sip::options_ping(host, 0);
 
-        unsafe { sw.write_bool(row as usize, 0, result.alive) };
-        unsafe { sw.write_i32(row as usize, 1, result.status_code) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.status_text) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.user_agent) };
-        unsafe { sw.write_varchar(row as usize, 4, &result.allow_methods) };
+        unsafe { sw.write_bool(row, 0, result.alive) };
+        unsafe { sw.write_i32(row, 1, result.status_code) };
+        unsafe { sw.write_varchar(row, 2, &result.status_text) };
+        unsafe { sw.write_varchar(row, 3, &result.user_agent) };
+        unsafe { sw.write_varchar(row, 4, &result.allow_methods) };
     }
 });
 
@@ -47,15 +46,15 @@ quack_rs::scalar_callback!(cb_sip_options_port, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 5) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let port = unsafe { port_reader.read_i32(row as usize) } as u16;
+        let host = unsafe { host_reader.read_str(row) };
+        let port = unsafe { port_reader.read_i32(row) } as u16;
         let result = sip::options_ping(host, port);
 
-        unsafe { sw.write_bool(row as usize, 0, result.alive) };
-        unsafe { sw.write_i32(row as usize, 1, result.status_code) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.status_text) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.user_agent) };
-        unsafe { sw.write_varchar(row as usize, 4, &result.allow_methods) };
+        unsafe { sw.write_bool(row, 0, result.alive) };
+        unsafe { sw.write_i32(row, 1, result.status_code) };
+        unsafe { sw.write_varchar(row, 2, &result.status_text) };
+        unsafe { sw.write_varchar(row, 3, &result.user_agent) };
+        unsafe { sw.write_varchar(row, 4, &result.allow_methods) };
     }
 });
 

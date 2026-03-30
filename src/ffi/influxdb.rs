@@ -25,16 +25,16 @@ quack_rs::scalar_callback!(cb_influx_query, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let org = unsafe { org_reader.read_str(row as usize) };
-        let token = unsafe { token_reader.read_str(row as usize) };
-        let flux_query = unsafe { flux_query_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let org = unsafe { org_reader.read_str(row) };
+        let token = unsafe { token_reader.read_str(row) };
+        let flux_query = unsafe { flux_query_reader.read_str(row) };
 
         let result = influxdb::query(url, org, token, flux_query);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -51,17 +51,17 @@ quack_rs::scalar_callback!(cb_influx_write, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let org = unsafe { org_reader.read_str(row as usize) };
-        let bucket = unsafe { bucket_reader.read_str(row as usize) };
-        let token = unsafe { token_reader.read_str(row as usize) };
-        let line_protocol = unsafe { line_protocol_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let org = unsafe { org_reader.read_str(row) };
+        let bucket = unsafe { bucket_reader.read_str(row) };
+        let token = unsafe { token_reader.read_str(row) };
+        let line_protocol = unsafe { line_protocol_reader.read_str(row) };
 
         let result = influxdb::write(url, org, bucket, token, line_protocol);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -74,13 +74,13 @@ quack_rs::scalar_callback!(cb_influx_health, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
 
         let result = influxdb::health(url);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 

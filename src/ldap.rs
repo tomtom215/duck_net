@@ -51,7 +51,28 @@ pub(crate) fn parse_ldap_url(url: &str) -> Result<(String, u16, bool), String> {
 }
 
 /// Search LDAP directory.
+///
+/// Security: validates filter string for injection attacks (CWE-90),
+/// emits plaintext warning when using ldap:// with credentials.
 pub fn search(url: &str, base_dn: &str, filter: &str, attributes: &[&str]) -> LdapSearchResult {
+    // Validate LDAP filter to prevent injection attacks (CWE-90)
+    if let Err(e) = crate::security_validate::validate_ldap_filter(filter) {
+        return LdapSearchResult {
+            success: false,
+            entries: vec![],
+            message: e,
+        };
+    }
+
+    // Warn about plaintext LDAP connections (CWE-319)
+    crate::security_validate::warn_if_credentials_over_plaintext(
+        url,
+        false, // search doesn't require credentials
+        "LDAP",
+        "PLAINTEXT_LDAP",
+        "ldaps://",
+    );
+
     let (host, port, use_tls) = match parse_ldap_url(url) {
         Ok(v) => v,
         Err(e) => {
@@ -159,7 +180,18 @@ async fn search_async(
 }
 
 /// Test LDAP bind (authentication).
+///
+/// Security: emits plaintext warning when using ldap:// with credentials.
 pub fn bind(url: &str, bind_dn: &str, password: &str) -> LdapBindResult {
+    // Warn about plaintext LDAP bind (credentials over cleartext) (CWE-319)
+    crate::security_validate::warn_if_credentials_over_plaintext(
+        url,
+        true,
+        "LDAP",
+        "PLAINTEXT_LDAP_BIND",
+        "ldaps://",
+    );
+
     let (host, port, use_tls) = match parse_ldap_url(url) {
         Ok(v) => v,
         Err(e) => {

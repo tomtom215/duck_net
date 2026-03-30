@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::radius;
 
-
 fn radius_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),
@@ -28,17 +27,17 @@ quack_rs::scalar_callback!(cb_radius_auth, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let secret = unsafe { secret_reader.read_str(row as usize) };
-        let username = unsafe { user_reader.read_str(row as usize) };
-        let password = unsafe { pass_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let secret = unsafe { secret_reader.read_str(row) };
+        let username = unsafe { user_reader.read_str(row) };
+        let password = unsafe { pass_reader.read_str(row) };
 
         let result = radius::auth_default_port(host, secret, username, password);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i32(row as usize, 1, result.code) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.code_name) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i32(row, 1, result.code) };
+        unsafe { sw.write_varchar(row, 2, &result.code_name) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 
@@ -55,18 +54,18 @@ quack_rs::scalar_callback!(cb_radius_auth_port, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let port = unsafe { port_reader.read_i32(row as usize) } as u16;
-        let secret = unsafe { secret_reader.read_str(row as usize) };
-        let username = unsafe { user_reader.read_str(row as usize) };
-        let password = unsafe { pass_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let port = unsafe { port_reader.read_i32(row) } as u16;
+        let secret = unsafe { secret_reader.read_str(row) };
+        let username = unsafe { user_reader.read_str(row) };
+        let password = unsafe { pass_reader.read_str(row) };
 
         let result = radius::auth(host, port, secret, username, password);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i32(row as usize, 1, result.code) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.code_name) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i32(row, 1, result.code) };
+        unsafe { sw.write_varchar(row, 2, &result.code_name) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 

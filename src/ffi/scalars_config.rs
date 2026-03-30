@@ -16,7 +16,7 @@ quack_rs::scalar_callback!(cb_set_retry_statuses, |_info, input, output| {
     let mut out_w = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let input_str = unsafe { statuses_reader.read_str(row as usize) };
+        let input_str = unsafe { statuses_reader.read_str(row) };
         let mut codes = Vec::new();
         let mut err = None;
         for part in input_str.split(',') {
@@ -56,7 +56,7 @@ quack_rs::scalar_callback!(cb_set_domain_rate_limits, |_info, input, output| {
     let mut out_w = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let config = unsafe { config_reader.read_str(row as usize) };
+        let config = unsafe { config_reader.read_str(row) };
         let msg = match rate_limit::set_domain_limits(config) {
             Ok(m) => m,
             Err(e) => format!("Error: {e}"),
@@ -74,7 +74,7 @@ quack_rs::scalar_callback!(cb_set_rate_limit, |_info, input, output| {
     let mut out_w = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let rps = unsafe { rps_reader.read_i32(row as usize) };
+        let rps = unsafe { rps_reader.read_i32(row) };
         let rps = rps.max(0) as u32;
         rate_limit::set_global_rps(rps);
         let msg = if rps == 0 {
@@ -95,8 +95,8 @@ quack_rs::scalar_callback!(cb_set_retries, |_info, input, output| {
     let mut out_w = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let retries = unsafe { retries_reader.read_i32(row as usize) }.max(0) as u32;
-        let backoff_ms = unsafe { backoff_reader.read_i32(row as usize) }.max(100) as u64;
+        let retries = unsafe { retries_reader.read_i32(row) }.max(0) as u32;
+        let backoff_ms = unsafe { backoff_reader.read_i32(row) }.max(100) as u64;
         http::set_max_retries(retries);
         http::set_retry_backoff_ms(backoff_ms);
         let msg = if retries == 0 {
@@ -116,7 +116,7 @@ quack_rs::scalar_callback!(cb_set_timeout, |_info, input, output| {
     let mut out_w = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let secs = unsafe { secs_reader.read_i32(row as usize) }.max(1) as u64;
+        let secs = unsafe { secs_reader.read_i32(row) }.max(1) as u64;
         http::set_timeout_secs(secs);
         unsafe { out_w.write_varchar(row, &format!("Timeout set to {secs} seconds")) };
     }

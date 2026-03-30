@@ -96,6 +96,15 @@ fn list_messages_inner(
     limit: i64,
 ) -> Result<Vec<ImapMessage>, String> {
     let (host, port, use_tls) = parse_imap_url(url)?;
+
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
+
+    // Warn about plaintext IMAP with credentials (CWE-319)
+    if !use_tls {
+        crate::security_warnings::warn_plaintext("IMAP", "PLAINTEXT_IMAP", "imaps://");
+    }
+
     let mut session = ImapSession::connect(&host, port, use_tls)?;
 
     // Read greeting
@@ -178,6 +187,15 @@ fn fetch_message_inner(
     uid: i64,
 ) -> Result<String, String> {
     let (host, port, use_tls) = parse_imap_url(url)?;
+
+    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    crate::security::validate_no_ssrf_host(&host)?;
+
+    // Warn about plaintext IMAP with credentials (CWE-319)
+    if !use_tls {
+        crate::security_warnings::warn_plaintext("IMAP", "PLAINTEXT_IMAP", "imaps://");
+    }
+
     let mut session = ImapSession::connect(&host, port, use_tls)?;
 
     session.read_response("*")?;

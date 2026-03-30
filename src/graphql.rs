@@ -7,12 +7,25 @@ use crate::json;
 /// Execute a GraphQL query/mutation.
 ///
 /// Builds a JSON body `{"query": ..., "variables": ...}` and POSTs it.
+///
+/// Security: validates query payload size to prevent resource exhaustion
+/// (CWE-400) before sending to the server.
 pub fn query(
     url: &str,
     query_str: &str,
     variables: Option<&str>,
     headers: &[(String, String)],
 ) -> HttpResponse {
+    // Validate query size (CWE-400)
+    if let Err(e) = crate::security_validate::validate_query_size(query_str, "GraphQL") {
+        return HttpResponse {
+            status: 0,
+            reason: e.clone(),
+            headers: vec![],
+            body: e,
+        };
+    }
+
     let body = build_body(query_str, variables);
 
     let mut all_headers: Vec<(String, String)> = headers.to_vec();

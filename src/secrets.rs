@@ -27,16 +27,43 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use zeroize::Zeroize;
 
 /// Global in-memory secrets store.
 /// Maps secret_name -> (secret_type, key-value pairs).
 static SECRETS: Mutex<Option<HashMap<String, StoredSecret>>> = Mutex::new(None);
 
 /// A stored secret with its type and key-value configuration.
+///
+/// Implements a manual [`Zeroize`] that properly zeroes every string
+/// value in the HashMap before clearing the map. The `zeroize` crate
+/// guarantees that these writes are not optimised away by the compiler
+/// (CWE-316).
 #[derive(Clone)]
 struct StoredSecret {
     secret_type: String,
     values: HashMap<String, String>,
+}
+
+impl Zeroize for StoredSecret {
+    fn zeroize(&mut self) {
+        self.secret_type.zeroize();
+        for value in self.values.values_mut() {
+            value.zeroize();
+        }
+        // Keys may also contain sensitive info (e.g. key names hinting at usage)
+        let keys: Vec<String> = self.values.keys().cloned().collect();
+        self.values.clear();
+        for mut k in keys {
+            k.zeroize();
+        }
+    }
+}
+
+impl Drop for StoredSecret {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
 }
 
 /// Maximum number of secrets to prevent memory abuse.
@@ -214,21 +241,13 @@ pub fn clear_all_secrets() -> String {
 }
 
 /// Overwrite sensitive values in memory with zeros before dropping (CWE-316).
-/// This is a best-effort defense against memory inspection attacks.
+///
+/// Uses the `zeroize` crate which guarantees the zeroing writes are not
+/// optimised away by the compiler, unlike manual `write_volatile` calls.
+/// The [`StoredSecret`] type also derives [`ZeroizeOnDrop`], so any value
+/// that falls out of scope without an explicit clear is still scrubbed.
 fn zeroize_secret(secret: &mut StoredSecret) {
-    for value in secret.values.values_mut() {
-        // SAFETY: overwrite the string's buffer with zeros
-        // This prevents the secret from lingering in freed memory.
-        let bytes = unsafe { value.as_bytes_mut() };
-        for b in bytes.iter_mut() {
-            // Use volatile write to prevent the compiler from optimizing this away
-            unsafe {
-                std::ptr::write_volatile(b as *mut u8, 0);
-            }
-        }
-    }
-    secret.secret_type.clear();
-    secret.values.clear();
+    secret.zeroize();
 }
 
 /// List secret names and types (never exposes values).
