@@ -25,22 +25,18 @@ quack_rs::scalar_callback!(cb_whois_query, |_info, input, output| {
     let row_count = chunk.size();
     let domain_reader = unsafe { chunk.reader(0) };
 
-    let mut registrar_w = unsafe { StructVector::field_writer(output, 0) };
-    let mut creation_w = unsafe { StructVector::field_writer(output, 1) };
-    let mut expiration_w = unsafe { StructVector::field_writer(output, 2) };
-    let mut updated_w = unsafe { StructVector::field_writer(output, 3) };
-    let mut raw_w = unsafe { StructVector::field_writer(output, 4) };
+    let mut sw = unsafe { StructWriter::new(output, 5) };
 
     for row in 0..row_count {
         let domain = unsafe { domain_reader.read_str(row) };
         let raw = whois::lookup(domain).unwrap_or_else(|e| format!("WHOIS error: {e}"));
         let info = whois::parse_info(&raw);
 
-        unsafe { registrar_w.write_varchar(row, &info.registrar) };
-        unsafe { creation_w.write_varchar(row, &info.creation_date) };
-        unsafe { expiration_w.write_varchar(row, &info.expiration_date) };
-        unsafe { updated_w.write_varchar(row, &info.updated_date) };
-        unsafe { raw_w.write_varchar(row, &info.raw) };
+        unsafe { sw.write_varchar(row, 0, &info.registrar) };
+        unsafe { sw.write_varchar(row, 1, &info.creation_date) };
+        unsafe { sw.write_varchar(row, 2, &info.expiration_date) };
+        unsafe { sw.write_varchar(row, 3, &info.updated_date) };
+        unsafe { sw.write_varchar(row, 4, &info.raw) };
     }
 });
 
