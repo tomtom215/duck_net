@@ -49,7 +49,7 @@ quack_rs::scalar_callback!(cb_s3_get, |_info, input, output| {
         let secret_key = unsafe { secret_key_reader.read_str(row) };
         let region = unsafe { region_reader.read_str(row) };
 
-        let result = s3::s3_get(endpoint, bucket, key, access_key, secret_key, region);
+        let result = s3::s3_get(endpoint, bucket, key, access_key, secret_key, region, None);
 
         unsafe { sw.write_bool(row, 0, result.success) };
         unsafe { sw.write_varchar(row, 1, &result.body) };
@@ -81,7 +81,9 @@ quack_rs::scalar_callback!(cb_s3_put, |_info, input, output| {
         let secret_key = unsafe { secret_key_reader.read_str(row) };
         let region = unsafe { region_reader.read_str(row) };
 
-        let result = s3::s3_put(endpoint, bucket, key, body, access_key, secret_key, region);
+        let result = s3::s3_put(
+            endpoint, bucket, key, body, access_key, secret_key, region, None,
+        );
 
         unsafe { sw.write_bool(row, 0, result.success) };
         unsafe { sw.write_varchar(row, 1, &result.body) };
@@ -113,7 +115,9 @@ quack_rs::scalar_callback!(cb_s3_list, |_info, input, output| {
         let secret_key = unsafe { secret_key_reader.read_str(row) };
         let region = unsafe { region_reader.read_str(row) };
 
-        let result = s3::s3_list(endpoint, bucket, prefix, access_key, secret_key, region);
+        let result = s3::s3_list(
+            endpoint, bucket, prefix, access_key, secret_key, region, None,
+        );
 
         unsafe { sw.write_bool(row, 0, result.success) };
         unsafe { write_string_list(keys_vec, row, &result.keys, &mut list_offset) };

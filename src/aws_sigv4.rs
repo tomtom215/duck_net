@@ -6,14 +6,20 @@ use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// AWS SigV4 signed headers result.
+/// AWS SigV4 signed request result including any extra required headers.
 pub struct SignedRequest {
     pub authorization: String,
     pub x_amz_date: String,
     pub x_amz_content_sha256: String,
+    /// Present when a session token was provided (STS temporary credentials).
+    pub x_amz_security_token: Option<String>,
 }
 
 /// Sign an HTTP request using AWS Signature Version 4.
+///
+/// `session_token` is required when using temporary credentials obtained from
+/// AWS STS (e.g., assumed roles, instance metadata). Pass `None` for permanent
+/// IAM credentials.
 ///
 /// Returns the Authorization header value and required X-Amz-* headers.
 #[allow(clippy::too_many_arguments)]
@@ -26,6 +32,24 @@ pub fn sign(
     secret_key: &str,
     region: &str,
     service: &str,
+) -> Result<SignedRequest, String> {
+    sign_with_token(
+        method, url, headers, body, access_key, secret_key, region, service, None,
+    )
+}
+
+/// Sign an HTTP request using AWS Signature Version 4 with an optional session token.
+#[allow(clippy::too_many_arguments)]
+pub fn sign_with_token(
+    method: &str,
+    url: &str,
+    headers: &[(String, String)],
+    body: &str,
+    access_key: &str,
+    secret_key: &str,
+    region: &str,
+    service: &str,
+    session_token: Option<&str>,
 ) -> Result<SignedRequest, String> {
     let (host, path, query) = parse_url(url)?;
     let datetime = amz_datetime();
@@ -41,6 +65,10 @@ pub fn sign(
     signed_headers_list.push(("host".to_string(), host.clone()));
     signed_headers_list.push(("x-amz-date".to_string(), datetime.clone()));
     signed_headers_list.push(("x-amz-content-sha256".to_string(), payload_hash.clone()));
+    // Include the security token in the canonical signed headers when present
+    if let Some(token) = session_token {
+        signed_headers_list.push(("x-amz-security-token".to_string(), token.to_string()));
+    }
     signed_headers_list.sort_by(|a, b| a.0.cmp(&b.0));
 
     let canonical_headers: String = signed_headers_list
@@ -77,6 +105,7 @@ pub fn sign(
         authorization,
         x_amz_date: datetime,
         x_amz_content_sha256: payload_hash,
+        x_amz_security_token: session_token.map(|s| s.to_string()),
     })
 }
 

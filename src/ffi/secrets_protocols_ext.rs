@@ -110,9 +110,15 @@ quack_rs::scalar_callback!(cb_s3_get_secret, |_info, input, output| {
         let key = unsafe { key_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_s3(secret_name) {
-            Ok((endpoint, access_key, secret_key, region)) => {
-                crate::s3::s3_get(&endpoint, bucket, key, &access_key, &secret_key, &region)
-            }
+            Ok(creds) => crate::s3::s3_get(
+                &creds.endpoint,
+                bucket,
+                key,
+                &creds.access_key,
+                &creds.secret_key,
+                &creds.region,
+                creds.session_token.as_deref(),
+            ),
             Err(e) => crate::s3::S3Result {
                 success: false,
                 body: String::new(),
@@ -146,14 +152,15 @@ quack_rs::scalar_callback!(cb_s3_put_secret, |_info, input, output| {
         let body = unsafe { body_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_s3(secret_name) {
-            Ok((endpoint, access_key, secret_key, region)) => crate::s3::s3_put(
-                &endpoint,
+            Ok(creds) => crate::s3::s3_put(
+                &creds.endpoint,
                 bucket,
                 key,
                 body,
-                &access_key,
-                &secret_key,
-                &region,
+                &creds.access_key,
+                &creds.secret_key,
+                &creds.region,
+                creds.session_token.as_deref(),
             ),
             Err(e) => crate::s3::S3Result {
                 success: false,
@@ -188,9 +195,15 @@ quack_rs::scalar_callback!(cb_s3_list_secret, |_info, input, output| {
         let prefix = unsafe { prefix_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_s3(secret_name) {
-            Ok((endpoint, access_key, secret_key, region)) => {
-                crate::s3::s3_list(&endpoint, bucket, prefix, &access_key, &secret_key, &region)
-            }
+            Ok(creds) => crate::s3::s3_list(
+                &creds.endpoint,
+                bucket,
+                prefix,
+                &creds.access_key,
+                &creds.secret_key,
+                &creds.region,
+                creds.session_token.as_deref(),
+            ),
             Err(e) => crate::s3::S3ListResult {
                 success: false,
                 keys: Vec::new(),

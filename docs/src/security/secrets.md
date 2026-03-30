@@ -88,6 +88,32 @@ SELECT ldap_search_secret('my_ldap', 'ldaps://ldap.example.com', 'dc=example,dc=
 - **Name validation**: Secret names must be 1-128 characters, alphanumeric with underscores, hyphens, and dots
 - **Error scrubbing**: Credential values are scrubbed from all error messages, including Authorization headers and AUTH PLAIN payloads
 
+## AWS Temporary Credentials (STS)
+
+For assumed roles, ECS task roles, Lambda execution roles, and other STS-based credentials, include `session_token` in the secret:
+
+```sql
+SELECT duck_net_add_secret('sts_role', 's3', json_object(
+    'key_id',        'ASIAIOSFODNN7EXAMPLE',
+    'secret',        'temporary_secret_key',
+    'region',        'us-east-1',
+    'session_token', 'AQoDYXdzEJr...'
+));
+SELECT * FROM s3_get_secret('sts_role', 'my-bucket', 'data.json');
+```
+
+Or load credentials directly from the standard AWS environment variables:
+
+```sql
+-- Reads AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN,
+-- AWS_DEFAULT_REGION, and AWS_ENDPOINT_URL
+SELECT duck_net_import_aws_env('my_s3');
+```
+
+## Security Warning: Raw Credential Access
+
+`duck_net_secret(name, key)` returns the raw credential value and emits a `SECRET_VALUE_EXPOSED` HIGH-severity warning. Prefer protocol-specific `_secret()` functions to avoid exposing credentials directly.
+
 ## DuckDB Native Secrets
 
 For S3, HTTP, GCS, and R2 protocols, prefer DuckDB's native secrets manager. See [DuckDB Native Secrets](./duckdb-secrets.md) for details.

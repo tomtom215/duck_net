@@ -26,6 +26,9 @@ FROM duck_net_security_warnings();
 
 | Code | Protocol | Description |
 |------|----------|-------------|
+| `S3_OVER_HTTP` | S3 | S3 endpoint uses `http://` instead of `https://` |
+| `HTTP_REDIRECT_HTTPS_TO_HTTP` | HTTP | Redirect chain downgraded from HTTPS to HTTP |
+| `SECRET_VALUE_EXPOSED` | Secrets | `duck_net_secret(name, key)` returned a raw credential |
 | `PLAINTEXT_MQTT` | MQTT | Plaintext MQTT connection (use `mqtts://`) |
 | `PLAINTEXT_REDIS` | Redis | Plaintext Redis connection (use `rediss://`) |
 | `PLAINTEXT_FTP` | FTP | Plaintext FTP connection (use `ftps://`) |
@@ -48,7 +51,7 @@ FROM duck_net_security_warnings();
 | `SNMPV2C_WEAK_AUTH` | SNMP | SNMPv2c plaintext community strings |
 | `IPMI_V15_NO_AUTH` | IPMI | IPMI v1.5 with no authentication |
 | `TOFU_SSH` | SSH | Trust-On-First-Use host key verification |
-| `PERSISTENT_SECRET_UNENCRYPTED` | Secrets | DuckDB persistent secrets stored unencrypted |
+| `PERSISTENT_SECRET_UNENCRYPTED` | Secrets | DuckDB persistent secrets stored unencrypted on disk |
 
 ## Suppressing Warnings
 

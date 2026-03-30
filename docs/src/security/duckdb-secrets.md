@@ -169,12 +169,86 @@ DROP PERSISTENT SECRET my_prod_s3;
 
 ## duck_net + DuckDB Secrets
 
-duck_net's S3 functions use the same key names as DuckDB's native S3 secrets (`KEY_ID`, `SECRET`, `REGION`, `ENDPOINT`) so credentials can be managed consistently:
+duck_net's S3 functions use the same key names as DuckDB's native S3 secrets (`KEY_ID`, `SECRET`, `REGION`, `ENDPOINT`, `SESSION_TOKEN`) so credentials can be managed consistently:
 
 ```sql
 -- Using duck_net's in-memory secret for S3
 SELECT duck_net_add_secret('my_s3', 's3', '{"key_id":"AKIA...","secret":"...","region":"us-east-1"}');
 SELECT s3_get_secret('my_s3', 'my-bucket', 'path/to/file.txt');
+```
+
+## Bridge Functions
+
+duck_net provides helper SQL functions that make it easy to import credentials into duck_net's in-memory store from environment variables or to export them to DuckDB-compatible SQL.
+
+### Import AWS Credentials from Environment Variables
+
+```sql
+-- Reads AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN,
+-- AWS_DEFAULT_REGION, and AWS_ENDPOINT_URL from the environment.
+-- Automatically includes the session token if present (for STS/assumed roles).
+SELECT duck_net_import_aws_env('my_s3');
+
+-- Now use the imported secret with duck_net S3 functions
+SELECT * FROM s3_get_secret('my_s3', 'my-bucket', 'data.json');
+```
+
+### Import HTTP Bearer Token from Environment Variable
+
+```sql
+-- Import a bearer token stored in an environment variable
+SELECT duck_net_import_bearer_env('my_api', 'API_SECRET_TOKEN');
+SELECT (http_get_secret('my_api', 'https://api.example.com/data')).body;
+```
+
+### Generate DuckDB CREATE SECRET SQL
+
+```sql
+-- Generate the CREATE SECRET SQL from an existing duck_net secret
+-- WARNING: Output contains plaintext credentials
+SELECT duck_net_to_duckdb_secret_sql('my_s3');
+```
+
+### View Integration Status
+
+```sql
+SELECT duck_net_duckdb_secrets_info();
+```
+
+## AWS Temporary Credentials (STS)
+
+When using assumed roles, ECS task roles, Lambda execution roles, or other STS-based credentials, duck_net correctly includes the `x-amz-security-token` header in SigV4-signed S3 requests:
+
+```sql
+-- Add an STS secret with session token
+SELECT duck_net_add_secret('sts_role', 's3', json_object(
+    'key_id',        'ASIAIOSFODNN7EXAMPLE',
+    'secret',        'temporary_secret_key',
+    'region',        'us-east-1',
+    'session_token', 'AQoDYXdzEJr...',
+    'endpoint',      'https://s3.amazonaws.com'
+));
+
+-- Or import automatically from the environment (e.g., on EC2/ECS)
+SELECT duck_net_import_aws_env('sts_creds');
+
+-- duck_net handles the session token automatically
+SELECT * FROM s3_get_secret('sts_role', 'my-bucket', 'secure.json');
+```
+
+## Security Warnings
+
+duck_net emits security warnings for common S3 misconfiguration:
+
+| Warning Code | Condition | Severity |
+|---|---|---|
+| `S3_OVER_HTTP` | S3 endpoint uses `http://` instead of `https://` | HIGH |
+| `SECRET_VALUE_EXPOSED` | `duck_net_secret(name, key)` returns a raw credential | HIGH |
+| `PERSISTENT_SECRET_UNENCRYPTED` | DuckDB persistent secrets stored on disk | MEDIUM |
+
+View warnings:
+```sql
+FROM duck_net_security_warnings();
 ```
 
 ## Security Comparison
@@ -186,5 +260,6 @@ SELECT s3_get_secret('my_s3', 'my-bucket', 'path/to/file.txt');
 | Zeroization | Yes (`zeroize` crate) | No |
 | Encryption at rest | N/A (never on disk) | No (unencrypted binary) |
 | Scope support | By name | By path prefix |
-| Credential chain | No | Yes (AWS SDK) |
+| AWS credential chain | Via `duck_net_import_aws_env()` | Yes (AWS SDK) |
+| Session token (STS) | Yes (explicit `session_token` field) | Yes |
 | Protocol coverage | All 49+ protocols | S3, HTTP, GCS, R2, Azure |

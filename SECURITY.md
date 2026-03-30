@@ -10,19 +10,24 @@ duck_net enforces security at every layer: input validation, network safety (SSR
 
 | Threat | CWE | Mitigation |
 |--------|-----|------------|
-| Server-Side Request Forgery | CWE-918 | Block private/reserved IPs by default |
-| Credential Exposure in Logs | CWE-532 | Scrub URLs, error messages, and Authorization headers |
-| Command Injection (SSH) | CWE-78 | Shell metacharacter validation (strict mode) |
+| Server-Side Request Forgery | CWE-918 | Block all private/reserved IPv4 and IPv6 ranges by default (including CGN, benchmark, NAT64, Teredo, 6to4 ranges) |
+| Redirect-based SSRF | CWE-918 | Manual redirect following with per-hop SSRF validation; redirect limit of 10 |
+| Credential Exposure in Logs | CWE-532 | Scrub URLs, error messages, and Authorization headers before returning to SQL |
+| HTTP Header Injection | CWE-113 | RFC 7230 header name/value validation; CRLF in header values is blocked |
+| Command Injection (SSH) | CWE-78 | Shell metacharacter validation (strict mode on by default) |
 | Path Traversal (FTP/SFTP/SCP) | CWE-22 | Block `..`, null bytes, long paths |
 | LDAP Injection | CWE-90 | RFC 4515 filter escaping + filter validation |
 | CRLF Injection (SMTP) | CWE-93 | Header and body sanitization |
+| HTTP Redirect Downgrade | CWE-319 | Warning emitted when HTTPS redirect goes to HTTP |
+| S3 Over Plaintext HTTP | CWE-319 | Warning emitted when S3 endpoint uses `http://` |
 | Resource Exhaustion | CWE-400 | Response size limits + query payload limits |
 | Stack Overflow | CWE-674 | Recursion depth limits (Protobuf, Redis, mDNS) |
 | Weak Randomness | CWE-338 | OS CSPRNG via `getrandom` (panics on failure) |
-| Cleartext Credentials | CWE-312 | In-memory secrets with `zeroize` crate (compiler-resistant) |
+| Cleartext Credentials | CWE-312 | In-memory secrets with `zeroize` crate (compiler-resistant); `duck_net_secret()` warns |
 | Plaintext Protocols | CWE-319 | Runtime security warnings for all plaintext usage |
 | Integer Overflow | CWE-190 | Safe length validation before type casts |
 | Missing Authentication | CWE-306 | Warnings for Memcached, ZeroMQ, etc. |
+| Incomplete SSRF IPv6 | CWE-918 | Full IPv6 private range coverage: fc00::/7, fe80::/10, ff00::/8, 2001::/32 (Teredo), 2002::/16 (6to4), 64:ff9b::/96 (NAT64), 2001:db8::/32 (docs) |
 
 ## Security Functions
 

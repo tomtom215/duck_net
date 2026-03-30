@@ -9,9 +9,24 @@
 
 use crate::secrets::get_value;
 
+/// Resolved S3 credentials from a named secret.
+#[allow(dead_code)]
+pub struct S3Creds {
+    pub endpoint: String,
+    pub access_key: String,
+    pub secret_key: String,
+    pub region: String,
+    /// STS session token for temporary credentials (optional).
+    pub session_token: Option<String>,
+    /// Whether to enforce SSL (default: true).
+    pub use_ssl: bool,
+}
+
 /// Resolve S3 credentials from a named secret.
-/// Returns (endpoint, access_key, secret_key, region) if all required fields exist.
-pub fn resolve_s3(secret_name: &str) -> Result<(String, String, String, String), String> {
+///
+/// Accepts DuckDB-compatible field names (KEY_ID, SECRET, REGION, ENDPOINT,
+/// SESSION_TOKEN, USE_SSL) as well as alternative aliases.
+pub fn resolve_s3(secret_name: &str) -> Result<S3Creds, String> {
     let access_key = get_value(secret_name, "key_id")
         .or_else(|| get_value(secret_name, "access_key"))
         .ok_or_else(|| format!("Secret '{}' missing 'key_id' or 'access_key'", secret_name))?;
@@ -25,7 +40,22 @@ pub fn resolve_s3(secret_name: &str) -> Result<(String, String, String, String),
     let endpoint = get_value(secret_name, "endpoint")
         .unwrap_or_else(|| "https://s3.amazonaws.com".to_string());
 
-    Ok((endpoint, access_key, secret_key, region))
+    // STS session token for temporary credentials
+    let session_token = get_value(secret_name, "session_token");
+
+    // use_ssl: default true; false only when explicitly set to "false"
+    let use_ssl = get_value(secret_name, "use_ssl")
+        .map(|v| !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
+
+    Ok(S3Creds {
+        endpoint,
+        access_key,
+        secret_key,
+        region,
+        session_token,
+        use_ssl,
+    })
 }
 
 /// Resolve HTTP auth credentials from a named secret.
