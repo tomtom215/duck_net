@@ -146,9 +146,10 @@ pub fn validate_no_ssrf_host(host: &str) -> Result<(), String> {
         }
         Err(_) => {
             // Block on DNS resolution failure to prevent DNS rebinding attacks.
-            // If this is a legitimate host, retrying will succeed.
+            // A rebinding attacker could return NXDOMAIN on the first lookup and
+            // a private IP on the second (actual connection) lookup.
             Err(format!(
-                "SSRF protection: cannot resolve hostname '{}'. \
+                "SSRF protection: connection blocked — hostname '{}' could not be resolved. \
                  Use duck_net_set_ssrf_protection(false) to disable for local development.",
                 host
             ))
