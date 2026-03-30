@@ -65,7 +65,7 @@ quack_rs::scalar_callback!(cb_ocsp_check_default, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionSetBuilder::new("ocsp_check")
@@ -84,7 +84,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
                 .function(cb_ocsp_check)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

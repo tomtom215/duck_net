@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::memcached;
@@ -83,7 +82,7 @@ quack_rs::scalar_callback!(cb_memcached_set_ttl, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // memcached_get(host, key)
@@ -93,7 +92,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(memcached_result_type())
         .function(cb_memcached_get)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // memcached_set: 3 or 4 params
     ScalarFunctionSetBuilder::new("memcached_set")
@@ -116,7 +115,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_memcached_set_ttl)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

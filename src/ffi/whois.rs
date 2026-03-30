@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::whois;
@@ -55,20 +54,20 @@ fn whois_query_type() -> LogicalType {
     ])
 }
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionBuilder::new("whois_lookup")
         .param(v)
         .returns(v)
         .function(cb_whois_lookup)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     ScalarFunctionBuilder::new("whois_query")
         .param(v)
         .returns_logical(whois_query_type())
         .function(cb_whois_query)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

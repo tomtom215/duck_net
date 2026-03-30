@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::jsonrpc;
@@ -44,7 +43,7 @@ quack_rs::scalar_callback!(cb_jsonrpc_call_4, |_info, input, output| {
         let url = unsafe { url_reader.read_str(row) };
         let method = unsafe { method_reader.read_str(row) };
         let params = unsafe { params_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 3, row) };
+        let headers = unsafe { read_headers_map(&chunk, 3, row) };
         let params_opt = if params.is_empty() {
             None
         } else {
@@ -78,7 +77,7 @@ quack_rs::scalar_callback!(cb_xmlrpc_call, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionSetBuilder::new("jsonrpc_call")
@@ -101,7 +100,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_jsonrpc_call_4)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     ScalarFunctionBuilder::new("xmlrpc_call")
         .param(v)
@@ -110,7 +109,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(response_type())
         .function(cb_xmlrpc_call)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::nats;
@@ -91,7 +90,7 @@ quack_rs::scalar_callback!(cb_nats_request_default, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionBuilder::new("nats_publish")
@@ -101,7 +100,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(nats_result_type())
         .function(cb_nats_publish)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // nats_request: 3-param (default 5s timeout) and 4-param overloads
     ScalarFunctionSetBuilder::new("nats_request")
@@ -124,7 +123,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_nats_request)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

@@ -20,7 +20,7 @@ quack_rs::scalar_callback!(cb_odata_query, |_info, input, output| {
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 1, row) };
+        let headers = unsafe { read_headers_map(&chunk, 1, row) };
         let resp = odata::query(url, None, None, None, None, None, None, &headers);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
@@ -171,7 +171,7 @@ quack_rs::table_scan_callback!(odata_paginate_scan, |info, output| {
             let out_chunk = unsafe { DataChunk::from_raw(output) };
             let mut page_w = unsafe { out_chunk.writer(0) };
             let mut status_w = unsafe { out_chunk.writer(1) };
-            let headers_vec = unsafe { duckdb_data_chunk_get_vector(output, 2) };
+            let headers_vec = unsafe { out_chunk.vector(2) };
             let mut body_w = unsafe { out_chunk.writer(3) };
 
             unsafe { page_w.write_i32(0, page_num as i32) };
@@ -293,13 +293,7 @@ quack_rs::table_scan_callback!(odata_metadata_scan, |info, output| {
         if let Some(ref es) = row.entity_set {
             unsafe { set_w.write_varchar(count, es) };
         } else {
-            // NULL for entity_set — write empty and mark null via validity
-            let set_vec = unsafe { duckdb_data_chunk_get_vector(output, 0) };
-            unsafe { duckdb_vector_ensure_validity_writable(set_vec) };
-            let validity = unsafe { duckdb_vector_get_validity(set_vec) };
-            if !validity.is_null() {
-                unsafe { duckdb_validity_set_row_invalid(validity, count as u64) };
-            }
+            unsafe { set_w.set_null(count) };
         }
         unsafe { type_w.write_varchar(count, &row.entity_type) };
         unsafe { prop_w.write_varchar(count, &row.property_name) };
@@ -315,7 +309,7 @@ quack_rs::table_scan_callback!(odata_metadata_scan, |info, output| {
     unsafe { out_chunk.set_size(count) };
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // odata_extract_count(body VARCHAR) -> BIGINT
@@ -326,7 +320,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns(TypeId::BigInt)
         .function(cb_odata_extract_count)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // odata_query(url, headers MAP) -> STRUCT
     ScalarFunctionBuilder::new("odata_query")
@@ -335,7 +329,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(response_type())
         .function(cb_odata_query)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // odata_metadata(url, authorization :=) -> TABLE
     TableFunctionBuilder::new("odata_metadata")
@@ -344,7 +338,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(odata_metadata_bind)
         .init(odata_metadata_init)
         .scan(odata_metadata_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // odata_paginate table function
     TableFunctionBuilder::new("odata_paginate")
@@ -358,7 +352,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(odata_paginate_bind)
         .init(odata_paginate_init)
         .scan(odata_paginate_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

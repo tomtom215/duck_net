@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::elasticsearch;
@@ -81,7 +80,7 @@ quack_rs::scalar_callback!(cb_es_cat, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // es_search(url, index, query_json)
@@ -92,7 +91,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(es_result_type())
         .function(cb_es_search)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // es_count(url, index, query_json)
     ScalarFunctionBuilder::new("es_count")
@@ -102,7 +101,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(es_result_type())
         .function(cb_es_count)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // es_cat(url, endpoint)
     ScalarFunctionBuilder::new("es_cat")
@@ -111,7 +110,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(es_result_type())
         .function(cb_es_cat)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

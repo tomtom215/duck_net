@@ -268,7 +268,7 @@ quack_rs::scalar_callback!(cb_imap_flag, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // imap_list(url, username, password) table function
@@ -282,7 +282,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(imap_list_bind)
         .init(imap_list_init)
         .scan(imap_list_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // imap_fetch(url, username, password, uid) -> STRUCT(success, body, message)
     ScalarFunctionBuilder::new("imap_fetch")
@@ -293,7 +293,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(imap_fetch_result_type())
         .function(cb_imap_fetch)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // imap_move(url, username, password, mailbox, uid, dest_mailbox) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("imap_move")
@@ -306,7 +306,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(imap_write_result_type())
         .function(cb_imap_move)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // imap_delete(url, username, password, mailbox, uid) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("imap_delete")
@@ -318,7 +318,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(imap_write_result_type())
         .function(cb_imap_delete)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // imap_flag(url, username, password, mailbox, uid, flags) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("imap_flag")
@@ -331,7 +331,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(imap_write_result_type())
         .function(cb_imap_flag)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

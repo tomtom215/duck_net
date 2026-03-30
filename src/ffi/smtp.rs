@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::smtp::{self, SmtpConfig};
@@ -98,7 +97,7 @@ quack_rs::scalar_callback!(cb_smtp_send_7, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionSetBuilder::new("smtp_send")
@@ -126,7 +125,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_smtp_send_7)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

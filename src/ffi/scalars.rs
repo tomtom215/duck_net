@@ -41,11 +41,11 @@ pub(crate) fn map_varchar_varchar() -> LogicalType {
 
 /// Read a MAP(VARCHAR, VARCHAR) column from the input chunk at the given row.
 pub(crate) unsafe fn read_headers_map(
-    input: duckdb_data_chunk,
-    col: idx_t,
+    chunk: &DataChunk,
+    col: usize,
     row: usize,
 ) -> Vec<(String, String)> {
-    let map_vec = duckdb_data_chunk_get_vector(input, col);
+    let map_vec = chunk.vector(col);
 
     if !VectorReader::from_vector(map_vec, row + 1).is_valid(row) {
         return vec![];
@@ -93,37 +93,35 @@ pub(crate) unsafe fn write_response(
     resp: &HttpResponse,
     map_offset: &mut usize,
 ) {
-    let mut status_w = StructVector::field_writer(output, 0);
-    let mut reason_w = StructVector::field_writer(output, 1);
-    let headers_vec = StructVector::get_child(output, 2);
-    let mut body_w = StructVector::field_writer(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
+    let headers_vec = sw.child_vector(2);
 
     // Status (INTEGER)
-    status_w.write_i32(row, resp.status as i32);
+    unsafe { sw.write_i32(row, 0, resp.status as i32) };
 
     // Reason (VARCHAR)
-    reason_w.write_varchar(row, &resp.reason);
+    unsafe { sw.write_varchar(row, 1, &resp.reason) };
 
     // Headers (MAP(VARCHAR, VARCHAR))
     let n = resp.headers.len();
     let new_total = *map_offset + n;
 
-    MapVector::reserve(headers_vec, new_total);
-    let mut key_w = MapVector::key_writer(headers_vec);
-    let mut val_w = MapVector::value_writer(headers_vec);
+    unsafe { MapVector::reserve(headers_vec, new_total) };
+    let mut key_w = unsafe { MapVector::key_writer(headers_vec) };
+    let mut val_w = unsafe { MapVector::value_writer(headers_vec) };
 
     for (i, (k, v)) in resp.headers.iter().enumerate() {
         let idx = *map_offset + i;
-        key_w.write_varchar(idx, k);
-        val_w.write_varchar(idx, v);
+        unsafe { key_w.write_varchar(idx, k) };
+        unsafe { val_w.write_varchar(idx, v) };
     }
 
-    MapVector::set_entry(headers_vec, row, *map_offset as u64, n as u64);
+    unsafe { MapVector::set_entry(headers_vec, row, *map_offset as u64, n as u64) };
     *map_offset = new_total;
-    MapVector::set_size(headers_vec, new_total);
+    unsafe { MapVector::set_size(headers_vec, new_total) };
 
     // Body (VARCHAR)
-    body_w.write_varchar(row, &resp.body);
+    unsafe { sw.write_varchar(row, 3, &resp.body) };
 }
 
 // ===== Extra Info: Method Tag =====
@@ -169,7 +167,7 @@ quack_rs::scalar_callback!(cb_url_headers, |info, input, output| {
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 1, row) };
+        let headers = unsafe { read_headers_map(&chunk, 1, row) };
         let resp = http::execute(method, url, &headers, None);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
@@ -203,7 +201,7 @@ quack_rs::scalar_callback!(cb_url_headers_body, |info, input, output| {
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 1, row) };
+        let headers = unsafe { read_headers_map(&chunk, 1, row) };
         let body = unsafe { body_reader.read_str(row) };
         let resp = http::execute(method, url, &headers, Some(body));
         unsafe { write_response(output, row, &resp, &mut map_offset) };
@@ -235,7 +233,7 @@ quack_rs::scalar_callback!(cb_generic, |_info, input, output| {
             }
         };
         let url = unsafe { url_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 2, row) };
+        let headers = unsafe { read_headers_map(&chunk, 2, row) };
         let body = unsafe { body_reader.read_str(row) };
         let body_opt = if body.is_empty() { None } else { Some(body) };
         let resp = http::execute(method, url, &headers, body_opt);
@@ -252,8 +250,8 @@ quack_rs::scalar_callback!(cb_multipart, |_info, input, output| {
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
-        let form_fields = unsafe { read_headers_map(input, 1, row) };
-        let file_fields = unsafe { read_headers_map(input, 2, row) };
+        let form_fields = unsafe { read_headers_map(&chunk, 1, row) };
+        let file_fields = unsafe { read_headers_map(&chunk, 2, row) };
         let resp = http::execute_multipart(url, &[], &form_fields, &file_fields);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
@@ -268,9 +266,9 @@ quack_rs::scalar_callback!(cb_multipart_hdrs, |_info, input, output| {
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 1, row) };
-        let form_fields = unsafe { read_headers_map(input, 2, row) };
-        let file_fields = unsafe { read_headers_map(input, 3, row) };
+        let headers = unsafe { read_headers_map(&chunk, 1, row) };
+        let form_fields = unsafe { read_headers_map(&chunk, 2, row) };
+        let file_fields = unsafe { read_headers_map(&chunk, 3, row) };
         let resp = http::execute_multipart(url, &headers, &form_fields, &file_fields);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
     }

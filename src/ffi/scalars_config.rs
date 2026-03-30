@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::http;
@@ -124,13 +123,13 @@ quack_rs::scalar_callback!(cb_set_timeout, |_info, input, output| {
 
 // ===== Registration =====
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     // Rate limiting: duck_net_set_rate_limit(requests_per_second INTEGER) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_rate_limit")
         .param(TypeId::Integer)
         .returns(TypeId::Varchar)
         .function(cb_set_rate_limit)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Retry config: duck_net_set_retries(max_retries INTEGER, backoff_ms INTEGER) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_retries")
@@ -138,28 +137,28 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(TypeId::Integer)
         .returns(TypeId::Varchar)
         .function(cb_set_retries)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Timeout config: duck_net_set_timeout(seconds INTEGER) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_timeout")
         .param(TypeId::Integer)
         .returns(TypeId::Varchar)
         .function(cb_set_timeout)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Retry status codes: duck_net_set_retry_statuses(statuses VARCHAR) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_retry_statuses")
         .param(TypeId::Varchar)
         .returns(TypeId::Varchar)
         .function(cb_set_retry_statuses)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Per-domain rate limiting: duck_net_set_domain_rate_limits(config VARCHAR) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_domain_rate_limits")
         .param(TypeId::Varchar)
         .returns(TypeId::Varchar)
         .function(cb_set_domain_rate_limits)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

@@ -158,7 +158,7 @@ quack_rs::table_scan_callback!(paginate_scan, |info, output| {
 
 // ===== Registration =====
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     TableFunctionBuilder::new("http_paginate")
         .param(TypeId::Varchar)
         .named_param("page_param", TypeId::Varchar)
@@ -168,7 +168,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(paginate_bind)
         .init(paginate_init)
         .scan(paginate_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

@@ -118,7 +118,7 @@ quack_rs::scalar_callback!(cb_webdav_read, |_info, input, output| {
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 1, row) };
+        let headers = unsafe { read_headers_map(&chunk, 1, row) };
         let resp = webdav::read(url, &headers);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
@@ -135,7 +135,7 @@ quack_rs::scalar_callback!(cb_webdav_write, |_info, input, output| {
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
         let content = unsafe { content_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 2, row) };
+        let headers = unsafe { read_headers_map(&chunk, 2, row) };
         let resp = webdav::write(url, content, &headers);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
@@ -150,7 +150,7 @@ quack_rs::scalar_callback!(cb_webdav_delete, |_info, input, output| {
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 1, row) };
+        let headers = unsafe { read_headers_map(&chunk, 1, row) };
         let resp = webdav::delete(url, &headers);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
@@ -165,13 +165,13 @@ quack_rs::scalar_callback!(cb_webdav_mkcol, |_info, input, output| {
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 1, row) };
+        let headers = unsafe { read_headers_map(&chunk, 1, row) };
         let resp = webdav::mkcol(url, &headers);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // webdav_list table function
@@ -180,7 +180,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(webdav_list_bind)
         .init(webdav_list_init)
         .scan(webdav_list_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // webdav_read(url, headers MAP) -> STRUCT
     ScalarFunctionBuilder::new("webdav_read")
@@ -189,7 +189,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(response_type())
         .function(cb_webdav_read)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // webdav_write(url, content, headers MAP) -> STRUCT
     ScalarFunctionBuilder::new("webdav_write")
@@ -199,7 +199,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(response_type())
         .function(cb_webdav_write)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // webdav_delete(url, headers MAP) -> STRUCT
     ScalarFunctionBuilder::new("webdav_delete")
@@ -208,7 +208,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(response_type())
         .function(cb_webdav_delete)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // webdav_mkcol(url, headers MAP) -> STRUCT
     ScalarFunctionBuilder::new("webdav_mkcol")
@@ -217,7 +217,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(response_type())
         .function(cb_webdav_mkcol)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

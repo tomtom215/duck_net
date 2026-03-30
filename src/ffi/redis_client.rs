@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::redis_client;
@@ -99,9 +98,8 @@ quack_rs::scalar_callback!(cb_redis_keys, |_info, input, output| {
     let url_reader = unsafe { chunk.reader(0) };
     let pattern_reader = unsafe { chunk.reader(1) };
 
-    let mut success_w = unsafe { StructVector::field_writer(output, 0) };
-    let keys_vec = unsafe { StructVector::get_child(output, 1) };
-    let mut message_w = unsafe { StructVector::field_writer(output, 2) };
+    let mut sw = unsafe { StructWriter::new(output, 3) };
+    let keys_vec = sw.child_vector(1);
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
@@ -110,9 +108,9 @@ quack_rs::scalar_callback!(cb_redis_keys, |_info, input, output| {
 
         let result = redis_client::keys(url, pattern);
 
-        unsafe { success_w.write_bool(row, result.success) };
+        unsafe { sw.write_bool(row, 0, result.success) };
         unsafe { write_string_list(keys_vec, row, &result.keys, &mut list_offset) };
-        unsafe { message_w.write_varchar(row, &result.message) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -204,7 +202,7 @@ quack_rs::scalar_callback!(cb_redis_hset, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // redis_get(url, key) -> STRUCT
@@ -214,7 +212,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(redis_result_type())
         .function(cb_redis_get)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // redis_set: 3 or 4 params
     ScalarFunctionSetBuilder::new("redis_set")
@@ -237,7 +235,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_redis_set_ex)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // redis_keys(url, pattern) -> STRUCT(success, keys, message)
     ScalarFunctionBuilder::new("redis_keys")
@@ -246,7 +244,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(redis_keys_result_type())
         .function(cb_redis_keys)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // redis_del(url, key) -> STRUCT
     ScalarFunctionBuilder::new("redis_del")
@@ -255,7 +253,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(redis_result_type())
         .function(cb_redis_del)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // redis_expire(url, key, ttl_secs) -> STRUCT
     ScalarFunctionBuilder::new("redis_expire")
@@ -265,7 +263,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(redis_result_type())
         .function(cb_redis_expire)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // redis_hget(url, key, field) -> STRUCT
     ScalarFunctionBuilder::new("redis_hget")
@@ -275,7 +273,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(redis_result_type())
         .function(cb_redis_hget)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // redis_hset(url, key, field, value) -> STRUCT
     ScalarFunctionBuilder::new("redis_hset")
@@ -286,7 +284,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(redis_result_type())
         .function(cb_redis_hset)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

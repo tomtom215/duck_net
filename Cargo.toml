@@ -10,7 +10,7 @@ description = "DuckDB extension for comprehensive network client operations"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-quack_rs = { version = "0.10", package = "quack-rs" }
+quack_rs = { version = "0.11", package = "quack-rs" }
 libduckdb-sys = { version = "=1.10501.0", features = ["loadable-extension"] }
 ureq = { version = "3.3", features = ["multipart", "platform-verifier"] }
 base64 = "0.22"

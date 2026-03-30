@@ -155,7 +155,7 @@ quack_rs::table_scan_callback!(snmp_walk_scan, |info, output| {
     unsafe { out_chunk.set_size(count as usize) };
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionBuilder::new("snmp_get")
@@ -165,7 +165,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(snmp_result_type())
         .function(cb_snmp_get)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     TableFunctionBuilder::new("snmp_walk")
         .param(v)
@@ -175,7 +175,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(snmp_walk_bind)
         .init(snmp_walk_init)
         .scan(snmp_walk_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

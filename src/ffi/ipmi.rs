@@ -117,27 +117,27 @@ quack_rs::scalar_callback!(cb_ipmi_chassis_control, |_info, input, output| {
 
 // ===== Registration =====
 
-pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionBuilder::new("ipmi_device_id")
         .param(v)
         .returns_logical(ipmi_device_type())
         .function(cb_ipmi_device_id)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     ScalarFunctionBuilder::new("ipmi_chassis_status")
         .param(v)
         .returns_logical(ipmi_chassis_type())
         .function(cb_ipmi_chassis_status)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     ScalarFunctionBuilder::new("ipmi_chassis_control")
         .param(v)
         .param(v)
         .returns_logical(ipmi_result_type())
         .function(cb_ipmi_chassis_control)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

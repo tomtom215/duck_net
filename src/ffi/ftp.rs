@@ -203,7 +203,7 @@ quack_rs::table_scan_callback!(ftp_list_scan, |info, output| {
 
 // ===== Registration =====
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // FTP scalar functions
@@ -211,27 +211,27 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(v)
         .returns_logical(read_result_type())
         .function(cb_ftp_read)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     ScalarFunctionBuilder::new("ftp_write")
         .param(v)
         .param(v)
         .returns_logical(write_result_type())
         .function(cb_ftp_write)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     ScalarFunctionBuilder::new("ftp_delete")
         .param(v)
         .returns_logical(delete_result_type())
         .function(cb_ftp_delete)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Binary read function
     ScalarFunctionBuilder::new("ftp_read_blob")
         .param(v)
         .returns_logical(blob_read_result_type())
         .function(cb_ftp_read_blob)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // FTP list table function
     TableFunctionBuilder::new("ftp_list")
@@ -239,7 +239,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(ftp_list_bind)
         .init(ftp_list_init)
         .scan(ftp_list_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // SFTP functions
     super::sftp::register_all(con)?;

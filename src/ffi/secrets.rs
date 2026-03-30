@@ -3,7 +3,6 @@
 
 //! FFI bindings for the duck_net secrets manager and security configuration.
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::secrets;
@@ -238,7 +237,7 @@ quack_rs::scalar_callback!(cb_security_status, |_info, _input, output| {
 // Registration
 // ---------------------------------------------------------------------------
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // Initialize secrets store
@@ -253,20 +252,20 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(v) // config_json
         .returns(TypeId::Varchar)
         .function(cb_add_secret)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_clear_secret(name) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_clear_secret")
         .param(v) // name
         .returns(TypeId::Varchar)
         .function(cb_clear_secret)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_clear_all_secrets() -> VARCHAR (no params, returns message)
     ScalarFunctionBuilder::new("duck_net_clear_all_secrets")
         .returns(TypeId::Varchar)
         .function(cb_clear_all_secrets)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_secret(name, key) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_secret")
@@ -275,7 +274,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns(TypeId::Varchar)
         .function(cb_get_secret_value)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_secret_type(name) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_secret_type")
@@ -283,28 +282,28 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns(TypeId::Varchar)
         .function(cb_get_secret_type)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_secret_redacted(name) -> VARCHAR (JSON with redacted values)
     ScalarFunctionBuilder::new("duck_net_secret_redacted")
         .param(v) // name
         .returns(TypeId::Varchar)
         .function(cb_get_secret_redacted)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_scrub_url(url) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_scrub_url")
         .param(v)
         .returns(TypeId::Varchar)
         .function(cb_scrub_url)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_scrub_error(msg) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_scrub_error")
         .param(v)
         .returns(TypeId::Varchar)
         .function(cb_scrub_error)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // --- Security Configuration Functions ---
 
@@ -312,21 +311,21 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
     ScalarFunctionBuilder::new("duck_net_security_status")
         .returns(TypeId::Varchar)
         .function(cb_security_status)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_set_ssrf_protection(enabled BOOLEAN) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_ssrf_protection")
         .param(TypeId::Boolean)
         .returns(TypeId::Varchar)
         .function(cb_set_ssrf_protection)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_set_ssh_strict(enabled BOOLEAN) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_ssh_strict")
         .param(TypeId::Boolean)
         .returns(TypeId::Varchar)
         .function(cb_set_ssh_strict)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // --- Protocol-specific overloads (S3, SMTP, Vault, SSH, Consul, InfluxDB, HTTP, etc.) ---
     super::secrets_protocols::register_all(con)?;

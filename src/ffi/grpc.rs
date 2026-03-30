@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::grpc;
@@ -37,7 +36,7 @@ quack_rs::scalar_callback!(cb_grpc_list_services, |_info, input, output| {
     let url_reader = unsafe { chunk.reader(0) };
 
     let mut sw = unsafe { StructWriter::new(output, 3) };
-    let services_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
+    let services_vec = sw.child_vector(1);
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
@@ -78,7 +77,7 @@ quack_rs::scalar_callback!(cb_grpc_call, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionBuilder::new("grpc_list_services")
@@ -86,7 +85,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(grpc_reflection_result_type())
         .function(cb_grpc_list_services)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     ScalarFunctionBuilder::new("grpc_call")
         .param(v) // url
@@ -96,7 +95,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(grpc_result_type())
         .function(cb_grpc_call)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::soap::{self, SoapVersion};
@@ -41,7 +40,7 @@ quack_rs::scalar_callback!(cb_soap11_4h, |_info, input, output| {
         let url = unsafe { url_reader.read_str(row) };
         let action = unsafe { action_reader.read_str(row) };
         let body_xml = unsafe { body_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 3, row) };
+        let headers = unsafe { read_headers_map(&chunk, 3, row) };
         let resp = soap::send_request(url, action, body_xml, None, &headers, SoapVersion::V1_1);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
@@ -89,7 +88,7 @@ quack_rs::scalar_callback!(cb_soap11_5, |_info, input, output| {
         let action = unsafe { action_reader.read_str(row) };
         let body_xml = unsafe { body_reader.read_str(row) };
         let soap_hdr = unsafe { soap_hdr_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 4, row) };
+        let headers = unsafe { read_headers_map(&chunk, 4, row) };
         let resp = soap::send_request(
             url,
             action,
@@ -162,7 +161,7 @@ quack_rs::scalar_callback!(cb_soap12_5, |_info, input, output| {
         let action = unsafe { action_reader.read_str(row) };
         let body_xml = unsafe { body_reader.read_str(row) };
         let soap_hdr = unsafe { soap_hdr_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 4, row) };
+        let headers = unsafe { read_headers_map(&chunk, 4, row) };
         let resp = soap::send_request(
             url,
             action,
@@ -222,7 +221,7 @@ quack_rs::scalar_callback!(cb_fault_string, |_info, input, output| {
 
 // ===== Registration =====
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // soap_request: 4 overloads (3-arg, 4-arg with headers, 4-arg with soap_header, 5-arg)
@@ -267,7 +266,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_soap11_5)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // soap12_request: 3 overloads
     ScalarFunctionSetBuilder::new("soap12_request")
@@ -301,21 +300,21 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_soap12_5)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // soap_extract_body(xml) -> VARCHAR
     ScalarFunctionBuilder::new("soap_extract_body")
         .param(v)
         .returns(v)
         .function(cb_extract_body)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // soap_is_fault(xml) -> BOOLEAN
     ScalarFunctionBuilder::new("soap_is_fault")
         .param(v)
         .returns(TypeId::Boolean)
         .function(cb_is_fault)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // soap_fault_string(xml) -> VARCHAR
     ScalarFunctionBuilder::new("soap_fault_string")
@@ -323,7 +322,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns(v)
         .function(cb_fault_string)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

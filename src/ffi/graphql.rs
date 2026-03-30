@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::graphql;
@@ -56,7 +55,7 @@ quack_rs::scalar_callback!(cb_graphql_query_4, |_info, input, output| {
         let url = unsafe { url_reader.read_str(row) };
         let query = unsafe { query_reader.read_str(row) };
         let vars = unsafe { vars_reader.read_str(row) };
-        let headers = unsafe { read_headers_map(input, 3, row) };
+        let headers = unsafe { read_headers_map(&chunk, 3, row) };
         let vars_opt = if vars.is_empty() { None } else { Some(vars) };
         let resp = graphql::query(url, query, vars_opt, &headers);
         unsafe { write_response(output, row, &resp, &mut map_offset) };
@@ -93,7 +92,7 @@ quack_rs::scalar_callback!(cb_graphql_extract_errors, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionSetBuilder::new("graphql_query")
@@ -124,20 +123,20 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_graphql_query_4)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     ScalarFunctionBuilder::new("graphql_has_errors")
         .param(v)
         .returns(TypeId::Boolean)
         .function(cb_graphql_has_errors)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     ScalarFunctionBuilder::new("graphql_extract_errors")
         .param(v)
         .returns(v)
         .function(cb_graphql_extract_errors)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

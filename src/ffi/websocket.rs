@@ -97,7 +97,7 @@ quack_rs::scalar_callback!(cb_ws_multi_request, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionSetBuilder::new("ws_request")
@@ -118,7 +118,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
                 .function(cb_ws_request_timeout)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // ws_multi_request(url, messages, timeout_secs) -> STRUCT(success, responses, count, message)
     ScalarFunctionBuilder::new("ws_multi_request")
@@ -128,7 +128,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
         .returns_logical(ws_multi_result_type())
         .function(cb_ws_multi_request)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

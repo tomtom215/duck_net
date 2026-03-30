@@ -70,7 +70,7 @@ quack_rs::scalar_callback!(cb_bgp_asn_info, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // bgp_route(prefix)
@@ -79,7 +79,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
         .returns_logical(bgp_result_type())
         .function(cb_bgp_route)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // bgp_prefix_overview(prefix)
     ScalarFunctionBuilder::new("bgp_prefix_overview")
@@ -87,7 +87,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
         .returns_logical(bgp_result_type())
         .function(cb_bgp_prefix_overview)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // bgp_asn_info(asn)
     ScalarFunctionBuilder::new("bgp_asn_info")
@@ -95,7 +95,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
         .returns_logical(bgp_result_type())
         .function(cb_bgp_asn_info)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }
