@@ -25,27 +25,20 @@ fn ssh_result_type() -> LogicalType {
     ])
 }
 
-/// ssh_exec_secret(secret_name, host, command) -> STRUCT
-unsafe extern "C" fn cb_ssh_exec_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ssh_exec_secret(secret_name, host, command) -> STRUCT
+quack_rs::scalar_callback!(cb_ssh_exec_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let host_reader = chunk.reader(1);
-    let cmd_reader = chunk.reader(2);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let host_reader = unsafe { chunk.reader(1) };
+    let cmd_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let mut exit_w = StructVector::field_writer(output, 1);
-    let stdout_vec = duckdb_struct_vector_get_child(output, 2);
-    let stderr_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let host = host_reader.read_str(row);
-        let command = cmd_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let host = unsafe { host_reader.read_str(row) };
+        let command = unsafe { cmd_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_ssh(secret_name) {
             Ok((user, key_file, password)) => {
@@ -70,12 +63,12 @@ unsafe extern "C" fn cb_ssh_exec_secret(
             },
         };
 
-        success_w.write_bool(row, result.success);
-        exit_w.write_i32(row, result.exit_code);
-        write_varchar(stdout_vec, row, &result.stdout);
-        write_varchar(stderr_vec, row, &result.stderr);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i32(row, 1, result.exit_code) };
+        unsafe { sw.write_varchar(row, 2, &result.stdout) };
+        unsafe { sw.write_varchar(row, 3, &result.stderr) };
     }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Secrets-Aware Consul Overload
@@ -89,26 +82,20 @@ fn kv_result_type() -> LogicalType {
     ])
 }
 
-/// consul_get_secret(secret_name, url, key) -> STRUCT
-unsafe extern "C" fn cb_consul_get_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// consul_get_secret(secret_name, url, key) -> STRUCT
+quack_rs::scalar_callback!(cb_consul_get_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let url_reader = chunk.reader(1);
-    let key_reader = chunk.reader(2);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let url_reader = unsafe { chunk.reader(1) };
+    let key_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let url = url_reader.read_str(row);
-        let key = key_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_token(secret_name) {
             Ok(token) => crate::consul::consul_get(url, key, &token),
@@ -119,11 +106,11 @@ unsafe extern "C" fn cb_consul_get_secret(
             },
         };
 
-        success_w.write_bool(row, result.success);
-        write_varchar(value_vec, row, &result.value);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Secrets-Aware InfluxDB Overload
@@ -137,28 +124,22 @@ fn influx_result_type() -> LogicalType {
     ])
 }
 
-/// influxdb_query_secret(secret_name, url, org, flux_query) -> STRUCT
-unsafe extern "C" fn cb_influxdb_query_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// influxdb_query_secret(secret_name, url, org, flux_query) -> STRUCT
+quack_rs::scalar_callback!(cb_influxdb_query_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let url_reader = chunk.reader(1);
-    let org_reader = chunk.reader(2);
-    let query_reader = chunk.reader(3);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let url_reader = unsafe { chunk.reader(1) };
+    let org_reader = unsafe { chunk.reader(2) };
+    let query_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let url = url_reader.read_str(row);
-        let org = org_reader.read_str(row);
-        let flux_query = query_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let url = unsafe { url_reader.read_str(row) };
+        let org = unsafe { org_reader.read_str(row) };
+        let flux_query = unsafe { query_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_token(secret_name) {
             Ok(token) => crate::influxdb::query(url, org, &token, flux_query),
@@ -169,31 +150,27 @@ unsafe extern "C" fn cb_influxdb_query_secret(
             },
         };
 
-        success_w.write_bool(row, result.success);
-        write_varchar(body_vec, row, &result.body);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Secrets-Aware HTTP Overload (for bearer token / basic auth from secrets)
 // ---------------------------------------------------------------------------
 
-/// http_get_secret(secret_name, url) -> response STRUCT
-unsafe extern "C" fn cb_http_get_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// http_get_secret(secret_name, url) -> response STRUCT
+quack_rs::scalar_callback!(cb_http_get_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let url_reader = chunk.reader(1);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let url_reader = unsafe { chunk.reader(1) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let url = url_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let url = unsafe { url_reader.read_str(row) };
 
         let resp = match crate::secrets_resolve::resolve_http(secret_name) {
             Ok(headers) => crate::http::execute(crate::http::Method::Get, url, &headers, None),
@@ -204,27 +181,23 @@ unsafe extern "C" fn cb_http_get_secret(
                 body: String::new(),
             },
         };
-        super::scalars::write_response(output, row, &resp, &mut map_offset);
+        unsafe { super::scalars::write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// http_post_secret(secret_name, url, body) -> response STRUCT
-unsafe extern "C" fn cb_http_post_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// http_post_secret(secret_name, url, body) -> response STRUCT
+quack_rs::scalar_callback!(cb_http_post_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let url_reader = chunk.reader(1);
-    let body_reader = chunk.reader(2);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let url_reader = unsafe { chunk.reader(1) };
+    let body_reader = unsafe { chunk.reader(2) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let url = url_reader.read_str(row);
-        let body = body_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let url = unsafe { url_reader.read_str(row) };
+        let body = unsafe { body_reader.read_str(row) };
 
         let resp = match crate::secrets_resolve::resolve_http(secret_name) {
             Ok(headers) => {
@@ -237,33 +210,28 @@ unsafe extern "C" fn cb_http_post_secret(
                 body: String::new(),
             },
         };
-        super::scalars::write_response(output, row, &resp, &mut map_offset);
+        unsafe { super::scalars::write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Secrets-Aware SNMP Overload
 // ---------------------------------------------------------------------------
 
-/// snmp_get_secret(secret_name, host, oid) -> STRUCT(success, value)
-unsafe extern "C" fn cb_snmp_get_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// snmp_get_secret(secret_name, host, oid) -> STRUCT(success, value)
+quack_rs::scalar_callback!(cb_snmp_get_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let host_reader = chunk.reader(1);
-    let oid_reader = chunk.reader(2);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let host_reader = unsafe { chunk.reader(1) };
+    let oid_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let host = host_reader.read_str(row);
-        let oid = oid_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let host = unsafe { host_reader.read_str(row) };
+        let oid = unsafe { oid_reader.read_str(row) };
 
         let (success, value) = match crate::secrets_resolve::resolve_community(secret_name) {
             Ok(community) => match crate::snmp::get(host, oid, &community) {
@@ -273,32 +241,27 @@ unsafe extern "C" fn cb_snmp_get_secret(
             Err(e) => (false, e),
         };
 
-        success_w.write_bool(row, success);
-        write_varchar(value_vec, row, &value);
+        unsafe { sw.write_bool(row, 0, success) };
+        unsafe { sw.write_varchar(row, 1, &value) };
     }
-}
+});
 
-/// radius_auth_secret(secret_name, host, username, password) -> STRUCT(success, message)
-unsafe extern "C" fn cb_radius_auth_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// radius_auth_secret(secret_name, host, username, password) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_radius_auth_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let host_reader = chunk.reader(1);
-    let user_reader = chunk.reader(2);
-    let pass_reader = chunk.reader(3);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let host_reader = unsafe { chunk.reader(1) };
+    let user_reader = unsafe { chunk.reader(2) };
+    let pass_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let host = host_reader.read_str(row);
-        let username = user_reader.read_str(row);
-        let password = pass_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let host = unsafe { host_reader.read_str(row) };
+        let username = unsafe { user_reader.read_str(row) };
+        let password = unsafe { pass_reader.read_str(row) };
 
         let (success, message) = match crate::secrets_resolve::resolve_shared_secret(secret_name) {
             Ok(shared_secret) => {
@@ -308,33 +271,27 @@ unsafe extern "C" fn cb_radius_auth_secret(
             Err(e) => (false, e),
         };
 
-        success_w.write_bool(row, success);
-        write_varchar(message_vec, row, &message);
+        unsafe { sw.write_bool(row, 0, success) };
+        unsafe { sw.write_varchar(row, 1, &message) };
     }
-}
+});
 
-/// imap_fetch_secret(secret_name, url, mailbox, uid) -> STRUCT(success, body, message)
-unsafe extern "C" fn cb_imap_fetch_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// imap_fetch_secret(secret_name, url, mailbox, uid) -> STRUCT(success, body, message)
+quack_rs::scalar_callback!(cb_imap_fetch_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let url_reader = chunk.reader(1);
-    let mailbox_reader = chunk.reader(2);
-    let uid_reader = chunk.reader(3);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let url_reader = unsafe { chunk.reader(1) };
+    let mailbox_reader = unsafe { chunk.reader(2) };
+    let uid_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let url = url_reader.read_str(row);
-        let mailbox = mailbox_reader.read_str(row);
-        let uid = uid_reader.read_i64(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let url = unsafe { url_reader.read_str(row) };
+        let mailbox = unsafe { mailbox_reader.read_str(row) };
+        let uid = unsafe { uid_reader.read_i64(row) };
 
         let (success, body, message) =
             match crate::secrets_resolve::resolve_credentials(secret_name) {
@@ -353,32 +310,28 @@ unsafe extern "C" fn cb_imap_fetch_secret(
                 Err(e) => (false, String::new(), e),
             };
 
-        success_w.write_bool(row, success);
-        write_varchar(body_vec, row, &body);
-        write_varchar(message_vec, row, &message);
+        unsafe { sw.write_bool(row, 0, success) };
+        unsafe { sw.write_varchar(row, 1, &body) };
+        unsafe { sw.write_varchar(row, 2, &message) };
     }
-}
+});
 
-/// ldap_search_secret(secret_name, url, base_dn, filter, attributes) -> VARCHAR
-unsafe extern "C" fn cb_ldap_search_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ldap_search_secret(secret_name, url, base_dn, filter, attributes) -> VARCHAR
+quack_rs::scalar_callback!(cb_ldap_search_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let url_reader = chunk.reader(1);
-    let base_reader = chunk.reader(2);
-    let filter_reader = chunk.reader(3);
-    let attrs_reader = chunk.reader(4);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let url_reader = unsafe { chunk.reader(1) };
+    let base_reader = unsafe { chunk.reader(2) };
+    let filter_reader = unsafe { chunk.reader(3) };
+    let attrs_reader = unsafe { chunk.reader(4) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let url = url_reader.read_str(row);
-        let base_dn = base_reader.read_str(row);
-        let filter = filter_reader.read_str(row);
-        let attrs_str = attrs_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let url = unsafe { url_reader.read_str(row) };
+        let base_dn = unsafe { base_reader.read_str(row) };
+        let filter = unsafe { filter_reader.read_str(row) };
+        let attrs_str = unsafe { attrs_reader.read_str(row) };
 
         let msg = match crate::secrets_resolve::resolve_credentials(secret_name) {
             Ok((Some(user), Some(pass))) => {
@@ -427,9 +380,9 @@ unsafe extern "C" fn cb_ldap_search_secret(
             Err(e) => e,
         };
 
-        write_varchar(output, row, &msg);
+        unsafe { write_varchar(output, row, &msg) };
     }
-}
+});
 
 // Registration
 

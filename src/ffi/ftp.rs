@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::ftp;
 use crate::sftp;
 
-use super::scalars::write_varchar;
 
 // ===== Return Type Helpers =====
 
@@ -37,176 +36,140 @@ fn delete_result_type() -> LogicalType {
 
 // ===== FTP Scalar Callbacks =====
 
-/// ftp_read(url) -> STRUCT(success, content, size, message)
-unsafe extern "C" fn cb_ftp_read(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ftp_read(url) -> STRUCT(success, content, size, message)
+quack_rs::scalar_callback!(cb_ftp_read, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
+
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
         let r = ftp::read(url);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let content_vec = duckdb_struct_vector_get_child(output, 1);
-        let mut size_w = StructVector::field_writer(output, 2);
-        let message_vec = duckdb_struct_vector_get_child(output, 3);
-        success_w.write_bool(row as usize, r.success);
-        write_varchar(content_vec, row, &r.content);
-        size_w.write_i64(row as usize, r.size);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &r.content) };
+        unsafe { sw.write_i64(row as usize, 2, r.size) };
+        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
     }
-}
+});
 
-/// ftp_write(url, content) -> STRUCT(success, bytes_written, message)
-unsafe extern "C" fn cb_ftp_write(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ftp_write(url, content) -> STRUCT(success, bytes_written, message)
+quack_rs::scalar_callback!(cb_ftp_write, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let content_reader = chunk.reader(1);
+    let url_reader = unsafe { chunk.reader(0) };
+    let content_reader = unsafe { chunk.reader(1) };
+
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let content = content_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let content = unsafe { content_reader.read_str(row as usize) };
         let r = ftp::write(url, content);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let mut bytes_w = StructVector::field_writer(output, 1);
-        let message_vec = duckdb_struct_vector_get_child(output, 2);
-        success_w.write_bool(row as usize, r.success);
-        bytes_w.write_i64(row as usize, r.bytes_written);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_i64(row as usize, 1, r.bytes_written) };
+        unsafe { sw.write_varchar(row as usize, 2, &r.message) };
     }
-}
+});
 
-/// ftp_delete(url) -> STRUCT(success, message)
-unsafe extern "C" fn cb_ftp_delete(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ftp_delete(url) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_ftp_delete, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
         let r = ftp::delete(url);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let message_vec = duckdb_struct_vector_get_child(output, 1);
-        success_w.write_bool(row as usize, r.success);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &r.message) };
     }
-}
+});
 
 // ===== SFTP Scalar Callbacks =====
 
-/// sftp_read(url) -> STRUCT(success, content, size, message)
-unsafe extern "C" fn cb_sftp_read(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// sftp_read(url) -> STRUCT(success, content, size, message)
+quack_rs::scalar_callback!(cb_sftp_read, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
+
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
         let r = sftp::read(url, None);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let content_vec = duckdb_struct_vector_get_child(output, 1);
-        let mut size_w = StructVector::field_writer(output, 2);
-        let message_vec = duckdb_struct_vector_get_child(output, 3);
-        success_w.write_bool(row as usize, r.success);
-        write_varchar(content_vec, row, &r.content);
-        size_w.write_i64(row as usize, r.size);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &r.content) };
+        unsafe { sw.write_i64(row as usize, 2, r.size) };
+        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
     }
-}
+});
 
-/// sftp_read(url, key_file) -> STRUCT(success, content, size, message)
-unsafe extern "C" fn cb_sftp_read_key(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// sftp_read(url, key_file) -> STRUCT(success, content, size, message)
+quack_rs::scalar_callback!(cb_sftp_read_key, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
+    let url_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let key_file = key_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let key_file = unsafe { key_reader.read_str(row as usize) };
         let r = sftp::read(url, Some(key_file));
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let content_vec = duckdb_struct_vector_get_child(output, 1);
-        let mut size_w = StructVector::field_writer(output, 2);
-        let message_vec = duckdb_struct_vector_get_child(output, 3);
-        success_w.write_bool(row as usize, r.success);
-        write_varchar(content_vec, row, &r.content);
-        size_w.write_i64(row as usize, r.size);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &r.content) };
+        unsafe { sw.write_i64(row as usize, 2, r.size) };
+        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
     }
-}
+});
 
-/// sftp_write(url, content) -> STRUCT(success, bytes_written, message)
-unsafe extern "C" fn cb_sftp_write(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// sftp_write(url, content) -> STRUCT(success, bytes_written, message)
+quack_rs::scalar_callback!(cb_sftp_write, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let content_reader = chunk.reader(1);
+    let url_reader = unsafe { chunk.reader(0) };
+    let content_reader = unsafe { chunk.reader(1) };
+
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let content = content_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let content = unsafe { content_reader.read_str(row as usize) };
         let r = sftp::write(url, content, None);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let mut bytes_w = StructVector::field_writer(output, 1);
-        let message_vec = duckdb_struct_vector_get_child(output, 2);
-        success_w.write_bool(row as usize, r.success);
-        bytes_w.write_i64(row as usize, r.bytes_written);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_i64(row as usize, 1, r.bytes_written) };
+        unsafe { sw.write_varchar(row as usize, 2, &r.message) };
     }
-}
+});
 
-/// sftp_delete(url) -> STRUCT(success, message)
-unsafe extern "C" fn cb_sftp_delete(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// sftp_delete(url) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_sftp_delete, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
         let r = sftp::delete(url, None);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let message_vec = duckdb_struct_vector_get_child(output, 1);
-        success_w.write_bool(row as usize, r.success);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &r.message) };
     }
-}
+});
 
 // ===== Blob Read Result Type =====
 
@@ -219,98 +182,89 @@ fn blob_read_result_type() -> LogicalType {
     ])
 }
 
-/// ftp_read_blob(url) -> STRUCT(success, data BLOB, size, message)
-unsafe extern "C" fn cb_ftp_read_blob(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ftp_read_blob(url) -> STRUCT(success, data BLOB, size, message)
+quack_rs::scalar_callback!(cb_ftp_read_blob, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
+
+    let mut sw = unsafe { StructWriter::new(output, 4) };
+    let data_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
         let r = ftp::read_blob(url);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let data_vec = duckdb_struct_vector_get_child(output, 1);
-        let mut size_w = StructVector::field_writer(output, 2);
-        let message_vec = duckdb_struct_vector_get_child(output, 3);
-        success_w.write_bool(row as usize, r.success);
-        // Write blob data
-        duckdb_vector_assign_string_element_len(
-            data_vec,
-            row as idx_t,
-            r.data.as_ptr() as *const _,
-            r.data.len() as idx_t,
-        );
-        size_w.write_i64(row as usize, r.size);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        // Write blob data directly
+        unsafe {
+            duckdb_vector_assign_string_element_len(
+                data_vec,
+                row as idx_t,
+                r.data.as_ptr() as *const _,
+                r.data.len() as idx_t,
+            );
+        }
+        unsafe { sw.write_i64(row as usize, 2, r.size) };
+        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
     }
-}
+});
 
-/// sftp_read_blob(url) -> STRUCT(success, data BLOB, size, message)
-unsafe extern "C" fn cb_sftp_read_blob(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// sftp_read_blob(url) -> STRUCT(success, data BLOB, size, message)
+quack_rs::scalar_callback!(cb_sftp_read_blob, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
+
+    let mut sw = unsafe { StructWriter::new(output, 4) };
+    let data_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
         let r = sftp::read_blob(url, None);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let data_vec = duckdb_struct_vector_get_child(output, 1);
-        let mut size_w = StructVector::field_writer(output, 2);
-        let message_vec = duckdb_struct_vector_get_child(output, 3);
-        success_w.write_bool(row as usize, r.success);
-        duckdb_vector_assign_string_element_len(
-            data_vec,
-            row as idx_t,
-            r.data.as_ptr() as *const _,
-            r.data.len() as idx_t,
-        );
-        size_w.write_i64(row as usize, r.size);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe {
+            duckdb_vector_assign_string_element_len(
+                data_vec,
+                row as idx_t,
+                r.data.as_ptr() as *const _,
+                r.data.len() as idx_t,
+            );
+        }
+        unsafe { sw.write_i64(row as usize, 2, r.size) };
+        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
     }
-}
+});
 
-/// sftp_read_blob(url, key_file) -> STRUCT(success, data BLOB, size, message)
-unsafe extern "C" fn cb_sftp_read_blob_key(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// sftp_read_blob(url, key_file) -> STRUCT(success, data BLOB, size, message)
+quack_rs::scalar_callback!(cb_sftp_read_blob_key, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
+    let url_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+
+    let mut sw = unsafe { StructWriter::new(output, 4) };
+    let data_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let key_file = key_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let key_file = unsafe { key_reader.read_str(row as usize) };
         let r = sftp::read_blob(url, Some(key_file));
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let data_vec = duckdb_struct_vector_get_child(output, 1);
-        let mut size_w = StructVector::field_writer(output, 2);
-        let message_vec = duckdb_struct_vector_get_child(output, 3);
-        success_w.write_bool(row as usize, r.success);
-        duckdb_vector_assign_string_element_len(
-            data_vec,
-            row as idx_t,
-            r.data.as_ptr() as *const _,
-            r.data.len() as idx_t,
-        );
-        size_w.write_i64(row as usize, r.size);
-        write_varchar(message_vec, row, &r.message);
+        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe {
+            duckdb_vector_assign_string_element_len(
+                data_vec,
+                row as idx_t,
+                r.data.as_ptr() as *const _,
+                r.data.len() as idx_t,
+            );
+        }
+        unsafe { sw.write_i64(row as usize, 2, r.size) };
+        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
     }
-}
+});
 
 // ===== FTP/SFTP List Table Functions =====
 
@@ -343,18 +297,19 @@ unsafe extern "C" fn ftp_list_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn ftp_list_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<FtpListBindData>::get_from_function(info) {
+// ftp_list scan callback
+quack_rs::table_scan_callback!(ftp_list_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<FtpListBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<FtpListInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<FtpListInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -366,31 +321,31 @@ unsafe extern "C" fn ftp_list_scan(info: duckdb_function_info, output: duckdb_da
             Err(e) => {
                 let fi = FunctionInfo::new(info);
                 fi.set_error(&e);
-                duckdb_data_chunk_set_size(output, 0);
+                unsafe { duckdb_data_chunk_set_size(output, 0) };
                 return;
             }
         }
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut name_w = out_chunk.writer(0);
-    let mut size_w = out_chunk.writer(1);
-    let mut is_dir_w = out_chunk.writer(2);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut name_w = unsafe { out_chunk.writer(0) };
+    let mut size_w = unsafe { out_chunk.writer(1) };
+    let mut is_dir_w = unsafe { out_chunk.writer(2) };
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.entries.len() && count < max_chunk {
         let entry = &init_data.entries[init_data.idx];
-        name_w.write_varchar(count as usize, &entry.name);
-        size_w.write_i64(count as usize, entry.size);
-        is_dir_w.write_bool(count as usize, entry.is_dir);
+        unsafe { name_w.write_varchar(count as usize, &entry.name) };
+        unsafe { size_w.write_i64(count as usize, entry.size) };
+        unsafe { is_dir_w.write_bool(count as usize, entry.is_dir) };
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count) };
+});
 
 // SFTP list table function
 struct SftpListBindData {
@@ -431,18 +386,19 @@ unsafe extern "C" fn sftp_list_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn sftp_list_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<SftpListBindData>::get_from_function(info) {
+// sftp_list scan callback
+quack_rs::table_scan_callback!(sftp_list_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<SftpListBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<SftpListInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<SftpListInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -453,31 +409,31 @@ unsafe extern "C" fn sftp_list_scan(info: duckdb_function_info, output: duckdb_d
             Err(e) => {
                 let fi = FunctionInfo::new(info);
                 fi.set_error(&e);
-                duckdb_data_chunk_set_size(output, 0);
+                unsafe { duckdb_data_chunk_set_size(output, 0) };
                 return;
             }
         }
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut name_w = out_chunk.writer(0);
-    let mut size_w = out_chunk.writer(1);
-    let mut is_dir_w = out_chunk.writer(2);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut name_w = unsafe { out_chunk.writer(0) };
+    let mut size_w = unsafe { out_chunk.writer(1) };
+    let mut is_dir_w = unsafe { out_chunk.writer(2) };
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.entries.len() && count < max_chunk {
         let entry = &init_data.entries[init_data.idx];
-        name_w.write_varchar(count as usize, &entry.name);
-        size_w.write_i64(count as usize, entry.size);
-        is_dir_w.write_bool(count as usize, entry.is_dir);
+        unsafe { name_w.write_varchar(count as usize, &entry.name) };
+        unsafe { size_w.write_i64(count as usize, entry.size) };
+        unsafe { is_dir_w.write_bool(count as usize, entry.is_dir) };
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count) };
+});
 
 // ===== Registration =====
 

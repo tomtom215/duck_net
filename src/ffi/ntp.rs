@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::ntp;
 
-use super::scalars::write_varchar;
 
 fn ntp_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -18,42 +17,34 @@ fn ntp_result_type() -> LogicalType {
     ])
 }
 
-/// ntp_query(server) -> STRUCT(offset_ms, delay_ms, stratum, reference_id, server_time_unix)
-unsafe extern "C" fn cb_ntp_query(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ntp_query(server) -> STRUCT(offset_ms, delay_ms, stratum, reference_id, server_time_unix)
+quack_rs::scalar_callback!(cb_ntp_query, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let server_reader = chunk.reader(0);
+    let server_reader = unsafe { chunk.reader(0) };
 
-    let mut offset_w = StructVector::field_writer(output, 0);
-    let mut delay_w = StructVector::field_writer(output, 1);
-    let mut stratum_w = StructVector::field_writer(output, 2);
-    let refid_vec = duckdb_struct_vector_get_child(output, 3);
-    let mut time_w = StructVector::field_writer(output, 4);
+    let mut sw = unsafe { StructWriter::new(output, 5) };
 
     for row in 0..row_count {
-        let server = server_reader.read_str(row as usize);
+        let server = unsafe { server_reader.read_str(row as usize) };
         match ntp::query(server) {
             Ok(result) => {
-                offset_w.write_f64(row as usize, result.offset_ms);
-                delay_w.write_f64(row as usize, result.delay_ms);
-                stratum_w.write_i32(row as usize, result.stratum as i32);
-                write_varchar(refid_vec, row, &result.reference_id);
-                time_w.write_f64(row as usize, result.server_time_unix);
+                unsafe { sw.write_f64(row as usize, 0, result.offset_ms) };
+                unsafe { sw.write_f64(row as usize, 1, result.delay_ms) };
+                unsafe { sw.write_i32(row as usize, 2, result.stratum as i32) };
+                unsafe { sw.write_varchar(row as usize, 3, &result.reference_id) };
+                unsafe { sw.write_f64(row as usize, 4, result.server_time_unix) };
             }
             Err(e) => {
-                offset_w.write_f64(row as usize, 0.0);
-                delay_w.write_f64(row as usize, 0.0);
-                stratum_w.write_i32(row as usize, -1);
-                write_varchar(refid_vec, row, &format!("Error: {e}"));
-                time_w.write_f64(row as usize, 0.0);
+                unsafe { sw.write_f64(row as usize, 0, 0.0) };
+                unsafe { sw.write_f64(row as usize, 1, 0.0) };
+                unsafe { sw.write_i32(row as usize, 2, -1) };
+                unsafe { sw.write_varchar(row as usize, 3, &format!("Error: {e}")) };
+                unsafe { sw.write_f64(row as usize, 4, 0.0) };
             }
         }
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     ScalarFunctionBuilder::new("ntp_query")

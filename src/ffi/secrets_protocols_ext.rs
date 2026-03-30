@@ -9,29 +9,23 @@ use quack_rs::prelude::*;
 
 use crate::secrets;
 
-use super::scalars::write_varchar;
 
 // ---------------------------------------------------------------------------
 // Secrets-Aware Redis Overload
 // ---------------------------------------------------------------------------
 
-/// redis_get_secret(secret_name, key) -> STRUCT(success, value)
-unsafe extern "C" fn cb_redis_get_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// redis_get_secret(secret_name, key) -> STRUCT(success, value)
+quack_rs::scalar_callback!(cb_redis_get_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let key = key_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
 
         let result = match build_redis_url(secret_name) {
             Ok(url) => crate::redis_client::get(&url, key),
@@ -41,30 +35,25 @@ unsafe extern "C" fn cb_redis_get_secret(
             },
         };
 
-        success_w.write_bool(row, result.success);
-        write_varchar(value_vec, row, &result.value);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
     }
-}
+});
 
-/// redis_set_secret(secret_name, key, value) -> STRUCT(success, value)
-unsafe extern "C" fn cb_redis_set_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// redis_set_secret(secret_name, key, value) -> STRUCT(success, value)
+quack_rs::scalar_callback!(cb_redis_set_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
-    let val_reader = chunk.reader(2);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+    let val_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let key = key_reader.read_str(row);
-        let value = val_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let value = unsafe { val_reader.read_str(row) };
 
         let result = match build_redis_url(secret_name) {
             Ok(url) => crate::redis_client::set(&url, key, value),
@@ -74,10 +63,10 @@ unsafe extern "C" fn cb_redis_set_secret(
             },
         };
 
-        success_w.write_bool(row, result.success);
-        write_varchar(value_vec, row, &result.value);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
     }
-}
+});
 
 /// Build a Redis URL from a named secret.
 fn build_redis_url(secret_name: &str) -> Result<String, String> {
@@ -106,27 +95,20 @@ fn build_redis_url(secret_name: &str) -> Result<String, String> {
 // Secrets-Aware S3 Overloads
 // ---------------------------------------------------------------------------
 
-/// s3_get_secret(secret_name, bucket, key) -> STRUCT
-unsafe extern "C" fn cb_s3_get_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// s3_get_secret(secret_name, bucket, key) -> STRUCT
+quack_rs::scalar_callback!(cb_s3_get_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let bucket_reader = chunk.reader(1);
-    let key_reader = chunk.reader(2);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let bucket_reader = unsafe { chunk.reader(1) };
+    let key_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let mut status_w = StructVector::field_writer(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let bucket = bucket_reader.read_str(row);
-        let key = key_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let bucket = unsafe { bucket_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_s3(secret_name) {
             Ok((endpoint, access_key, secret_key, region)) => {
@@ -140,36 +122,29 @@ unsafe extern "C" fn cb_s3_get_secret(
             },
         };
 
-        success_w.write_bool(row, result.success);
-        write_varchar(body_vec, row, &result.body);
-        status_w.write_i32(row, result.status);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_i32(row, 2, result.status) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
-}
+});
 
-/// s3_put_secret(secret_name, bucket, key, body) -> STRUCT
-unsafe extern "C" fn cb_s3_put_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// s3_put_secret(secret_name, bucket, key, body) -> STRUCT
+quack_rs::scalar_callback!(cb_s3_put_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let bucket_reader = chunk.reader(1);
-    let key_reader = chunk.reader(2);
-    let body_reader = chunk.reader(3);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let bucket_reader = unsafe { chunk.reader(1) };
+    let key_reader = unsafe { chunk.reader(2) };
+    let body_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let mut status_w = StructVector::field_writer(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let bucket = bucket_reader.read_str(row);
-        let key = key_reader.read_str(row);
-        let body = body_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let bucket = unsafe { bucket_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let body = unsafe { body_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_s3(secret_name) {
             Ok((endpoint, access_key, secret_key, region)) => crate::s3::s3_put(
@@ -189,34 +164,29 @@ unsafe extern "C" fn cb_s3_put_secret(
             },
         };
 
-        success_w.write_bool(row, result.success);
-        write_varchar(body_vec, row, &result.body);
-        status_w.write_i32(row, result.status);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_i32(row, 2, result.status) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
-}
+});
 
-/// s3_list_secret(secret_name, bucket, prefix) -> STRUCT
-unsafe extern "C" fn cb_s3_list_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// s3_list_secret(secret_name, bucket, prefix) -> STRUCT
+quack_rs::scalar_callback!(cb_s3_list_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let bucket_reader = chunk.reader(1);
-    let prefix_reader = chunk.reader(2);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let bucket_reader = unsafe { chunk.reader(1) };
+    let prefix_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let keys_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
+    let keys_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let bucket = bucket_reader.read_str(row);
-        let prefix = prefix_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let bucket = unsafe { bucket_reader.read_str(row) };
+        let prefix = unsafe { prefix_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_s3(secret_name) {
             Ok((endpoint, access_key, secret_key, region)) => {
@@ -229,42 +199,37 @@ unsafe extern "C" fn cb_s3_list_secret(
             },
         };
 
-        success_w.write_bool(row, result.success);
-        super::dns::write_string_list(keys_vec, row, &result.keys, &mut list_offset);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { super::dns::write_string_list(keys_vec, row, &result.keys, &mut list_offset) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Secrets-Aware SMTP Overload
 // ---------------------------------------------------------------------------
 
-/// smtp_send_secret(secret_name, from, to, subject, body) -> STRUCT(success, message)
-unsafe extern "C" fn cb_smtp_send_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// smtp_send_secret(secret_name, from, to, subject, body) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_smtp_send_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let from_reader = chunk.reader(1);
-    let to_reader = chunk.reader(2);
-    let subject_reader = chunk.reader(3);
-    let body_reader = chunk.reader(4);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let from_reader = unsafe { chunk.reader(1) };
+    let to_reader = unsafe { chunk.reader(2) };
+    let subject_reader = unsafe { chunk.reader(3) };
+    let body_reader = unsafe { chunk.reader(4) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
 
         let (success, message) = match resolve_smtp_config(
             secret_name,
-            from_reader.read_str(row),
-            to_reader.read_str(row),
-            subject_reader.read_str(row),
-            body_reader.read_str(row),
+            unsafe { from_reader.read_str(row) },
+            unsafe { to_reader.read_str(row) },
+            unsafe { subject_reader.read_str(row) },
+            unsafe { body_reader.read_str(row) },
         ) {
             Ok(config) => {
                 let r = crate::smtp::send(&config);
@@ -273,10 +238,10 @@ unsafe extern "C" fn cb_smtp_send_secret(
             Err(e) => (false, e),
         };
 
-        success_w.write_bool(row, success);
-        write_varchar(message_vec, row, &message);
+        unsafe { sw.write_bool(row, 0, success) };
+        unsafe { sw.write_varchar(row, 1, &message) };
     }
-}
+});
 
 fn resolve_smtp_config(
     secret_name: &str,
@@ -314,28 +279,20 @@ fn resolve_smtp_config(
 // Secrets-Aware Vault Overload
 // ---------------------------------------------------------------------------
 
-/// vault_read_secret(secret_name, vault_url, path) -> STRUCT
-unsafe extern "C" fn cb_vault_read_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// vault_read_secret(secret_name, vault_url, path) -> STRUCT
+quack_rs::scalar_callback!(cb_vault_read_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let secret_reader = chunk.reader(0);
-    let url_reader = chunk.reader(1);
-    let path_reader = chunk.reader(2);
+    let secret_reader = unsafe { chunk.reader(0) };
+    let url_reader = unsafe { chunk.reader(1) };
+    let path_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let data_vec = duckdb_struct_vector_get_child(output, 1);
-    let mut lease_w = StructVector::field_writer(output, 2);
-    let mut renew_w = StructVector::field_writer(output, 3);
-    let message_vec = duckdb_struct_vector_get_child(output, 4);
+    let mut sw = unsafe { StructWriter::new(output, 5) };
 
     for row in 0..row_count {
-        let secret_name = secret_reader.read_str(row);
-        let url = url_reader.read_str(row);
-        let path = path_reader.read_str(row);
+        let secret_name = unsafe { secret_reader.read_str(row) };
+        let url = unsafe { url_reader.read_str(row) };
+        let path = unsafe { path_reader.read_str(row) };
 
         let result = match crate::secrets_resolve::resolve_token(secret_name) {
             Ok(token) => crate::vault::read(url, &token, path),
@@ -348,13 +305,13 @@ unsafe extern "C" fn cb_vault_read_secret(
             },
         };
 
-        success_w.write_bool(row, result.success);
-        write_varchar(data_vec, row, &result.data);
-        lease_w.write_i64(row, result.lease_duration);
-        renew_w.write_bool(row, result.renewable);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.data) };
+        unsafe { sw.write_i64(row, 2, result.lease_duration) };
+        unsafe { sw.write_bool(row, 3, result.renewable) };
+        unsafe { sw.write_varchar(row, 4, &result.message) };
     }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Secrets List Table Function
@@ -384,11 +341,12 @@ unsafe extern "C" fn secrets_list_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn secrets_list_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let init_data = match FfiInitData::<SecretsListInitData>::get_mut(info) {
+// secrets_list_scan table scan callback
+quack_rs::table_scan_callback!(secrets_list_scan, |info, output| {
+    let init_data = match unsafe { FfiInitData::<SecretsListInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -397,25 +355,25 @@ unsafe extern "C" fn secrets_list_scan(info: duckdb_function_info, output: duckd
         init_data.entries = secrets::list_secrets();
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut name_w = out_chunk.writer(0);
-    let mut type_w = out_chunk.writer(1);
-    let mut count_w = out_chunk.writer(2);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut name_w = unsafe { out_chunk.writer(0) };
+    let mut type_w = unsafe { out_chunk.writer(1) };
+    let mut count_w = unsafe { out_chunk.writer(2) };
 
     let mut count: usize = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.entries.len() && count < max_chunk {
         let (name, stype, key_count) = &init_data.entries[init_data.idx];
-        name_w.write_varchar(count, name);
-        type_w.write_varchar(count, stype);
-        count_w.write_i32(count, *key_count as i32);
+        unsafe { name_w.write_varchar(count, name) };
+        unsafe { type_w.write_varchar(count, stype) };
+        unsafe { count_w.write_i32(count, *key_count as i32) };
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count as idx_t);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count as idx_t) };
+});
 
 // ---------------------------------------------------------------------------
 // Registration

@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::s3;
 
 use super::dns::write_string_list;
-use super::scalars::write_varchar;
 
 fn s3_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -29,117 +28,98 @@ fn s3_list_result_type() -> LogicalType {
     ])
 }
 
-/// s3_get(endpoint, bucket, key, access_key, secret_key, region) -> STRUCT(success, body, status, message)
-unsafe extern "C" fn cb_s3_get(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// s3_get(endpoint, bucket, key, access_key, secret_key, region) -> STRUCT(success, body, status, message)
+quack_rs::scalar_callback!(cb_s3_get, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let endpoint_reader = chunk.reader(0);
-    let bucket_reader = chunk.reader(1);
-    let key_reader = chunk.reader(2);
-    let access_key_reader = chunk.reader(3);
-    let secret_key_reader = chunk.reader(4);
-    let region_reader = chunk.reader(5);
+    let endpoint_reader = unsafe { chunk.reader(0) };
+    let bucket_reader = unsafe { chunk.reader(1) };
+    let key_reader = unsafe { chunk.reader(2) };
+    let access_key_reader = unsafe { chunk.reader(3) };
+    let secret_key_reader = unsafe { chunk.reader(4) };
+    let region_reader = unsafe { chunk.reader(5) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let mut status_writer = StructVector::field_writer(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let endpoint = endpoint_reader.read_str(row as usize);
-        let bucket = bucket_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let access_key = access_key_reader.read_str(row as usize);
-        let secret_key = secret_key_reader.read_str(row as usize);
-        let region = region_reader.read_str(row as usize);
+        let endpoint = unsafe { endpoint_reader.read_str(row as usize) };
+        let bucket = unsafe { bucket_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
+        let access_key = unsafe { access_key_reader.read_str(row as usize) };
+        let secret_key = unsafe { secret_key_reader.read_str(row as usize) };
+        let region = unsafe { region_reader.read_str(row as usize) };
 
         let result = s3::s3_get(endpoint, bucket, key, access_key, secret_key, region);
 
-        unsafe { success_writer.write_bool(row as usize, result.success) };
-        write_varchar(body_vec, row, &result.body);
-        unsafe { status_writer.write_i32(row as usize, result.status) };
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
+        unsafe { sw.write_i32(row as usize, 2, result.status) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
     }
-}
+});
 
-/// s3_put(endpoint, bucket, key, body, access_key, secret_key, region) -> STRUCT(success, body, status, message)
-unsafe extern "C" fn cb_s3_put(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// s3_put(endpoint, bucket, key, body, access_key, secret_key, region) -> STRUCT(success, body, status, message)
+quack_rs::scalar_callback!(cb_s3_put, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let endpoint_reader = chunk.reader(0);
-    let bucket_reader = chunk.reader(1);
-    let key_reader = chunk.reader(2);
-    let body_reader = chunk.reader(3);
-    let access_key_reader = chunk.reader(4);
-    let secret_key_reader = chunk.reader(5);
-    let region_reader = chunk.reader(6);
+    let endpoint_reader = unsafe { chunk.reader(0) };
+    let bucket_reader = unsafe { chunk.reader(1) };
+    let key_reader = unsafe { chunk.reader(2) };
+    let body_reader = unsafe { chunk.reader(3) };
+    let access_key_reader = unsafe { chunk.reader(4) };
+    let secret_key_reader = unsafe { chunk.reader(5) };
+    let region_reader = unsafe { chunk.reader(6) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let mut status_writer = StructVector::field_writer(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let endpoint = endpoint_reader.read_str(row as usize);
-        let bucket = bucket_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let body = body_reader.read_str(row as usize);
-        let access_key = access_key_reader.read_str(row as usize);
-        let secret_key = secret_key_reader.read_str(row as usize);
-        let region = region_reader.read_str(row as usize);
+        let endpoint = unsafe { endpoint_reader.read_str(row as usize) };
+        let bucket = unsafe { bucket_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
+        let body = unsafe { body_reader.read_str(row as usize) };
+        let access_key = unsafe { access_key_reader.read_str(row as usize) };
+        let secret_key = unsafe { secret_key_reader.read_str(row as usize) };
+        let region = unsafe { region_reader.read_str(row as usize) };
 
         let result = s3::s3_put(endpoint, bucket, key, body, access_key, secret_key, region);
 
-        unsafe { success_writer.write_bool(row as usize, result.success) };
-        write_varchar(body_vec, row, &result.body);
-        unsafe { status_writer.write_i32(row as usize, result.status) };
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
+        unsafe { sw.write_i32(row as usize, 2, result.status) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
     }
-}
+});
 
-/// s3_list(endpoint, bucket, prefix, access_key, secret_key, region) -> STRUCT(success, keys, message)
-unsafe extern "C" fn cb_s3_list(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// s3_list(endpoint, bucket, prefix, access_key, secret_key, region) -> STRUCT(success, keys, message)
+quack_rs::scalar_callback!(cb_s3_list, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let endpoint_reader = chunk.reader(0);
-    let bucket_reader = chunk.reader(1);
-    let prefix_reader = chunk.reader(2);
-    let access_key_reader = chunk.reader(3);
-    let secret_key_reader = chunk.reader(4);
-    let region_reader = chunk.reader(5);
+    let endpoint_reader = unsafe { chunk.reader(0) };
+    let bucket_reader = unsafe { chunk.reader(1) };
+    let prefix_reader = unsafe { chunk.reader(2) };
+    let access_key_reader = unsafe { chunk.reader(3) };
+    let secret_key_reader = unsafe { chunk.reader(4) };
+    let region_reader = unsafe { chunk.reader(5) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let keys_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
+    let keys_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let endpoint = endpoint_reader.read_str(row);
-        let bucket = bucket_reader.read_str(row);
-        let prefix = prefix_reader.read_str(row);
-        let access_key = access_key_reader.read_str(row);
-        let secret_key = secret_key_reader.read_str(row);
-        let region = region_reader.read_str(row);
+        let endpoint = unsafe { endpoint_reader.read_str(row) };
+        let bucket = unsafe { bucket_reader.read_str(row) };
+        let prefix = unsafe { prefix_reader.read_str(row) };
+        let access_key = unsafe { access_key_reader.read_str(row) };
+        let secret_key = unsafe { secret_key_reader.read_str(row) };
+        let region = unsafe { region_reader.read_str(row) };
 
         let result = s3::s3_list(endpoint, bucket, prefix, access_key, secret_key, region);
 
-        unsafe { success_writer.write_bool(row, result.success) };
-        write_string_list(keys_vec, row, &result.keys, &mut list_offset);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { write_string_list(keys_vec, row, &result.keys, &mut list_offset) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

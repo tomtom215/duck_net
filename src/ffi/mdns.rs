@@ -72,18 +72,19 @@ unsafe extern "C" fn mdns_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn mdns_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<MdnsBindData>::get_from_function(info) {
+// mdns_scan table scan callback
+quack_rs::table_scan_callback!(mdns_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<MdnsBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<MdnsInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<MdnsInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -93,20 +94,20 @@ unsafe extern "C" fn mdns_scan(info: duckdb_function_info, output: duckdb_data_c
         match mdns::discover(&bind_data.service_type, bind_data.timeout_secs) {
             Ok(svcs) => init_data.services = svcs,
             Err(e) => {
-                let fi = FunctionInfo::new(info);
+                let fi = unsafe { FunctionInfo::new(info) };
                 fi.set_error(&e);
-                duckdb_data_chunk_set_size(output, 0);
+                unsafe { duckdb_data_chunk_set_size(output, 0) };
                 return;
             }
         }
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut name_w = out_chunk.writer(0);
-    let mut host_w = out_chunk.writer(1);
-    let mut port_w = out_chunk.writer(2);
-    let ips_vec = duckdb_data_chunk_get_vector(output, 3);
-    let txt_vec = duckdb_data_chunk_get_vector(output, 4);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut name_w = unsafe { out_chunk.writer(0) };
+    let mut host_w = unsafe { out_chunk.writer(1) };
+    let mut port_w = unsafe { out_chunk.writer(2) };
+    let ips_vec = unsafe { duckdb_data_chunk_get_vector(output, 3) };
+    let txt_vec = unsafe { duckdb_data_chunk_get_vector(output, 4) };
 
     let mut count: usize = 0;
     let max_chunk = 2048;
@@ -116,19 +117,19 @@ unsafe extern "C" fn mdns_scan(info: duckdb_function_info, output: duckdb_data_c
     while init_data.idx < init_data.services.len() && count < max_chunk {
         let svc = &init_data.services[init_data.idx];
 
-        name_w.write_varchar(count, &svc.instance_name);
-        host_w.write_varchar(count, &svc.hostname);
-        port_w.write_i32(count, svc.port as i32);
+        unsafe { name_w.write_varchar(count, &svc.instance_name) };
+        unsafe { host_w.write_varchar(count, &svc.hostname) };
+        unsafe { port_w.write_i32(count, svc.port as i32) };
 
-        write_string_list(ips_vec, count, &svc.ips, &mut ips_list_offset);
-        write_string_list(txt_vec, count, &svc.txt, &mut txt_list_offset);
+        unsafe { write_string_list(ips_vec, count, &svc.ips, &mut ips_list_offset) };
+        unsafe { write_string_list(txt_vec, count, &svc.txt, &mut txt_list_offset) };
 
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count as idx_t);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count as idx_t) };
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     TableFunctionBuilder::new("mdns_discover")

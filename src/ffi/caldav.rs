@@ -57,18 +57,19 @@ unsafe extern "C" fn caldav_events_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn caldav_events_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<CalDavEventsBindData>::get_from_function(info) {
+// caldav_events_scan table scan callback
+quack_rs::table_scan_callback!(caldav_events_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<CalDavEventsBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<CalDavEventsInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<CalDavEventsInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -83,33 +84,33 @@ unsafe extern "C" fn caldav_events_scan(info: duckdb_function_info, output: duck
         ) {
             Ok(events) => init_data.events = events,
             Err(e) => {
-                let fi = FunctionInfo::new(info);
+                let fi = unsafe { FunctionInfo::new(info) };
                 fi.set_error(&e);
-                duckdb_data_chunk_set_size(output, 0);
+                unsafe { duckdb_data_chunk_set_size(output, 0) };
                 return;
             }
         }
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut href_w = out_chunk.writer(0);
-    let mut etag_w = out_chunk.writer(1);
-    let mut data_w = out_chunk.writer(2);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut href_w = unsafe { out_chunk.writer(0) };
+    let mut etag_w = unsafe { out_chunk.writer(1) };
+    let mut data_w = unsafe { out_chunk.writer(2) };
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.events.len() && count < max_chunk {
         let e = &init_data.events[init_data.idx];
-        href_w.write_varchar(count as usize, &e.href);
-        etag_w.write_varchar(count as usize, &e.etag);
-        data_w.write_varchar(count as usize, &e.data);
+        unsafe { href_w.write_varchar(count as usize, &e.href) };
+        unsafe { etag_w.write_varchar(count as usize, &e.etag) };
+        unsafe { data_w.write_varchar(count as usize, &e.data) };
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count) };
+});
 
 // ===== carddav_contacts table function =====
 
@@ -152,18 +153,19 @@ unsafe extern "C" fn carddav_contacts_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn carddav_contacts_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<CardDavContactsBindData>::get_from_function(info) {
+// carddav_contacts_scan table scan callback
+quack_rs::table_scan_callback!(carddav_contacts_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<CardDavContactsBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<CardDavContactsInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<CardDavContactsInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -173,33 +175,33 @@ unsafe extern "C" fn carddav_contacts_scan(info: duckdb_function_info, output: d
         match caldav::list_contacts(&bind_data.url, &bind_data.headers) {
             Ok(contacts) => init_data.contacts = contacts,
             Err(e) => {
-                let fi = FunctionInfo::new(info);
+                let fi = unsafe { FunctionInfo::new(info) };
                 fi.set_error(&e);
-                duckdb_data_chunk_set_size(output, 0);
+                unsafe { duckdb_data_chunk_set_size(output, 0) };
                 return;
             }
         }
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut href_w = out_chunk.writer(0);
-    let mut etag_w = out_chunk.writer(1);
-    let mut data_w = out_chunk.writer(2);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut href_w = unsafe { out_chunk.writer(0) };
+    let mut etag_w = unsafe { out_chunk.writer(1) };
+    let mut data_w = unsafe { out_chunk.writer(2) };
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.contacts.len() && count < max_chunk {
         let c = &init_data.contacts[init_data.idx];
-        href_w.write_varchar(count as usize, &c.href);
-        etag_w.write_varchar(count as usize, &c.etag);
-        data_w.write_varchar(count as usize, &c.data);
+        unsafe { href_w.write_varchar(count as usize, &c.href) };
+        unsafe { etag_w.write_varchar(count as usize, &c.etag) };
+        unsafe { data_w.write_varchar(count as usize, &c.data) };
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count) };
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

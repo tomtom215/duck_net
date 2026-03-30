@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::consul;
 
-use super::scalars::write_varchar;
 
 fn kv_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -16,150 +15,120 @@ fn kv_result_type() -> LogicalType {
     ])
 }
 
-/// consul_get(url, key, token) -> STRUCT(success, value, message)
-unsafe extern "C" fn cb_consul_get(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// consul_get(url, key, token) -> STRUCT(success, value, message)
+quack_rs::scalar_callback!(cb_consul_get, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
-    let token_reader = chunk.reader(2);
+    let url_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+    let token_reader = unsafe { chunk.reader(2) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let token = token_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
+        let token = unsafe { token_reader.read_str(row as usize) };
 
         let result = consul::consul_get(url, key, token);
 
-        unsafe { success_writer.write_bool(row as usize, result.success) };
-        write_varchar(value_vec, row, &result.value);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-/// consul_set(url, key, value, token) -> STRUCT(success, value, message)
-unsafe extern "C" fn cb_consul_set(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// consul_set(url, key, value, token) -> STRUCT(success, value, message)
+quack_rs::scalar_callback!(cb_consul_set, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
-    let value_reader = chunk.reader(2);
-    let token_reader = chunk.reader(3);
+    let url_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+    let value_reader = unsafe { chunk.reader(2) };
+    let token_reader = unsafe { chunk.reader(3) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let value_out_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let value = value_reader.read_str(row as usize);
-        let token = token_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
+        let value = unsafe { value_reader.read_str(row as usize) };
+        let token = unsafe { token_reader.read_str(row as usize) };
 
         let result = consul::consul_set(url, key, value, token);
 
-        unsafe { success_writer.write_bool(row as usize, result.success) };
-        write_varchar(value_out_vec, row, &result.value);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-/// consul_delete(url, key, token) -> STRUCT(success, value, message)
-unsafe extern "C" fn cb_consul_delete(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// consul_delete(url, key, token) -> STRUCT(success, value, message)
+quack_rs::scalar_callback!(cb_consul_delete, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
-    let token_reader = chunk.reader(2);
+    let url_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+    let token_reader = unsafe { chunk.reader(2) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let token = token_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
+        let token = unsafe { token_reader.read_str(row as usize) };
 
         let result = consul::consul_delete(url, key, token);
 
-        unsafe { success_writer.write_bool(row as usize, result.success) };
-        write_varchar(value_vec, row, &result.value);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-/// etcd_get(url, key) -> STRUCT(success, value, message)
-unsafe extern "C" fn cb_etcd_get(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// etcd_get(url, key) -> STRUCT(success, value, message)
+quack_rs::scalar_callback!(cb_etcd_get, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
+    let url_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
 
         let result = consul::etcd_get(url, key);
 
-        unsafe { success_writer.write_bool(row as usize, result.success) };
-        write_varchar(value_vec, row, &result.value);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-/// etcd_put(url, key, value) -> STRUCT(success, value, message)
-unsafe extern "C" fn cb_etcd_put(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// etcd_put(url, key, value) -> STRUCT(success, value, message)
+quack_rs::scalar_callback!(cb_etcd_put, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
-    let value_reader = chunk.reader(2);
+    let url_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+    let value_reader = unsafe { chunk.reader(2) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let value_out_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let value = value_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
+        let value = unsafe { value_reader.read_str(row as usize) };
 
         let result = consul::etcd_put(url, key, value);
 
-        unsafe { success_writer.write_bool(row as usize, result.success) };
-        write_varchar(value_out_vec, row, &result.value);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

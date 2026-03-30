@@ -6,8 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::snmp;
 
-use super::scalars::write_varchar;
-
 // ===== snmp_get scalar =====
 
 fn snmp_result_type() -> LogicalType {
@@ -18,41 +16,35 @@ fn snmp_result_type() -> LogicalType {
     ])
 }
 
-/// snmp_get(host, oid, community) -> STRUCT(oid, value, value_type)
-unsafe extern "C" fn cb_snmp_get(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// snmp_get(host, oid, community) -> STRUCT(oid, value, value_type)
+quack_rs::scalar_callback!(cb_snmp_get, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let oid_reader = chunk.reader(1);
-    let comm_reader = chunk.reader(2);
+    let host_reader = unsafe { chunk.reader(0) };
+    let oid_reader = unsafe { chunk.reader(1) };
+    let comm_reader = unsafe { chunk.reader(2) };
 
-    let oid_vec = duckdb_struct_vector_get_child(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
-    let type_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let oid = oid_reader.read_str(row as usize);
-        let community = comm_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let oid = unsafe { oid_reader.read_str(row as usize) };
+        let community = unsafe { comm_reader.read_str(row as usize) };
 
         match snmp::get(host, oid, community) {
             Ok(result) => {
-                write_varchar(oid_vec, row, &result.oid);
-                write_varchar(value_vec, row, &result.value);
-                write_varchar(type_vec, row, &result.value_type);
+                unsafe { sw.write_varchar(row as usize, 0, &result.oid) };
+                unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+                unsafe { sw.write_varchar(row as usize, 2, &result.value_type) };
             }
             Err(e) => {
-                write_varchar(oid_vec, row, oid);
-                write_varchar(value_vec, row, &format!("Error: {e}"));
-                write_varchar(type_vec, row, "ERROR");
+                unsafe { sw.write_varchar(row as usize, 0, oid) };
+                unsafe { sw.write_varchar(row as usize, 1, &format!("Error: {e}")) };
+                unsafe { sw.write_varchar(row as usize, 2, "ERROR") };
             }
         }
     }
-}
+});
 
 // ===== snmp_walk table function =====
 
@@ -108,18 +100,19 @@ unsafe extern "C" fn snmp_walk_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn snmp_walk_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<SnmpWalkBindData>::get_from_function(info) {
+// snmp_walk table scan callback
+quack_rs::table_scan_callback!(snmp_walk_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<SnmpWalkBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<SnmpWalkInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<SnmpWalkInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -136,31 +129,31 @@ unsafe extern "C" fn snmp_walk_scan(info: duckdb_function_info, output: duckdb_d
             Err(e) => {
                 let fi = FunctionInfo::new(info);
                 fi.set_error(&e);
-                duckdb_data_chunk_set_size(output, 0);
+                unsafe { duckdb_data_chunk_set_size(output, 0) };
                 return;
             }
         }
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut oid_w = out_chunk.writer(0);
-    let mut value_w = out_chunk.writer(1);
-    let mut type_w = out_chunk.writer(2);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut oid_w = unsafe { out_chunk.writer(0) };
+    let mut value_w = unsafe { out_chunk.writer(1) };
+    let mut type_w = unsafe { out_chunk.writer(2) };
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.results.len() && count < max_chunk {
         let r = &init_data.results[init_data.idx];
-        oid_w.write_varchar(count as usize, &r.oid);
-        value_w.write_varchar(count as usize, &r.value);
-        type_w.write_varchar(count as usize, &r.value_type);
+        unsafe { oid_w.write_varchar(count as usize, &r.oid) };
+        unsafe { value_w.write_varchar(count as usize, &r.value) };
+        unsafe { type_w.write_varchar(count as usize, &r.value_type) };
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count) };
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

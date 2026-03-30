@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::influxdb;
-
-use super::scalars::write_varchar;
 
 fn influx_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -16,96 +13,78 @@ fn influx_result_type() -> LogicalType {
     ])
 }
 
-/// influx_query(url, org, token, flux_query) -> STRUCT(success, body, message)
-unsafe extern "C" fn cb_influx_query(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// influx_query(url, org, token, flux_query) -> STRUCT(success, body, message)
+quack_rs::scalar_callback!(cb_influx_query, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let org_reader = chunk.reader(1);
-    let token_reader = chunk.reader(2);
-    let flux_query_reader = chunk.reader(3);
+    let url_reader = unsafe { chunk.reader(0) };
+    let org_reader = unsafe { chunk.reader(1) };
+    let token_reader = unsafe { chunk.reader(2) };
+    let flux_query_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let org = org_reader.read_str(row as usize);
-        let token = token_reader.read_str(row as usize);
-        let flux_query = flux_query_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let org = unsafe { org_reader.read_str(row as usize) };
+        let token = unsafe { token_reader.read_str(row as usize) };
+        let flux_query = unsafe { flux_query_reader.read_str(row as usize) };
 
         let result = influxdb::query(url, org, token, flux_query);
 
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(body_vec, row, &result.body);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-/// influx_write(url, org, bucket, token, line_protocol) -> STRUCT(success, body, message)
-unsafe extern "C" fn cb_influx_write(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// influx_write(url, org, bucket, token, line_protocol) -> STRUCT(success, body, message)
+quack_rs::scalar_callback!(cb_influx_write, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let org_reader = chunk.reader(1);
-    let bucket_reader = chunk.reader(2);
-    let token_reader = chunk.reader(3);
-    let line_protocol_reader = chunk.reader(4);
+    let url_reader = unsafe { chunk.reader(0) };
+    let org_reader = unsafe { chunk.reader(1) };
+    let bucket_reader = unsafe { chunk.reader(2) };
+    let token_reader = unsafe { chunk.reader(3) };
+    let line_protocol_reader = unsafe { chunk.reader(4) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let org = org_reader.read_str(row as usize);
-        let bucket = bucket_reader.read_str(row as usize);
-        let token = token_reader.read_str(row as usize);
-        let line_protocol = line_protocol_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let org = unsafe { org_reader.read_str(row as usize) };
+        let bucket = unsafe { bucket_reader.read_str(row as usize) };
+        let token = unsafe { token_reader.read_str(row as usize) };
+        let line_protocol = unsafe { line_protocol_reader.read_str(row as usize) };
 
         let result = influxdb::write(url, org, bucket, token, line_protocol);
 
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(body_vec, row, &result.body);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-/// influx_health(url) -> STRUCT(success, body, message)
-unsafe extern "C" fn cb_influx_health(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// influx_health(url) -> STRUCT(success, body, message)
+quack_rs::scalar_callback!(cb_influx_health, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let body_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
 
         let result = influxdb::health(url);
 
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(body_vec, row, &result.body);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // influx_query(url, org, token, flux_query)

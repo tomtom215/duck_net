@@ -6,30 +6,24 @@ use quack_rs::prelude::*;
 
 use crate::odata;
 
-use super::scalars::{
-    map_varchar_varchar, read_headers_map, response_type, write_response, write_varchar,
-};
+use super::scalars::{map_varchar_varchar, read_headers_map, response_type, write_response};
 
 // ===== odata_query scalar function =====
 
-/// odata_query(url, headers MAP) -> STRUCT (HTTP response)
-unsafe extern "C" fn cb_odata_query(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// odata_query(url, headers MAP) -> STRUCT (HTTP response)
+quack_rs::scalar_callback!(cb_odata_query, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let headers = read_headers_map(input, 1, row);
+        let url = unsafe { url_reader.read_str(row) };
+        let headers = unsafe { read_headers_map(input, 1, row) };
         let resp = odata::query(url, None, None, None, None, None, None, &headers);
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
 // ===== odata_paginate table function =====
 
@@ -100,18 +94,19 @@ unsafe extern "C" fn odata_paginate_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn odata_paginate_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<ODataPaginateBindData>::get_from_function(info) {
+// odata_paginate_scan table scan callback
+quack_rs::table_scan_callback!(odata_paginate_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<ODataPaginateBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<ODataPaginateInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<ODataPaginateInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -128,34 +123,34 @@ unsafe extern "C" fn odata_paginate_scan(info: duckdb_function_info, output: duc
         bind_data.max_pages,
     ) {
         Some((page_num, resp)) => {
-            let out_chunk = DataChunk::from_raw(output);
-            let mut page_w = out_chunk.writer(0);
-            let mut status_w = out_chunk.writer(1);
-            let headers_vec = duckdb_data_chunk_get_vector(output, 2);
-            let mut body_w = out_chunk.writer(3);
+            let out_chunk = unsafe { DataChunk::from_raw(output) };
+            let mut page_w = unsafe { out_chunk.writer(0) };
+            let mut status_w = unsafe { out_chunk.writer(1) };
+            let headers_vec = unsafe { duckdb_data_chunk_get_vector(output, 2) };
+            let mut body_w = unsafe { out_chunk.writer(3) };
 
-            page_w.write_i32(0, page_num as i32);
-            status_w.write_i32(0, resp.status as i32);
+            unsafe { page_w.write_i32(0, page_num as i32) };
+            unsafe { status_w.write_i32(0, resp.status as i32) };
 
             let n = resp.headers.len() as idx_t;
-            MapVector::reserve(headers_vec, n as usize);
-            let keys = MapVector::keys(headers_vec);
-            let vals = MapVector::values(headers_vec);
+            unsafe { MapVector::reserve(headers_vec, n as usize) };
+            let mut key_w = unsafe { MapVector::key_writer(headers_vec) };
+            let mut val_w = unsafe { MapVector::value_writer(headers_vec) };
             for (i, (k, v)) in resp.headers.iter().enumerate() {
-                write_varchar(keys, i, k);
-                write_varchar(vals, i, v);
+                unsafe { key_w.write_varchar(i, k) };
+                unsafe { val_w.write_varchar(i, v) };
             }
-            MapVector::set_entry(headers_vec, 0, 0, n);
-            MapVector::set_size(headers_vec, n as usize);
+            unsafe { MapVector::set_entry(headers_vec, 0, 0, n) };
+            unsafe { MapVector::set_size(headers_vec, n as usize) };
 
-            body_w.write_varchar(0, &resp.body);
-            duckdb_data_chunk_set_size(output, 1);
+            unsafe { body_w.write_varchar(0, &resp.body) };
+            unsafe { duckdb_data_chunk_set_size(output, 1) };
         }
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
         }
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

@@ -6,52 +6,44 @@ use quack_rs::prelude::*;
 
 use crate::whois;
 
-/// whois_lookup(domain) -> VARCHAR (raw WHOIS text)
-unsafe extern "C" fn cb_whois_lookup(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// whois_lookup(domain) -> VARCHAR (raw WHOIS text)
+quack_rs::scalar_callback!(cb_whois_lookup, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let domain_reader = chunk.reader(0);
-    let mut writer = VectorWriter::from_vector(output);
+    let domain_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let domain = domain_reader.read_str(row);
+        let domain = unsafe { domain_reader.read_str(row) };
         let result = whois::lookup(domain).unwrap_or_else(|e| format!("WHOIS error: {e}"));
-        writer.write_varchar(row, &result);
+        unsafe { writer.write_varchar(row, &result) };
     }
-}
+});
 
-/// whois_query(domain) -> STRUCT(registrar, creation_date, expiration_date, updated_date, raw)
-unsafe extern "C" fn cb_whois_query(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// whois_query(domain) -> STRUCT(registrar, creation_date, expiration_date, updated_date, raw)
+quack_rs::scalar_callback!(cb_whois_query, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let domain_reader = chunk.reader(0);
+    let domain_reader = unsafe { chunk.reader(0) };
 
-    let mut registrar_w = StructVector::field_writer(output, 0);
-    let mut creation_w = StructVector::field_writer(output, 1);
-    let mut expiration_w = StructVector::field_writer(output, 2);
-    let mut updated_w = StructVector::field_writer(output, 3);
-    let mut raw_w = StructVector::field_writer(output, 4);
+    let mut registrar_w = unsafe { StructVector::field_writer(output, 0) };
+    let mut creation_w = unsafe { StructVector::field_writer(output, 1) };
+    let mut expiration_w = unsafe { StructVector::field_writer(output, 2) };
+    let mut updated_w = unsafe { StructVector::field_writer(output, 3) };
+    let mut raw_w = unsafe { StructVector::field_writer(output, 4) };
 
     for row in 0..row_count {
-        let domain = domain_reader.read_str(row);
+        let domain = unsafe { domain_reader.read_str(row) };
         let raw = whois::lookup(domain).unwrap_or_else(|e| format!("WHOIS error: {e}"));
         let info = whois::parse_info(&raw);
 
-        registrar_w.write_varchar(row, &info.registrar);
-        creation_w.write_varchar(row, &info.creation_date);
-        expiration_w.write_varchar(row, &info.expiration_date);
-        updated_w.write_varchar(row, &info.updated_date);
-        raw_w.write_varchar(row, &info.raw);
+        unsafe { registrar_w.write_varchar(row, &info.registrar) };
+        unsafe { creation_w.write_varchar(row, &info.creation_date) };
+        unsafe { expiration_w.write_varchar(row, &info.expiration_date) };
+        unsafe { updated_w.write_varchar(row, &info.updated_date) };
+        unsafe { raw_w.write_varchar(row, &info.raw) };
     }
-}
+});
 
 fn whois_query_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

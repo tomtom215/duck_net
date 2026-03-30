@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::mqtt;
 
-use super::scalars::write_varchar;
 
 fn mqtt_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -15,61 +14,51 @@ fn mqtt_result_type() -> LogicalType {
     ])
 }
 
-/// mqtt_publish(broker, topic, payload) -> STRUCT(success, message)
-unsafe extern "C" fn cb_mqtt_publish(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// mqtt_publish(broker, topic, payload) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_mqtt_publish, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let broker_reader = chunk.reader(0);
-    let topic_reader = chunk.reader(1);
-    let payload_reader = chunk.reader(2);
+    let broker_reader = unsafe { chunk.reader(0) };
+    let topic_reader = unsafe { chunk.reader(1) };
+    let payload_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let broker = broker_reader.read_str(row);
-        let topic = topic_reader.read_str(row);
-        let payload = payload_reader.read_str(row);
+        let broker = unsafe { broker_reader.read_str(row) };
+        let topic = unsafe { topic_reader.read_str(row) };
+        let payload = unsafe { payload_reader.read_str(row) };
 
         let result = mqtt::publish(broker, topic, payload);
 
-        success_w.write_bool(row, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
-}
+});
 
-/// mqtt_publish_qos1(broker, topic, payload, retain) -> STRUCT(success, message)
-unsafe extern "C" fn cb_mqtt_publish_qos1(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// mqtt_publish_qos1(broker, topic, payload, retain) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_mqtt_publish_qos1, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let broker_reader = chunk.reader(0);
-    let topic_reader = chunk.reader(1);
-    let payload_reader = chunk.reader(2);
-    let retain_reader = chunk.reader(3);
+    let broker_reader = unsafe { chunk.reader(0) };
+    let topic_reader = unsafe { chunk.reader(1) };
+    let payload_reader = unsafe { chunk.reader(2) };
+    let retain_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let broker = broker_reader.read_str(row);
-        let topic = topic_reader.read_str(row);
-        let payload = payload_reader.read_str(row);
-        let retain = retain_reader.read_bool(row);
+        let broker = unsafe { broker_reader.read_str(row) };
+        let topic = unsafe { topic_reader.read_str(row) };
+        let payload = unsafe { payload_reader.read_str(row) };
+        let retain = unsafe { retain_reader.read_bool(row) };
 
         let result = mqtt::publish_qos1(broker, topic, payload, retain);
 
-        success_w.write_bool(row, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
