@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::nats;
 
-use super::scalars::StructWriter;
 
 fn nats_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

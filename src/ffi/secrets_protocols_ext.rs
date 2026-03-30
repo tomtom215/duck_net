@@ -9,7 +9,6 @@ use quack_rs::prelude::*;
 
 use crate::secrets;
 
-use super::scalars::StructWriter;
 
 // ---------------------------------------------------------------------------
 // Secrets-Aware Redis Overload

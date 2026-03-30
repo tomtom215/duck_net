@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::tls_inspect;
 
 use super::dns::write_string_list;
-use super::scalars::StructWriter;
 
 fn tls_cert_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::sip;
 
-use super::scalars::StructWriter;
 
 fn sip_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

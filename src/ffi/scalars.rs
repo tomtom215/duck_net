@@ -79,65 +79,8 @@ pub(crate) unsafe fn write_varchar(vec: duckdb_vector, row: usize, s: &str) {
     w.write_varchar(row, s);
 }
 
-/// A convenience wrapper over a STRUCT output vector that holds one `VectorWriter`
-/// per child field. This eliminates the need for separate `StructVector::field_writer`
-/// / `duckdb_struct_vector_get_child` / `write_varchar` calls.
-pub(crate) struct StructWriter {
-    writers: Vec<VectorWriter>,
-}
-
-impl StructWriter {
-    /// Create a `StructWriter` for a STRUCT vector with `field_count` child fields.
-    ///
-    /// # Safety
-    /// `output` must be a valid DuckDB STRUCT vector with at least `field_count` children.
-    pub unsafe fn new(output: duckdb_vector, field_count: usize) -> Self {
-        let writers = (0..field_count)
-            .map(|i| StructVector::field_writer(output, i))
-            .collect();
-        Self { writers }
-    }
-
-    /// Write a boolean value to the given field at the given row.
-    ///
-    /// # Safety
-    /// Row index must be within the vector's allocated capacity.
-    pub unsafe fn write_bool(&mut self, row: usize, field: usize, val: bool) {
-        self.writers[field].write_bool(row, val);
-    }
-
-    /// Write an i32 value to the given field at the given row.
-    ///
-    /// # Safety
-    /// Row index must be within the vector's allocated capacity.
-    pub unsafe fn write_i32(&mut self, row: usize, field: usize, val: i32) {
-        self.writers[field].write_i32(row, val);
-    }
-
-    /// Write an i64 value to the given field at the given row.
-    ///
-    /// # Safety
-    /// Row index must be within the vector's allocated capacity.
-    pub unsafe fn write_i64(&mut self, row: usize, field: usize, val: i64) {
-        self.writers[field].write_i64(row, val);
-    }
-
-    /// Write a varchar (string) value to the given field at the given row.
-    ///
-    /// # Safety
-    /// Row index must be within the vector's allocated capacity.
-    pub unsafe fn write_varchar(&mut self, row: usize, field: usize, val: &str) {
-        self.writers[field].write_varchar(row, val);
-    }
-
-    /// Write an f64 value to the given field at the given row.
-    ///
-    /// # Safety
-    /// Row index must be within the vector's allocated capacity.
-    pub unsafe fn write_f64(&mut self, row: usize, field: usize, val: f64) {
-        self.writers[field].write_f64(row, val);
-    }
-}
+// StructWriter is provided by quack_rs::prelude::StructWriter (from quack-rs v0.10.0).
+// All files should import it from the prelude, not from this module.
 
 /// Write an HttpResponse into the output STRUCT vector at the given row.
 /// `map_offset` tracks the cumulative offset into the MAP child vector across rows.

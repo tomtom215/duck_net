@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::radius;
 
-use super::scalars::StructWriter;
 
 fn radius_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::imap;
 use crate::imap_write;
 
-use super::scalars::StructWriter;
 
 // ===== imap_list table function =====
 

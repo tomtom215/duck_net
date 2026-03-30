@@ -8,7 +8,6 @@ use quack_rs::prelude::*;
 
 use crate::ping as ping_mod;
 
-use super::scalars::StructWriter;
 
 fn ping_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

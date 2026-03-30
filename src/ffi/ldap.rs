@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::ldap;
 use crate::ldap_write;
 
-use super::scalars::StructWriter;
 
 // ===== ldap_search table function =====
 

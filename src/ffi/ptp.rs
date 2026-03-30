@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::ptp;
 
-use super::scalars::StructWriter;
 
 fn sntp_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

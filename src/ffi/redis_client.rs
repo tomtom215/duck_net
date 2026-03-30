@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::redis_client;
 
 use super::dns::write_string_list;
-use super::scalars::StructWriter;
 
 fn redis_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

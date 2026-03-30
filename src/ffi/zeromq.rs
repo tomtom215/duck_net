@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::zeromq;
 
-use super::scalars::StructWriter;
 
 fn zmq_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[

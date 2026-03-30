@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::smtp::{self, SmtpConfig};
 
-use super::scalars::StructWriter;
 
 /// STRUCT(success BOOLEAN, message VARCHAR)
 fn smtp_result_type() -> LogicalType {

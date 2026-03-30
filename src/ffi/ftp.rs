@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::ftp;
 use crate::sftp;
 
-use super::scalars::StructWriter;
 
 // ===== Return Type Helpers =====
 

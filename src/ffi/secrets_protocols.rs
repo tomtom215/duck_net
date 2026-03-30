@@ -10,7 +10,7 @@ use quack_rs::prelude::*;
 
 use crate::security;
 
-use super::scalars::{write_varchar, StructWriter};
+use super::scalars::write_varchar;
 
 // ---------------------------------------------------------------------------
 // Secrets-Aware SSH Overloads
