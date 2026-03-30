@@ -57,7 +57,12 @@ An HTTPS→HTTP downgrade in a redirect chain emits an `HTTP_REDIRECT_HTTPS_TO_H
 
 ## DNS Rebinding Prevention
 
-When SSRF protection is enabled and a hostname cannot be resolved, the connection is **blocked** rather than retried. This prevents DNS rebinding attacks where an attacker's DNS server returns a private IP on the second resolution.
+DNS rebinding is a TOCTOU (time-of-check/time-of-use) attack: a DNS server returns a public IP for the validation step, then switches to a private IP for the actual connection. duck_net closes this window with `SsrfSafeResolver`:
+
+- Before this fix, `validate_no_ssrf_host()` resolved the hostname once for validation, then ureq resolved it **again** independently for the connection — leaving a window where a rebinding attack could serve a different address.
+- `SsrfSafeResolver` implements ureq's `Resolver` trait and runs inside ureq's connection pipeline. It resolves the hostname once, validates every returned address against the private-IP blocklist, and only then passes the resolved `SocketAddr` set to the TCP connector — making resolution and validation **one atomic step**.
+- If any resolved address is private or reserved, the entire request is blocked before the TCP handshake, and ureq performs no second DNS lookup.
+- When SSRF protection is disabled (via `duck_net_set_ssrf_protection(false)`), `SsrfSafeResolver` delegates transparently to `DefaultResolver` so normal resolution proceeds.
 
 ## CI/Airgapped Systems
 

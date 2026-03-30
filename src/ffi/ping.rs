@@ -103,14 +103,14 @@ quack_rs::table_scan_callback!(traceroute_scan, |info, output| {
     let bind_data = match unsafe { FfiBindData::<TracerouteBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
     let init_data = match unsafe { FfiInitData::<TracerouteInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
@@ -122,7 +122,7 @@ quack_rs::table_scan_callback!(traceroute_scan, |info, output| {
             Err(e) => {
                 let fi = FunctionInfo::new(info);
                 fi.set_error(&e);
-                unsafe { duckdb_data_chunk_set_size(output, 0) };
+                unsafe { DataChunk::from_raw(output).set_size(0) };
                 return;
             }
         }

@@ -88,14 +88,14 @@ quack_rs::table_scan_callback!(imap_list_scan, |info, output| {
     let bind_data = match unsafe { FfiBindData::<ImapListBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
     let init_data = match unsafe { FfiInitData::<ImapListInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
@@ -113,7 +113,7 @@ quack_rs::table_scan_callback!(imap_list_scan, |info, output| {
         if !result.success {
             let fi = unsafe { FunctionInfo::new(info) };
             fi.set_error(&result.message);
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
         init_data.messages = result.messages;
@@ -142,7 +142,7 @@ quack_rs::table_scan_callback!(imap_list_scan, |info, output| {
         count += 1;
     }
 
-    unsafe { duckdb_data_chunk_set_size(output, count) };
+    unsafe { out_chunk.set_size(count as usize) };
 });
 
 // ===== imap_fetch scalar =====

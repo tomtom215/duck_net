@@ -67,14 +67,14 @@ quack_rs::table_scan_callback!(ldap_search_scan, |info, output| {
     let bind_data = match unsafe { FfiBindData::<LdapSearchBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
     let init_data = match unsafe { FfiInitData::<LdapSearchInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
@@ -91,7 +91,7 @@ quack_rs::table_scan_callback!(ldap_search_scan, |info, output| {
         if !result.success {
             let fi = FunctionInfo::new(info);
             fi.set_error(&result.message);
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
         init_data.entries = result.entries;
@@ -134,7 +134,7 @@ quack_rs::table_scan_callback!(ldap_search_scan, |info, output| {
         init_data.idx += 1;
     }
 
-    unsafe { duckdb_data_chunk_set_size(output, count) };
+    unsafe { out_chunk.set_size(count as usize) };
 });
 
 // ===== ldap_bind scalar =====

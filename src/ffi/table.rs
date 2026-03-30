@@ -99,14 +99,14 @@ quack_rs::table_scan_callback!(paginate_scan, |info, output| {
     let bind_data = match unsafe { FfiBindData::<PaginateBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
     let init_data = match unsafe { FfiInitData::<PaginateInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
@@ -151,7 +151,7 @@ quack_rs::table_scan_callback!(paginate_scan, |info, output| {
             unsafe { chunk.set_size(1) };
         }
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
         }
     }
 });
