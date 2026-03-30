@@ -65,6 +65,7 @@ getrandom = "0.3"
 
 # Secure memory zeroization (CWE-316)
 zeroize = "1"
+quick-xml = "0.37"
 
 [profile.release]
 opt-level = 3

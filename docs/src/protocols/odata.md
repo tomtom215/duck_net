@@ -6,9 +6,10 @@ duck_net supports OData queries with automatic pagination through a scalar funct
 
 | Function | Parameters | Returns |
 |----------|-----------|---------|
-| `odata_query` | `(url)` | STRUCT (status, reason, headers, body) |
+| `odata_query` | `(url, headers MAP)` | STRUCT (status, reason, headers, body) |
 | `odata_paginate` | `(url)` with named params | Table: page, status, headers, body |
 | `odata_extract_count` | `(body VARCHAR)` | BIGINT or NULL |
+| `odata_metadata` | `(url, authorization :=)` | Table: entity_set, entity_type, property_name, property_type, nullable, is_key, is_navigation |
 
 ## Single Query
 
@@ -75,6 +76,63 @@ SELECT odata_extract_count(
 ```
 
 `odata_extract_count` returns `NULL` (not an error) when the count field is absent from the response — for example when `$count=true` / `$inlinecount=allpages` was not included in the request.
+
+## Schema Introspection
+
+`odata_metadata(url)` fetches and parses the `$metadata` CSDL document from an OData service into a flat, queryable table. It works with both OData v4 and v2/v3 CSDL formats.
+
+```sql
+-- Discover all entity sets, types, and properties
+SELECT *
+FROM odata_metadata('https://services.odata.org/V4/Northwind/Northwind.svc/$metadata');
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `entity_set` | VARCHAR | Entity set name from the service container (`NULL` for complex types with no direct set mapping) |
+| `entity_type` | VARCHAR | Entity or complex type name |
+| `property_name` | VARCHAR | Property name |
+| `property_type` | VARCHAR | OData type string, e.g. `Edm.String`, `Edm.Int32`, or navigation target type |
+| `nullable` | BOOLEAN | Whether the property accepts NULL (OData default: `true`) |
+| `is_key` | BOOLEAN | Whether this property is part of the entity key |
+| `is_navigation` | BOOLEAN | Whether this is a `NavigationProperty` rather than a scalar property |
+
+**Common introspection queries:**
+
+```sql
+-- List all available entity sets and their key properties
+SELECT entity_set, property_name, property_type
+FROM odata_metadata('https://api.example.com/odata/$metadata')
+WHERE is_key = true
+ORDER BY entity_set;
+
+-- Find all required (non-nullable, non-key) fields for a specific entity
+SELECT property_name, property_type
+FROM odata_metadata('https://api.example.com/odata/$metadata')
+WHERE entity_set = 'Orders'
+  AND nullable = false
+  AND is_key = false;
+
+-- Explore navigation properties (related entities)
+SELECT entity_type, property_name, property_type
+FROM odata_metadata('https://api.example.com/odata/$metadata')
+WHERE is_navigation = true
+ORDER BY entity_type;
+```
+
+**Authenticated endpoints** — pass a Bearer token via the `authorization` named parameter:
+
+```sql
+SELECT *
+FROM odata_metadata(
+    'https://api.example.com/odata/$metadata',
+    authorization := http_bearer_auth('my-token')
+);
+```
+
+The `authorization` value is sent as-is in the `Authorization` HTTP header. Use `http_basic_auth(user, pass)` or `http_bearer_auth(token)` to construct the correct format.
+
+> `odata_metadata` fetches CSDL XML and parses `EntityType`, `ComplexType`, `Property`, `NavigationProperty`, and `EntitySet` declarations. It does not evaluate `$metadata` annotations or function/action imports.
 
 ## OData v2 JSON Services
 

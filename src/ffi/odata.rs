@@ -5,6 +5,7 @@ use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::odata;
+use crate::metadata;
 
 use super::scalars::{map_varchar_varchar, read_headers_map, response_type, write_response};
 
@@ -196,6 +197,124 @@ quack_rs::table_scan_callback!(odata_paginate_scan, |info, output| {
     }
 });
 
+// ===== odata_metadata table function =====
+
+struct ODataMetadataBindData {
+    url: String,
+    authorization: Option<String>,
+}
+
+struct ODataMetadataInitData {
+    rows: Vec<metadata::MetadataRow>,
+    idx: usize,
+}
+
+unsafe extern "C" fn odata_metadata_bind(info: duckdb_bind_info) {
+    let bind = BindInfo::new(info);
+
+    let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
+
+    let auth_val = bind.get_named_parameter_value("authorization");
+    let authorization = if auth_val.is_null() {
+        None
+    } else {
+        auth_val.as_str().ok()
+    };
+
+    bind.add_result_column("entity_set",     TypeId::Varchar);
+    bind.add_result_column("entity_type",    TypeId::Varchar);
+    bind.add_result_column("property_name",  TypeId::Varchar);
+    bind.add_result_column("property_type",  TypeId::Varchar);
+    bind.add_result_column("nullable",       TypeId::Boolean);
+    bind.add_result_column("is_key",         TypeId::Boolean);
+    bind.add_result_column("is_navigation",  TypeId::Boolean);
+
+    FfiBindData::<ODataMetadataBindData>::set(
+        info,
+        ODataMetadataBindData { url, authorization },
+    );
+}
+
+unsafe extern "C" fn odata_metadata_init(info: duckdb_init_info) {
+    let bind_data = match unsafe { FfiBindData::<ODataMetadataBindData>::get_from_init(info) } {
+        Some(d) => d,
+        None => {
+            FfiInitData::<ODataMetadataInitData>::set(
+                info,
+                ODataMetadataInitData { rows: vec![], idx: 0 },
+            );
+            return;
+        }
+    };
+
+    let mut headers: Vec<(String, String)> = Vec::new();
+    if let Some(auth) = &bind_data.authorization {
+        headers.push(("Authorization".into(), auth.clone()));
+    }
+
+    let rows = match metadata::fetch_metadata(&bind_data.url, &headers) {
+        Ok(r) => r,
+        Err(e) => {
+            let init = InitInfo::new(info);
+            init.set_error(&e);
+            vec![]
+        }
+    };
+
+    FfiInitData::<ODataMetadataInitData>::set(
+        info,
+        ODataMetadataInitData { rows, idx: 0 },
+    );
+}
+
+quack_rs::table_scan_callback!(odata_metadata_scan, |info, output| {
+    let init_data = match unsafe { FfiInitData::<ODataMetadataInitData>::get_mut(info) } {
+        Some(d) => d,
+        None => {
+            unsafe { DataChunk::from_raw(output).set_size(0) };
+            return;
+        }
+    };
+
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut set_w  = unsafe { out_chunk.writer(0) };
+    let mut type_w = unsafe { out_chunk.writer(1) };
+    let mut prop_w = unsafe { out_chunk.writer(2) };
+    let mut ptype_w = unsafe { out_chunk.writer(3) };
+    let mut null_w = unsafe { out_chunk.writer(4) };
+    let mut key_w  = unsafe { out_chunk.writer(5) };
+    let mut nav_w  = unsafe { out_chunk.writer(6) };
+
+    let max_chunk: usize = 2048;
+    let mut count: usize = 0;
+
+    while init_data.idx < init_data.rows.len() && count < max_chunk {
+        let row = &init_data.rows[init_data.idx];
+        if let Some(ref es) = row.entity_set {
+            unsafe { set_w.write_varchar(count, es) };
+        } else {
+            // NULL for entity_set — write empty and mark null via validity
+            let set_vec = unsafe { duckdb_data_chunk_get_vector(output, 0) };
+            unsafe { duckdb_vector_ensure_validity_writable(set_vec) };
+            let validity = unsafe { duckdb_vector_get_validity(set_vec) };
+            if !validity.is_null() {
+                unsafe { duckdb_validity_set_row_invalid(validity, count as u64) };
+            }
+        }
+        unsafe { type_w.write_varchar(count, &row.entity_type) };
+        unsafe { prop_w.write_varchar(count, &row.property_name) };
+        unsafe { ptype_w.write_varchar(count, &row.property_type) };
+        unsafe { null_w.write_bool(count, row.nullable) };
+        unsafe { key_w.write_bool(count, row.is_key) };
+        unsafe { nav_w.write_bool(count, row.is_navigation) };
+
+        init_data.idx += 1;
+        count += 1;
+    }
+
+    unsafe { out_chunk.set_size(count) };
+});
+
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
@@ -216,6 +335,15 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(response_type())
         .function(cb_odata_query)
         .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // odata_metadata(url, authorization :=) -> TABLE
+    TableFunctionBuilder::new("odata_metadata")
+        .param(v)
+        .named_param("authorization", v)
+        .bind(odata_metadata_bind)
+        .init(odata_metadata_init)
+        .scan(odata_metadata_scan)
         .register(con)?;
 
     // odata_paginate table function
