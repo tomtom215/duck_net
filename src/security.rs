@@ -45,16 +45,47 @@ fn is_private_ip(ip: &IpAddr) -> bool {
             // 192.0.0.0/24 (IETF)
         }
         IpAddr::V6(v6) => {
+            let segs = v6.segments();
             v6.is_loopback()     // ::1
                 || v6.is_unspecified() // ::
                 // Unique local addresses (fc00::/7)
-                || (v6.segments()[0] & 0xFE00) == 0xFC00
+                || (segs[0] & 0xFE00) == 0xFC00
                 // Link-local (fe80::/10)
-                || (v6.segments()[0] & 0xFFC0) == 0xFE80
-                // IPv4-mapped addresses: check the embedded IPv4
+                || (segs[0] & 0xFFC0) == 0xFE80
+                // Multicast (ff00::/8)
+                || (segs[0] & 0xFF00) == 0xFF00
+                // Teredo tunneling (2001::/32) – RFC 4380
+                || (segs[0] == 0x2001 && segs[1] == 0x0000)
+                // 6to4 (2002::/16) – RFC 3056: embedded IPv4 may be private
+                || (segs[0] == 0x2002 && {
+                    let embedded = std::net::Ipv4Addr::new(
+                        (segs[1] >> 8) as u8,
+                        (segs[1] & 0xFF) as u8,
+                        (segs[2] >> 8) as u8,
+                        (segs[2] & 0xFF) as u8,
+                    );
+                    is_private_ip(&IpAddr::V4(embedded))
+                })
+                // NAT64 well-known prefix (64:ff9b::/96) – RFC 6052
+                || (segs[0] == 0x0064
+                    && segs[1] == 0xFF9B
+                    && segs[2] == 0
+                    && segs[3] == 0
+                    && segs[4] == 0
+                    && segs[5] == 0)
+                // IPv6 documentation (2001:db8::/32) – RFC 3849
+                || (segs[0] == 0x2001 && segs[1] == 0x0DB8)
+                // IPv4-mapped addresses (::ffff:0:0/96): check the embedded IPv4
                 || v6.to_ipv4_mapped().is_some_and(|v4| {
                     is_private_ip(&IpAddr::V4(v4))
                 })
+                // IPv4-translated addresses (::ffff:0:0:0/96) – RFC 6145
+                || (segs[0] == 0
+                    && segs[1] == 0
+                    && segs[2] == 0
+                    && segs[3] == 0
+                    && segs[4] == 0xFFFF
+                    && segs[5] == 0)
         }
     }
 }
@@ -458,6 +489,82 @@ fn random_bytes_vec(n: usize) -> Vec<u8> {
     getrandom::fill(&mut buf)
         .expect("OS entropy source unavailable — cannot generate secure random bytes");
     buf
+}
+
+// ---------------------------------------------------------------------------
+// HTTP Header Injection Prevention (CWE-113)
+// ---------------------------------------------------------------------------
+
+/// Validate an HTTP header name against RFC 7230 §3.2 token rules.
+///
+/// Header names must be non-empty, at most 256 bytes, and contain only
+/// `!#$%&'*+-.^_\`|~` and alphanumeric characters. CRLF and spaces are
+/// rejected to prevent header injection.
+pub fn validate_http_header_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("HTTP header name must not be empty".to_string());
+    }
+    if name.len() > 256 {
+        return Err("HTTP header name too long (max 256 bytes)".to_string());
+    }
+    for ch in name.chars() {
+        if !is_tchar(ch) {
+            return Err(format!(
+                "HTTP header name contains invalid character: {:?} (RFC 7230 token required)",
+                ch
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate an HTTP header value for CRLF injection (CWE-113).
+///
+/// Rejects values containing `\r`, `\n`, or `\0` which could inject
+/// additional HTTP headers or responses into a connection.
+pub fn validate_http_header_value(value: &str) -> Result<(), String> {
+    if value.len() > 8192 {
+        return Err("HTTP header value too long (max 8192 bytes)".to_string());
+    }
+    for (i, ch) in value.chars().enumerate() {
+        if ch == '\r' || ch == '\n' || ch == '\0' {
+            return Err(format!(
+                "HTTP header value contains disallowed control character at byte {}: {:?}. \
+                 CRLF injection in headers is blocked (CWE-113).",
+                i, ch
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate all headers in a list for name and value safety.
+pub fn validate_headers(headers: &[(String, String)]) -> Result<(), String> {
+    for (name, value) in headers {
+        validate_http_header_name(name)?;
+        validate_http_header_value(value)?;
+    }
+    Ok(())
+}
+
+/// RFC 7230 §3.2.6 token character: any VCHAR except delimiters.
+fn is_tchar(c: char) -> bool {
+    matches!(c,
+        '!' | '#' | '$' | '%' | '&' | '\'' | '*' | '+' | '-' | '.' |
+        '^' | '_' | '`' | '|' | '~' |
+        'A'..='Z' | 'a'..='z' | '0'..='9'
+    )
+}
+
+/// Check if a URL uses plain HTTP (not HTTPS).
+pub fn is_plaintext_http(url: &str) -> bool {
+    url.trim().to_ascii_lowercase().starts_with("http://")
+}
+
+/// Check if a URL uses HTTPS.
+#[allow(dead_code)]
+pub fn is_secure_https(url: &str) -> bool {
+    url.trim().to_ascii_lowercase().starts_with("https://")
 }
 
 // ---------------------------------------------------------------------------

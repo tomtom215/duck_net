@@ -235,3 +235,103 @@ pub fn warn_persistent_secret_unencrypted() {
             .to_string(),
     });
 }
+
+/// Warn when an S3 endpoint uses plain HTTP instead of HTTPS.
+///
+/// S3 credentials (SigV4 signature) and data travel in cleartext over HTTP.
+/// An attacker with network access can intercept requests and replay signatures
+/// within the 15-minute SigV4 validity window (CWE-319).
+pub fn warn_s3_over_http(endpoint: &str) {
+    warn(SecurityWarning {
+        code: "S3_OVER_HTTP",
+        cwe: "CWE-319",
+        severity: Severity::High,
+        protocol: "s3",
+        message: format!(
+            "Security warning: S3 endpoint '{}' uses plain HTTP. \
+             AWS SigV4 signatures and data travel unencrypted. \
+             Use an https:// endpoint for all production S3 workloads. \
+             Suppress with: SELECT duck_net_set_security_warnings(false);",
+            endpoint
+        ),
+    });
+}
+
+/// Warn when an HTTP redirect downgrades from HTTPS to HTTP.
+///
+/// Credentials sent with the original HTTPS request (e.g., Authorization
+/// headers) are NOT automatically stripped on redirect in many HTTP clients.
+/// Even if stripped, the user is now communicating over an unencrypted
+/// channel (CWE-319 / CWE-601).
+pub fn warn_http_redirect_downgrade() {
+    warn(SecurityWarning {
+        code: "HTTP_REDIRECT_HTTPS_TO_HTTP",
+        cwe: "CWE-319",
+        severity: Severity::High,
+        protocol: "http",
+        message: "Security warning: HTTP redirect from HTTPS to HTTP detected. \
+                  Subsequent requests and any credentials sent with them will \
+                  travel over an unencrypted connection. Follow the redirect \
+                  only if the destination is trusted. \
+                  Suppress with: SELECT duck_net_set_security_warnings(false);"
+            .to_string(),
+    });
+}
+
+/// Warn when `duck_net_secret()` is called to retrieve a raw credential value.
+///
+/// Returning a raw credential as a SQL value means it can appear in query
+/// results, logs, or DuckDB's query history (CWE-312 / CWE-532).
+pub fn warn_secret_value_exposed(secret_name: &str) {
+    warn(SecurityWarning {
+        code: "SECRET_VALUE_EXPOSED",
+        cwe: "CWE-312",
+        severity: Severity::High,
+        protocol: "secrets",
+        message: format!(
+            "Security warning: duck_net_secret('{secret_name}', ...) returned a raw \
+             credential value as a SQL result. This value may appear in query logs, \
+             DuckDB's query history, or query result exports. Prefer passing the \
+             secret name directly to protocol functions (e.g., http_get_secret) \
+             rather than extracting raw values. \
+             Suppress with: SELECT duck_net_set_security_warnings(false);"
+        ),
+    });
+}
+
+/// Warn when TLS certificate verification is disabled.
+///
+/// Disabling certificate verification makes all TLS connections vulnerable
+/// to man-in-the-middle attacks (CWE-295).
+#[allow(dead_code)]
+pub fn warn_tls_verification_disabled(protocol: &'static str) {
+    warn(SecurityWarning {
+        code: "TLS_CERT_VERIFICATION_DISABLED",
+        cwe: "CWE-295",
+        severity: Severity::Critical,
+        protocol,
+        message: format!(
+            "Security warning: TLS certificate verification is disabled for {protocol}. \
+             All connections are vulnerable to man-in-the-middle attacks. \
+             Only disable certificate verification for local development or testing. \
+             Suppress with: SELECT duck_net_set_security_warnings(false);"
+        ),
+    });
+}
+
+/// Warn when a protocol uses self-signed TLS certificates.
+#[allow(dead_code)]
+pub fn warn_self_signed_certificate(protocol: &'static str, host: &str) {
+    warn(SecurityWarning {
+        code: "SELF_SIGNED_CERTIFICATE",
+        cwe: "CWE-295",
+        severity: Severity::Medium,
+        protocol,
+        message: format!(
+            "Security warning: {protocol} connection to '{host}' uses a self-signed \
+             TLS certificate. Verify the certificate fingerprint matches the expected \
+             server. For production, use a CA-signed certificate. \
+             Suppress with: SELECT duck_net_set_security_warnings(false);"
+        ),
+    });
+}

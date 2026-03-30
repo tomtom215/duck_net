@@ -117,8 +117,9 @@ fn extract_host(endpoint: &str) -> String {
 }
 
 /// Build the HTTP header vector from a signed request plus the host.
+/// Includes `x-amz-security-token` when the request used temporary credentials.
 fn build_s3_headers(signed: &aws_sigv4::SignedRequest, host: &str) -> Vec<(String, String)> {
-    vec![
+    let mut headers = vec![
         ("Authorization".to_string(), signed.authorization.clone()),
         ("x-amz-date".to_string(), signed.x_amz_date.clone()),
         (
@@ -126,11 +127,19 @@ fn build_s3_headers(signed: &aws_sigv4::SignedRequest, host: &str) -> Vec<(Strin
             signed.x_amz_content_sha256.clone(),
         ),
         ("Host".to_string(), host.to_string()),
-    ]
+    ];
+    if let Some(ref token) = signed.x_amz_security_token {
+        headers.push(("x-amz-security-token".to_string(), token.clone()));
+    }
+    headers
 }
 
 /// Parse `<Key>...</Key>` elements from an S3 ListBucketResult XML response.
-fn parse_list_keys(xml: &str) -> Vec<String> {
+///
+/// Returns `(keys, is_truncated)`. When `is_truncated` is true the bucket
+/// has more objects than were returned; the caller should use continuation
+/// tokens to fetch subsequent pages.
+fn parse_list_keys(xml: &str) -> (Vec<String>, bool) {
     let mut keys = Vec::new();
     let tag_open = "<Key>";
     let tag_close = "</Key>";
@@ -144,14 +153,38 @@ fn parse_list_keys(xml: &str) -> Vec<String> {
             break;
         }
     }
-    keys
+    // Check IsTruncated flag (case-insensitive tag match)
+    let is_truncated = xml.contains("<IsTruncated>true</IsTruncated>")
+        || xml.contains("<IsTruncated>True</IsTruncated>");
+    (keys, is_truncated)
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Emit a warning if the S3 endpoint uses plain HTTP.
+fn warn_if_s3_plaintext(endpoint: &str) {
+    if crate::security::is_plaintext_http(endpoint) {
+        crate::security_warnings::warn_s3_over_http(endpoint);
+    }
+}
+
+/// Macro-like helper: early-return S3Result on validation error.
+macro_rules! s3_try {
+    ($expr:expr, $result_ctor:expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => return $result_ctor(e),
+        }
+    };
+}
+
 /// Download an object from S3 (or any S3-compatible store).
+///
+/// `session_token` is required when using temporary AWS credentials (STS).
+/// Pass `None` for permanent IAM credentials.
+#[allow(clippy::too_many_arguments)]
 pub fn s3_get(
     endpoint: &str,
     bucket: &str,
@@ -159,73 +192,50 @@ pub fn s3_get(
     access_key: &str,
     secret_key: &str,
     region: &str,
+    session_token: Option<&str>,
 ) -> S3Result {
-    if let Err(e) = validate_endpoint(endpoint) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
-    // SSRF protection for S3 endpoint
-    if let Err(e) = crate::security::validate_no_ssrf(endpoint) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
-    if let Err(e) = validate_bucket(bucket) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
+    let err = |msg: String| S3Result {
+        success: false,
+        body: String::new(),
+        status: 0,
+        message: msg,
+    };
+
+    s3_try!(validate_endpoint(endpoint), err);
+    warn_if_s3_plaintext(endpoint);
+    s3_try!(crate::security::validate_no_ssrf(endpoint), err);
+    s3_try!(validate_bucket(bucket), err);
+
     if key.is_empty() {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: "Object key cannot be empty".to_string(),
-        };
+        return err("Object key cannot be empty".to_string());
     }
-    // Validate credential lengths (CWE-400)
-    if let Err(e) = crate::security::validate_credential_length("access_key", access_key, 256) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
-    if let Err(e) = crate::security::validate_credential_length("secret_key", secret_key, 256) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
+    s3_try!(
+        crate::security::validate_credential_length("access_key", access_key, 256),
+        err
+    );
+    s3_try!(
+        crate::security::validate_credential_length("secret_key", secret_key, 256),
+        err
+    );
 
     let base = endpoint.trim_end_matches('/');
     let encoded_key = url_encode_path(key);
     let url = format!("{base}/{bucket}/{encoded_key}");
     let host = extract_host(endpoint);
 
-    let signed = match aws_sigv4::sign("GET", &url, &[], "", access_key, secret_key, region, "s3") {
+    let signed = match aws_sigv4::sign_with_token(
+        "GET",
+        &url,
+        &[],
+        "",
+        access_key,
+        secret_key,
+        region,
+        "s3",
+        session_token,
+    ) {
         Ok(s) => s,
-        Err(e) => {
-            return S3Result {
-                success: false,
-                body: String::new(),
-                status: 0,
-                message: format!("SigV4 signing failed: {e}"),
-            };
-        }
+        Err(e) => return err(format!("SigV4 signing failed: {e}")),
     };
 
     let headers = build_s3_headers(&signed, &host);
@@ -250,6 +260,10 @@ pub fn s3_get(
 }
 
 /// Upload an object to S3 (or any S3-compatible store).
+///
+/// `session_token` is required when using temporary AWS credentials (STS).
+/// Pass `None` for permanent IAM credentials.
+#[allow(clippy::too_many_arguments)]
 pub fn s3_put(
     endpoint: &str,
     bucket: &str,
@@ -258,68 +272,37 @@ pub fn s3_put(
     access_key: &str,
     secret_key: &str,
     region: &str,
+    session_token: Option<&str>,
 ) -> S3Result {
-    if let Err(e) = validate_endpoint(endpoint) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
-    // SSRF protection for S3 endpoint
-    if let Err(e) = crate::security::validate_no_ssrf(endpoint) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
-    // Validate credential lengths (CWE-400)
-    if let Err(e) = crate::security::validate_credential_length("access_key", access_key, 256) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
-    if let Err(e) = crate::security::validate_credential_length("secret_key", secret_key, 256) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
-    if let Err(e) = validate_bucket(bucket) {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: e,
-        };
-    }
+    let err = |msg: String| S3Result {
+        success: false,
+        body: String::new(),
+        status: 0,
+        message: msg,
+    };
+
+    s3_try!(validate_endpoint(endpoint), err);
+    warn_if_s3_plaintext(endpoint);
+    s3_try!(crate::security::validate_no_ssrf(endpoint), err);
+    s3_try!(
+        crate::security::validate_credential_length("access_key", access_key, 256),
+        err
+    );
+    s3_try!(
+        crate::security::validate_credential_length("secret_key", secret_key, 256),
+        err
+    );
+    s3_try!(validate_bucket(bucket), err);
+
     if key.is_empty() {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: "Object key cannot be empty".to_string(),
-        };
+        return err("Object key cannot be empty".to_string());
     }
     if body.len() > MAX_BODY_SIZE {
-        return S3Result {
-            success: false,
-            body: String::new(),
-            status: 0,
-            message: format!(
-                "Body size {} exceeds maximum allowed {} bytes",
-                body.len(),
-                MAX_BODY_SIZE
-            ),
-        };
+        return err(format!(
+            "Body size {} exceeds maximum allowed {} bytes",
+            body.len(),
+            MAX_BODY_SIZE
+        ));
     }
 
     let base = endpoint.trim_end_matches('/');
@@ -327,17 +310,19 @@ pub fn s3_put(
     let url = format!("{base}/{bucket}/{encoded_key}");
     let host = extract_host(endpoint);
 
-    let signed = match aws_sigv4::sign("PUT", &url, &[], body, access_key, secret_key, region, "s3")
-    {
+    let signed = match aws_sigv4::sign_with_token(
+        "PUT",
+        &url,
+        &[],
+        body,
+        access_key,
+        secret_key,
+        region,
+        "s3",
+        session_token,
+    ) {
         Ok(s) => s,
-        Err(e) => {
-            return S3Result {
-                success: false,
-                body: String::new(),
-                status: 0,
-                message: format!("SigV4 signing failed: {e}"),
-            };
-        }
+        Err(e) => return err(format!("SigV4 signing failed: {e}")),
     };
 
     let headers = build_s3_headers(&signed, &host);
@@ -362,6 +347,13 @@ pub fn s3_put(
 }
 
 /// List objects in an S3 bucket with an optional prefix (ListObjectsV2).
+///
+/// `session_token` is required when using temporary AWS credentials (STS).
+/// Pass `None` for permanent IAM credentials.
+///
+/// Note: results are limited to one page (1,000 objects). Use continuation
+/// tokens via raw S3 API calls for paginated listing.
+#[allow(clippy::too_many_arguments)]
 pub fn s3_list(
     endpoint: &str,
     bucket: &str,
@@ -369,79 +361,66 @@ pub fn s3_list(
     access_key: &str,
     secret_key: &str,
     region: &str,
+    session_token: Option<&str>,
 ) -> S3ListResult {
-    if let Err(e) = validate_endpoint(endpoint) {
-        return S3ListResult {
-            success: false,
-            keys: Vec::new(),
-            message: e,
-        };
-    }
-    // SSRF protection for S3 endpoint
-    if let Err(e) = crate::security::validate_no_ssrf(endpoint) {
-        return S3ListResult {
-            success: false,
-            keys: Vec::new(),
-            message: e,
-        };
-    }
-    // Validate credential lengths (CWE-400)
-    if let Err(e) = crate::security::validate_credential_length("access_key", access_key, 256) {
-        return S3ListResult {
-            success: false,
-            keys: Vec::new(),
-            message: e,
-        };
-    }
-    if let Err(e) = crate::security::validate_credential_length("secret_key", secret_key, 256) {
-        return S3ListResult {
-            success: false,
-            keys: Vec::new(),
-            message: e,
-        };
-    }
-    if let Err(e) = validate_bucket(bucket) {
-        return S3ListResult {
-            success: false,
-            keys: Vec::new(),
-            message: e,
-        };
-    }
+    let err = |msg: String| S3ListResult {
+        success: false,
+        keys: Vec::new(),
+        message: msg,
+    };
+
+    s3_try!(validate_endpoint(endpoint), err);
+    warn_if_s3_plaintext(endpoint);
+    s3_try!(crate::security::validate_no_ssrf(endpoint), err);
+    s3_try!(
+        crate::security::validate_credential_length("access_key", access_key, 256),
+        err
+    );
+    s3_try!(
+        crate::security::validate_credential_length("secret_key", secret_key, 256),
+        err
+    );
+    s3_try!(validate_bucket(bucket), err);
 
     let base = endpoint.trim_end_matches('/');
     let encoded_prefix = url_encode_value(prefix);
     let url = format!("{base}/{bucket}?list-type=2&prefix={encoded_prefix}");
     let host = extract_host(endpoint);
 
-    let signed = match aws_sigv4::sign("GET", &url, &[], "", access_key, secret_key, region, "s3") {
+    let signed = match aws_sigv4::sign_with_token(
+        "GET",
+        &url,
+        &[],
+        "",
+        access_key,
+        secret_key,
+        region,
+        "s3",
+        session_token,
+    ) {
         Ok(s) => s,
-        Err(e) => {
-            return S3ListResult {
-                success: false,
-                keys: Vec::new(),
-                message: format!("SigV4 signing failed: {e}"),
-            };
-        }
+        Err(e) => return err(format!("SigV4 signing failed: {e}")),
     };
 
     let headers = build_s3_headers(&signed, &host);
     let resp = http::execute(Method::Get, &url, &headers, None);
 
     if resp.status == 200 {
-        let keys = parse_list_keys(&resp.body);
+        let (keys, truncated) = parse_list_keys(&resp.body);
+        let message = if truncated {
+            "OK (results truncated; use continuation tokens for full listing)".to_string()
+        } else {
+            "OK".to_string()
+        };
         S3ListResult {
             success: true,
             keys,
-            message: "OK".to_string(),
+            message,
         }
     } else {
-        S3ListResult {
-            success: false,
-            keys: Vec::new(),
-            message: format!(
-                "S3 LIST failed with status {}: {}",
-                resp.status, resp.reason
-            ),
-        }
+        err(format!(
+            "S3 LIST failed with status {}: {}",
+            resp.status, resp.reason
+        ))
     }
 }

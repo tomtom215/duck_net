@@ -275,6 +275,15 @@ pub(crate) fn get_value(secret_name: &str, key: &str) -> Option<String> {
     store.as_ref()?.get(secret_name)?.values.get(key).cloned()
 }
 
+/// Get all raw values from a named secret (for internal bridge use only).
+/// Callers are responsible for not leaking these values.
+pub(crate) fn get_value_map_internal(
+    secret_name: &str,
+) -> Option<std::collections::HashMap<String, String>> {
+    let store = SECRETS.lock().unwrap();
+    store.as_ref()?.get(secret_name).map(|s| s.values.clone())
+}
+
 /// Get the type of a named secret.
 pub fn get_type(secret_name: &str) -> Option<String> {
     let store = SECRETS.lock().unwrap();

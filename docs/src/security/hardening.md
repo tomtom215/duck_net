@@ -12,6 +12,8 @@ This guide covers best practices for deploying duck_net securely in production e
 - [ ] TLS variants used for all protocols (`ftps://`, `ldaps://`, `imaps://`, `smtps://`, etc.)
 - [ ] Security warnings reviewed: `FROM duck_net_security_warnings();`
 - [ ] No `PLAINTEXT_*` or `NO_AUTH_*` warnings in production
+- [ ] No `S3_OVER_HTTP` warnings (S3 endpoints must use HTTPS)
+- [ ] No `HTTP_REDIRECT_HTTPS_TO_HTTP` warnings (redirects must not downgrade from HTTPS)
 
 ### Recommended
 
@@ -21,6 +23,8 @@ This guide covers best practices for deploying duck_net securely in production e
 - [ ] DuckDB native secrets used for S3/HTTP/GCS/R2
 - [ ] Persistent secrets directory permissions restricted (`chmod 700 ~/.duckdb/stored_secrets`)
 - [ ] Network egress filtering applied (firewall rules)
+- [ ] Use `duck_net_import_aws_env()` for AWS environments instead of hardcoded keys
+- [ ] STS/assumed-role credentials include `session_token` field in duck_net secrets
 
 ### Advanced
 
@@ -37,6 +41,8 @@ This guide covers best practices for deploying duck_net securely in production e
 - Configure retries with `duck_net_set_retries()` for resilience
 - Use rate limiting: `duck_net_set_rate_limit()` and `duck_net_set_domain_rate_limits()`
 - Tokens sent over `http://` trigger a `CRITICAL` severity warning
+- Redirect chains are validated at each hop; HTTPS→HTTP downgrades emit `HTTP_REDIRECT_HTTPS_TO_HTTP`
+- HTTP header names and values are validated against RFC 7230 (CRLF injection blocked)
 
 ### SSH
 - Keep strict mode enabled: `SELECT duck_net_set_ssh_strict(true);`
@@ -69,6 +75,14 @@ This guide covers best practices for deploying duck_net securely in production e
 - Use scoped secrets for multi-account environments
 - Enable SSE-KMS via the `KMS_KEY_ID` option for server-side encryption
 - Use `credential_chain` provider for AWS environments (no hardcoded keys)
+- S3 endpoints **must** use HTTPS; `http://` endpoints emit `S3_OVER_HTTP` HIGH warning
+- For STS/assumed roles, include `session_token` in the secret to sign `x-amz-security-token`
+- Use `duck_net_import_aws_env()` to load credentials from environment automatically:
+
+```sql
+SELECT duck_net_import_aws_env('my_s3');
+SELECT * FROM s3_get_secret('my_s3', 'my-bucket', 'data.json');
+```
 
 ### Messaging (MQTT, Kafka, AMQP, NATS)
 - Use TLS variants: `mqtts://`, `amqps://`, `nats+tls://`

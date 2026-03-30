@@ -8,6 +8,7 @@ mod caldav;
 mod consul;
 mod dns;
 mod doh;
+pub(crate) mod duckdb_secrets_bridge;
 mod elasticsearch;
 mod ffi;
 mod ftp;

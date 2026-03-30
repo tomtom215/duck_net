@@ -8,6 +8,7 @@ mod caldav;
 mod consul;
 pub(crate) mod dns;
 mod doh;
+mod duckdb_secrets_bridge;
 mod elasticsearch;
 mod ftp;
 mod graphql;
@@ -37,6 +38,7 @@ mod secrets;
 mod secrets_protocols;
 mod secrets_protocols_ext;
 mod security_warnings;
+mod sftp;
 mod sip;
 mod smtp;
 mod snmp;
@@ -139,6 +141,9 @@ pub fn register_all(con: &Connection) -> Result<(), ExtensionError> {
 
         // Security warnings subsystem
         security_warnings::register_all(raw_con)?;
+
+        // DuckDB secrets manager bridge
+        duckdb_secrets_bridge::register_all(raw_con)?;
     }
     Ok(())
 }

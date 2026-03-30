@@ -6,7 +6,11 @@ duck_net is designed with a security-first architecture. Every protocol module e
 
 | Threat | CWE | Mitigation |
 |--------|-----|------------|
-| Server-Side Request Forgery | CWE-918 | Block private/reserved IPs by default |
+| Server-Side Request Forgery | CWE-918 | Block all private/reserved IPv4 and IPv6 ranges by default (incl. CGN, NAT64, Teredo, 6to4) |
+| Redirect-based SSRF | CWE-918 | Manual redirect following with per-hop SSRF validation; 10-hop limit |
+| HTTP Header Injection | CWE-113 | RFC 7230 header name/value validation; CRLF in header values blocked |
+| HTTP Redirect Downgrade | CWE-319 | Warning emitted when HTTPS redirects to HTTP |
+| S3 Over Plaintext HTTP | CWE-319 | Warning emitted when S3 endpoint uses `http://` |
 | Credential Exposure in Logs | CWE-532 | Scrub URLs, error messages, Authorization headers |
 | Command Injection (SSH) | CWE-78 | Shell metacharacter validation (strict mode) |
 | Path Traversal (FTP/SFTP/SCP) | CWE-22 | Block `..`, null bytes, long paths |
@@ -15,8 +19,7 @@ duck_net is designed with a security-first architecture. Every protocol module e
 | Resource Exhaustion | CWE-400 | Response size limits + query payload limits |
 | Stack Overflow | CWE-674 | Recursion depth limits (Protobuf, Redis, mDNS) |
 | Weak Randomness | CWE-338 | OS CSPRNG via `getrandom` (panics on failure) |
-| Open Redirect | CWE-601 | Pagination URL scheme + SSRF validation |
-| Cleartext Credentials | CWE-312 | In-memory secrets with `zeroize` crate |
+| Cleartext Credentials | CWE-312 | In-memory secrets with `zeroize` crate; `duck_net_secret()` warns |
 | Plaintext Transmission | CWE-319 | Security warnings for all plaintext protocols |
 | Weak Authentication | CWE-327 | Warnings for SNMPv2c, IPMIv1.5, etc. |
 | Missing Authentication | CWE-306 | Warnings for Memcached, ZeroMQ, etc. |
@@ -42,7 +45,11 @@ Covered IP ranges:
 - `100.64.0.0/10` (carrier-grade NAT)
 - `198.18.0.0/15` (benchmark)
 - `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` (documentation)
-- IPv6: `::1`, `fc00::/7`, `fe80::/10`, IPv4-mapped equivalents
+- IPv6: `::1`, `fc00::/7` (unique local), `fe80::/10` (link-local), `ff00::/8` (multicast)
+- IPv6: `2001::/32` (Teredo), `2002::/16` (6to4 with private embedded IPv4), `64:ff9b::/96` (NAT64), `2001:db8::/32` (documentation)
+- IPv4-mapped IPv6 (`::ffff:0:0/96`): checked for embedded private IPv4
+
+Redirect chains are validated per-hop — SSRF protection applies to each intermediate destination, not just the final URL.
 
 ### Layer 3: Transport Security
 - **TLS**: Pure Rust via `rustls` (no OpenSSL dependency) with Mozilla CA bundle (`webpki-roots`)
@@ -77,6 +84,9 @@ Runtime warnings when protocols are used in potentially insecure configurations:
 - **NO_AUTH_***: Protocol without authentication mechanism
 - **WEAK_CRYPTO_***: Weak cryptographic implementation (SNMPv2c, IPMIv1.5)
 - **TOFU_***: Trust-on-first-use host key verification
+- **S3_OVER_HTTP**: S3 endpoint using plaintext HTTP (HIGH)
+- **HTTP_REDIRECT_HTTPS_TO_HTTP**: HTTP redirect chain downgraded from HTTPS to HTTP (HIGH)
+- **SECRET_VALUE_EXPOSED**: `duck_net_secret()` returned a raw credential value (HIGH)
 
 Warnings are informational and never block operations, supporting CI pipelines, airgapped systems, and development environments.
 

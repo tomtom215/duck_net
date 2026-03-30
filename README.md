@@ -68,10 +68,13 @@ Full documentation is available in the [docs/](docs/) directory:
 
 | Protection | Description |
 |-----------|-------------|
-| SSRF protection | Blocks private/reserved IPs across all 49+ protocols (CWE-918) |
+| SSRF protection | Blocks all private/reserved IPv4 + IPv6 ranges (CWE-918); full coverage: CGN, NAT64, Teredo, 6to4 |
+| Redirect SSRF | Manual redirect following with per-hop SSRF check; HTTPS→HTTP downgrade warning |
+| Header injection | RFC 7230 validation for header names and values; CRLF injection blocked (CWE-113) |
 | Secrets manager | In-memory credentials with `zeroize` crate (compiler-resistant zeroing) |
-| DuckDB secrets | Native `CREATE SECRET` for S3/HTTP/GCS/R2 with scoped + persistent support |
-| Security warnings | Runtime alerts for plaintext protocols, missing auth, weak crypto |
+| DuckDB secrets | Native `CREATE SECRET` for S3/HTTP/GCS/R2 with scoped, persistent, and STS support |
+| AWS STS support | `session_token` in S3 secrets or `duck_net_import_aws_env()` for assumed roles |
+| Security warnings | Runtime alerts for plaintext protocols, missing auth, S3 over HTTP, redirect downgrade |
 | Input validation | URL length, hostname format, path traversal, LDAP filter, query size limits |
 | TLS everywhere | Pure Rust `rustls`; no OpenSSL dependency |
 | Response limits | 256 MiB HTTP, 16 MiB gRPC/WS/Redis, 10 MiB IMAP, 1 MiB query payloads |

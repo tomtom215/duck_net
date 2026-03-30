@@ -12,6 +12,10 @@ use ureq::Agent;
 /// Prevents OOM from unbounded response buffering (CWE-400).
 const MAX_RESPONSE_BODY_BYTES: u64 = 256 * 1024 * 1024;
 
+/// Maximum number of redirects to follow before giving up (CWE-601).
+/// Prevents redirect loops and limits exposure during redirect chains.
+const MAX_REDIRECTS: usize = 10;
+
 /// Default global timeout per request (connect + transfer).
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
@@ -74,6 +78,10 @@ pub static AGENT: LazyLock<Agent> = LazyLock::new(|| {
     Agent::config_builder()
         .tls_config(tls)
         .http_status_as_error(false)
+        // Disable automatic redirects: we implement our own redirect following
+        // with per-hop SSRF validation so redirect chains can't escape to
+        // private/internal networks (CWE-918 / redirect-based SSRF).
+        .max_redirects(0)
         .timeout_global(Some(Duration::from_secs(DEFAULT_TIMEOUT_SECS)))
         .build()
         .into()
@@ -173,6 +181,142 @@ fn validate_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Follow an HTTP redirect response, performing SSRF validation on each hop.
+///
+/// Returns `Some(HttpResponse)` if the redirect chain completes successfully,
+/// or `None` if the original response is not a redirect.
+/// Emits a security warning if a redirect from HTTPS downgrades to HTTP.
+fn follow_redirect(
+    original_method: Method,
+    original_url: &str,
+    original_headers: &[(String, String)],
+    original_body: Option<&str>,
+    first_response: HttpResponse,
+) -> HttpResponse {
+    // 3xx redirect codes that we follow
+    let is_redirect = matches!(first_response.status, 301 | 302 | 303 | 307 | 308);
+    if !is_redirect {
+        return first_response;
+    }
+
+    let mut current_response = first_response;
+    let mut current_url = original_url.to_string();
+    let mut hops = 0usize;
+
+    loop {
+        if !matches!(current_response.status, 301 | 302 | 303 | 307 | 308) {
+            return current_response;
+        }
+
+        if hops >= MAX_REDIRECTS {
+            return HttpResponse {
+                status: 0,
+                reason: format!(
+                    "Redirect limit ({MAX_REDIRECTS}) exceeded. \
+                     Use duck_net_set_ssrf_protection(false) to allow longer chains."
+                ),
+                headers: vec![],
+                body: String::new(),
+            };
+        }
+
+        // Find Location header
+        let location = current_response
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("location"))
+            .map(|(_, v)| v.clone());
+
+        let redirect_url = match location {
+            Some(loc) => {
+                // Resolve relative URLs against the current URL
+                if loc.starts_with("http://") || loc.starts_with("https://") {
+                    loc
+                } else if loc.starts_with("//") {
+                    // Protocol-relative
+                    let scheme = if current_url.starts_with("https://") {
+                        "https:"
+                    } else {
+                        "http:"
+                    };
+                    format!("{}{}", scheme, loc)
+                } else if loc.starts_with('/') {
+                    // Absolute path, keep scheme+host
+                    let host_end = current_url[8..]
+                        .find('/')
+                        .map(|p| p + 8)
+                        .unwrap_or(current_url.len());
+                    format!("{}{}", &current_url[..host_end], loc)
+                } else {
+                    loc
+                }
+            }
+            None => {
+                return HttpResponse {
+                    status: 0,
+                    reason: "Redirect response missing Location header".to_string(),
+                    headers: vec![],
+                    body: String::new(),
+                };
+            }
+        };
+
+        // Validate the redirect target URL (SSRF check on each hop)
+        if let Err(e) = validate_url(&redirect_url) {
+            return HttpResponse {
+                status: 0,
+                reason: format!("Redirect blocked by SSRF protection: {e}"),
+                headers: vec![],
+                body: String::new(),
+            };
+        }
+
+        // Warn on HTTPS → HTTP downgrade
+        if current_url.starts_with("https://") && redirect_url.starts_with("http://") {
+            crate::security_warnings::warn_http_redirect_downgrade();
+        }
+
+        // Determine method for the redirect: 303 always becomes GET; 307/308 preserve
+        let redirect_method = match current_response.status {
+            303 => Method::Get,
+            301 | 302 => {
+                if original_method == Method::Post {
+                    Method::Get
+                } else {
+                    original_method
+                }
+            }
+            _ => original_method, // 307, 308 preserve method
+        };
+
+        // 303 and method-changes strip the body
+        let redirect_body = if redirect_method == Method::Get || redirect_method == Method::Head {
+            None
+        } else {
+            original_body
+        };
+
+        hops += 1;
+        current_url = redirect_url.clone();
+
+        let resp = execute_inner(
+            redirect_method,
+            &redirect_url,
+            original_headers,
+            redirect_body,
+        );
+        current_response = match resp {
+            Ok(r) => r,
+            Err(e) => HttpResponse {
+                status: 0,
+                reason: format!("Request failed on redirect hop {hops}: {e}"),
+                headers: vec![],
+                body: String::new(),
+            },
+        };
+    }
+}
+
 /// Read a response body with a size limit to prevent OOM (CWE-400).
 fn read_body_limited(body: &mut ureq::Body) -> Result<String, String> {
     let mut buf = Vec::new();
@@ -196,6 +340,14 @@ pub fn execute_raw_method(
         return HttpResponse {
             status: 0,
             reason: msg,
+            headers: vec![],
+            body: String::new(),
+        };
+    }
+    if let Err(msg) = crate::security::validate_headers(headers) {
+        return HttpResponse {
+            status: 0,
+            reason: format!("Invalid header: {msg}"),
             headers: vec![],
             body: String::new(),
         };
@@ -290,11 +442,20 @@ pub fn execute_with_retry(
             body: String::new(),
         };
     }
+    // Validate headers for CRLF injection before making any request (CWE-113)
+    if let Err(msg) = crate::security::validate_headers(headers) {
+        return HttpResponse {
+            status: 0,
+            reason: format!("Invalid header: {msg}"),
+            headers: vec![],
+            body: String::new(),
+        };
+    }
 
     let mut attempt = 0u32;
     loop {
         let resp = execute_inner(method, url, headers, body);
-        let result = match resp {
+        let raw = match resp {
             Ok(r) => r,
             Err(e) => HttpResponse {
                 status: 0,
@@ -303,6 +464,9 @@ pub fn execute_with_retry(
                 body: String::new(),
             },
         };
+
+        // Follow redirects with per-hop SSRF validation
+        let result = follow_redirect(method, url, headers, body, raw);
 
         if retry.should_retry(attempt, result.status) {
             let delay = retry.delay_for_attempt(attempt);
@@ -392,6 +556,14 @@ pub fn execute_multipart(
         return HttpResponse {
             status: 0,
             reason: msg,
+            headers: vec![],
+            body: String::new(),
+        };
+    }
+    if let Err(msg) = crate::security::validate_headers(headers) {
+        return HttpResponse {
+            status: 0,
+            reason: format!("Invalid header: {msg}"),
             headers: vec![],
             body: String::new(),
         };

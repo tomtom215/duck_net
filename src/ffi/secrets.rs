@@ -133,6 +133,8 @@ quack_rs::scalar_callback!(cb_scrub_error, |_info, input, output| {
 
 // duck_net_secret(name, key) -> VARCHAR
 // Returns a specific value from a named secret, or NULL if not found.
+// NOTE: This function returns raw credential values as SQL results which may
+// appear in query logs or exports. A security warning is emitted on first call.
 quack_rs::scalar_callback!(cb_get_secret_value, |_info, input, output| {
     let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
@@ -143,6 +145,9 @@ quack_rs::scalar_callback!(cb_get_secret_value, |_info, input, output| {
     for row in 0..row_count {
         let name = unsafe { name_reader.read_str(row) };
         let key = unsafe { key_reader.read_str(row) };
+
+        // Emit warning: raw credential exposure in SQL results (CWE-312/CWE-532)
+        crate::security_warnings::warn_secret_value_exposed(name);
 
         match secrets::get_value(name, key) {
             Some(value) => unsafe { writer.write_varchar(row, &value) },
