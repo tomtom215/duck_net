@@ -7,7 +7,7 @@ use quack_rs::prelude::*;
 use crate::tls_inspect;
 
 use super::dns::write_string_list;
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 fn tls_cert_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -28,121 +28,95 @@ fn tls_cert_type() -> LogicalType {
     ])
 }
 
-/// tls_inspect(host) -> STRUCT
-unsafe extern "C" fn cb_tls_inspect(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// tls_inspect(host) -> STRUCT
+quack_rs::scalar_callback!(cb_tls_inspect, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
+    let host_reader = unsafe { chunk.reader(0) };
 
-    let subject_vec = duckdb_struct_vector_get_child(output, 0);
-    let issuer_vec = duckdb_struct_vector_get_child(output, 1);
-    let not_before_vec = duckdb_struct_vector_get_child(output, 2);
-    let not_after_vec = duckdb_struct_vector_get_child(output, 3);
-    let serial_vec = duckdb_struct_vector_get_child(output, 4);
-    let san_names_vec = duckdb_struct_vector_get_child(output, 5);
-    let key_algo_vec = duckdb_struct_vector_get_child(output, 6);
-    let sig_algo_vec = duckdb_struct_vector_get_child(output, 7);
-    let mut is_expired_w = StructVector::field_writer(output, 8);
-    let mut days_w = StructVector::field_writer(output, 9);
-    let version_vec = duckdb_struct_vector_get_child(output, 10);
+    let mut sw = unsafe { StructWriter::new(output, 11) };
+    let san_names_vec = unsafe { duckdb_struct_vector_get_child(output, 5) };
 
     let mut san_list_offset: usize = 0;
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
         match tls_inspect::inspect(host, 443) {
             Ok(info) => {
-                write_varchar(subject_vec, row, &info.subject);
-                write_varchar(issuer_vec, row, &info.issuer);
-                write_varchar(not_before_vec, row, &info.not_before);
-                write_varchar(not_after_vec, row, &info.not_after);
-                write_varchar(serial_vec, row, &info.serial);
-                write_string_list(san_names_vec, row, &info.san_names, &mut san_list_offset);
-                write_varchar(key_algo_vec, row, &info.key_algorithm);
-                write_varchar(sig_algo_vec, row, &info.signature_algorithm);
-                is_expired_w.write_bool(row as usize, info.is_expired);
-                days_w.write_i64(row as usize, info.days_until_expiry);
-                write_varchar(version_vec, row, &info.version);
+                unsafe { sw.write_varchar(row as usize, 0, &info.subject) };
+                unsafe { sw.write_varchar(row as usize, 1, &info.issuer) };
+                unsafe { sw.write_varchar(row as usize, 2, &info.not_before) };
+                unsafe { sw.write_varchar(row as usize, 3, &info.not_after) };
+                unsafe { sw.write_varchar(row as usize, 4, &info.serial) };
+                unsafe { write_string_list(san_names_vec, row, &info.san_names, &mut san_list_offset) };
+                unsafe { sw.write_varchar(row as usize, 6, &info.key_algorithm) };
+                unsafe { sw.write_varchar(row as usize, 7, &info.signature_algorithm) };
+                unsafe { sw.write_bool(row as usize, 8, info.is_expired) };
+                unsafe { sw.write_i64(row as usize, 9, info.days_until_expiry) };
+                unsafe { sw.write_varchar(row as usize, 10, &info.version) };
             }
             Err(e) => {
-                write_varchar(subject_vec, row, &format!("Error: {e}"));
-                write_varchar(issuer_vec, row, "");
-                write_varchar(not_before_vec, row, "");
-                write_varchar(not_after_vec, row, "");
-                write_varchar(serial_vec, row, "");
-                write_string_list(san_names_vec, row, &[], &mut san_list_offset);
-                write_varchar(key_algo_vec, row, "");
-                write_varchar(sig_algo_vec, row, "");
-                is_expired_w.write_bool(row as usize, false);
-                days_w.write_i64(row as usize, -1);
-                write_varchar(version_vec, row, "");
+                unsafe { sw.write_varchar(row as usize, 0, &format!("Error: {e}")) };
+                unsafe { sw.write_varchar(row as usize, 1, "") };
+                unsafe { sw.write_varchar(row as usize, 2, "") };
+                unsafe { sw.write_varchar(row as usize, 3, "") };
+                unsafe { sw.write_varchar(row as usize, 4, "") };
+                unsafe { write_string_list(san_names_vec, row, &[], &mut san_list_offset) };
+                unsafe { sw.write_varchar(row as usize, 6, "") };
+                unsafe { sw.write_varchar(row as usize, 7, "") };
+                unsafe { sw.write_bool(row as usize, 8, false) };
+                unsafe { sw.write_i64(row as usize, 9, -1) };
+                unsafe { sw.write_varchar(row as usize, 10, "") };
             }
         }
     }
-}
+});
 
-/// tls_inspect(host, port) -> STRUCT
-unsafe extern "C" fn cb_tls_inspect_port(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// tls_inspect(host, port) -> STRUCT
+quack_rs::scalar_callback!(cb_tls_inspect_port, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let port_reader = chunk.reader(1);
+    let host_reader = unsafe { chunk.reader(0) };
+    let port_reader = unsafe { chunk.reader(1) };
 
-    let subject_vec = duckdb_struct_vector_get_child(output, 0);
-    let issuer_vec = duckdb_struct_vector_get_child(output, 1);
-    let not_before_vec = duckdb_struct_vector_get_child(output, 2);
-    let not_after_vec = duckdb_struct_vector_get_child(output, 3);
-    let serial_vec = duckdb_struct_vector_get_child(output, 4);
-    let san_names_vec = duckdb_struct_vector_get_child(output, 5);
-    let key_algo_vec = duckdb_struct_vector_get_child(output, 6);
-    let sig_algo_vec = duckdb_struct_vector_get_child(output, 7);
-    let mut is_expired_w = StructVector::field_writer(output, 8);
-    let mut days_w = StructVector::field_writer(output, 9);
-    let version_vec = duckdb_struct_vector_get_child(output, 10);
+    let mut sw = unsafe { StructWriter::new(output, 11) };
+    let san_names_vec = unsafe { duckdb_struct_vector_get_child(output, 5) };
 
     let mut san_list_offset: usize = 0;
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let port = port_reader.read_i32(row as usize) as u16;
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let port = unsafe { port_reader.read_i32(row as usize) } as u16;
         match tls_inspect::inspect(host, port) {
             Ok(info) => {
-                write_varchar(subject_vec, row, &info.subject);
-                write_varchar(issuer_vec, row, &info.issuer);
-                write_varchar(not_before_vec, row, &info.not_before);
-                write_varchar(not_after_vec, row, &info.not_after);
-                write_varchar(serial_vec, row, &info.serial);
-                write_string_list(san_names_vec, row, &info.san_names, &mut san_list_offset);
-                write_varchar(key_algo_vec, row, &info.key_algorithm);
-                write_varchar(sig_algo_vec, row, &info.signature_algorithm);
-                is_expired_w.write_bool(row as usize, info.is_expired);
-                days_w.write_i64(row as usize, info.days_until_expiry);
-                write_varchar(version_vec, row, &info.version);
+                unsafe { sw.write_varchar(row as usize, 0, &info.subject) };
+                unsafe { sw.write_varchar(row as usize, 1, &info.issuer) };
+                unsafe { sw.write_varchar(row as usize, 2, &info.not_before) };
+                unsafe { sw.write_varchar(row as usize, 3, &info.not_after) };
+                unsafe { sw.write_varchar(row as usize, 4, &info.serial) };
+                unsafe { write_string_list(san_names_vec, row, &info.san_names, &mut san_list_offset) };
+                unsafe { sw.write_varchar(row as usize, 6, &info.key_algorithm) };
+                unsafe { sw.write_varchar(row as usize, 7, &info.signature_algorithm) };
+                unsafe { sw.write_bool(row as usize, 8, info.is_expired) };
+                unsafe { sw.write_i64(row as usize, 9, info.days_until_expiry) };
+                unsafe { sw.write_varchar(row as usize, 10, &info.version) };
             }
             Err(e) => {
-                write_varchar(subject_vec, row, &format!("Error: {e}"));
-                write_varchar(issuer_vec, row, "");
-                write_varchar(not_before_vec, row, "");
-                write_varchar(not_after_vec, row, "");
-                write_varchar(serial_vec, row, "");
-                write_string_list(san_names_vec, row, &[], &mut san_list_offset);
-                write_varchar(key_algo_vec, row, "");
-                write_varchar(sig_algo_vec, row, "");
-                is_expired_w.write_bool(row as usize, false);
-                days_w.write_i64(row as usize, -1);
-                write_varchar(version_vec, row, "");
+                unsafe { sw.write_varchar(row as usize, 0, &format!("Error: {e}")) };
+                unsafe { sw.write_varchar(row as usize, 1, "") };
+                unsafe { sw.write_varchar(row as usize, 2, "") };
+                unsafe { sw.write_varchar(row as usize, 3, "") };
+                unsafe { sw.write_varchar(row as usize, 4, "") };
+                unsafe { write_string_list(san_names_vec, row, &[], &mut san_list_offset) };
+                unsafe { sw.write_varchar(row as usize, 6, "") };
+                unsafe { sw.write_varchar(row as usize, 7, "") };
+                unsafe { sw.write_bool(row as usize, 8, false) };
+                unsafe { sw.write_i64(row as usize, 9, -1) };
+                unsafe { sw.write_varchar(row as usize, 10, "") };
             }
         }
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     ScalarFunctionSetBuilder::new("tls_inspect")

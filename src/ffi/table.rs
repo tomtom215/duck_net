@@ -97,18 +97,19 @@ unsafe extern "C" fn paginate_init(info: duckdb_init_info) {
 
 // ===== Scan Callback =====
 
-unsafe extern "C" fn paginate_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<PaginateBindData>::get_from_function(info) {
+// paginate_scan table scan callback
+quack_rs::table_scan_callback!(paginate_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<PaginateBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<PaginateInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<PaginateInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -123,40 +124,40 @@ unsafe extern "C" fn paginate_scan(info: duckdb_function_info, output: duckdb_da
 
     match pagination::fetch_next(&bind_data.config, &mut init_data.state) {
         Some((page_num, resp)) => {
-            let chunk = DataChunk::from_raw(output);
+            let chunk = unsafe { DataChunk::from_raw(output) };
 
             // page (INTEGER)
-            let mut page_w = chunk.writer(0);
-            page_w.write_i32(0, page_num as i32);
+            let mut page_w = unsafe { chunk.writer(0) };
+            unsafe { page_w.write_i32(0, page_num as i32) };
 
             // status (INTEGER)
-            let mut status_w = chunk.writer(1);
-            status_w.write_i32(0, resp.status as i32);
+            let mut status_w = unsafe { chunk.writer(1) };
+            unsafe { status_w.write_i32(0, resp.status as i32) };
 
             // headers (MAP)
-            let headers_vec = chunk.vector(2);
+            let headers_vec = unsafe { chunk.vector(2) };
             let n = resp.headers.len() as idx_t;
-            MapVector::reserve(headers_vec, n as usize);
-            let mut key_w = MapVector::key_writer(headers_vec);
-            let mut val_w = MapVector::value_writer(headers_vec);
+            unsafe { MapVector::reserve(headers_vec, n as usize) };
+            let mut key_w = unsafe { MapVector::key_writer(headers_vec) };
+            let mut val_w = unsafe { MapVector::value_writer(headers_vec) };
             for (i, (k, v)) in resp.headers.iter().enumerate() {
-                key_w.write_varchar(i, k);
-                val_w.write_varchar(i, v);
+                unsafe { key_w.write_varchar(i, k) };
+                unsafe { val_w.write_varchar(i, v) };
             }
-            MapVector::set_entry(headers_vec, 0, 0, n);
-            MapVector::set_size(headers_vec, n as usize);
+            unsafe { MapVector::set_entry(headers_vec, 0, 0, n) };
+            unsafe { MapVector::set_size(headers_vec, n as usize) };
 
             // body (VARCHAR)
-            let mut body_w = chunk.writer(3);
-            body_w.write_varchar(0, &resp.body);
+            let mut body_w = unsafe { chunk.writer(3) };
+            unsafe { body_w.write_varchar(0, &resp.body) };
 
-            chunk.set_size(1);
+            unsafe { chunk.set_size(1) };
         }
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
         }
     }
-}
+});
 
 // ===== Registration =====
 

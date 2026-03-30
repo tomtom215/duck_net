@@ -8,44 +8,36 @@ use quack_rs::prelude::*;
 
 use crate::security_warnings;
 
-use super::scalars::write_varchar;
-
 // ---------------------------------------------------------------------------
 // Security Warnings Callbacks
 // ---------------------------------------------------------------------------
 
-/// duck_net_set_security_warnings(enabled BOOLEAN) -> VARCHAR
-unsafe extern "C" fn cb_set_security_warnings(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_set_security_warnings(enabled BOOLEAN) -> VARCHAR
+quack_rs::scalar_callback!(cb_set_security_warnings, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let enabled_reader = chunk.reader(0);
+    let enabled_reader = unsafe { chunk.reader(0) };
+    let mut out_w = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let enabled = enabled_reader.read_bool(row);
+        let enabled = unsafe { enabled_reader.read_bool(row) };
         security_warnings::set_warnings_enabled(enabled);
         let msg = if enabled {
             "Security warnings enabled"
         } else {
             "Security warnings suppressed (not recommended for production)"
         };
-        write_varchar(output, row, msg);
+        unsafe { out_w.write_varchar(row, msg) };
     }
-}
+});
 
-/// duck_net_clear_security_warnings() -> VARCHAR
-unsafe extern "C" fn cb_clear_security_warnings(
-    _info: duckdb_function_info,
-    _input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
+// duck_net_clear_security_warnings() -> VARCHAR
+quack_rs::scalar_callback!(cb_clear_security_warnings, |_info, _input, output| {
     let count = security_warnings::clear_warnings();
     let msg = format!("Cleared {count} security warnings");
-    write_varchar(output, 0, &msg);
-}
+    let mut out_w = unsafe { VectorWriter::from_vector(output) };
+    unsafe { out_w.write_varchar(0, &msg) };
+});
 
 // ---------------------------------------------------------------------------
 // Security Warnings Table Function
@@ -77,11 +69,12 @@ unsafe extern "C" fn warnings_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn warnings_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let init_data = match FfiInitData::<WarningsInitData>::get_mut(info) {
+// warnings_scan table scan callback
+quack_rs::table_scan_callback!(warnings_scan, |info, output| {
+    let init_data = match unsafe { FfiInitData::<WarningsInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -90,29 +83,29 @@ unsafe extern "C" fn warnings_scan(info: duckdb_function_info, output: duckdb_da
         init_data.entries = security_warnings::list_warnings();
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut code_w = out_chunk.writer(0);
-    let mut sev_w = out_chunk.writer(1);
-    let mut cwe_w = out_chunk.writer(2);
-    let mut proto_w = out_chunk.writer(3);
-    let mut msg_w = out_chunk.writer(4);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut code_w = unsafe { out_chunk.writer(0) };
+    let mut sev_w = unsafe { out_chunk.writer(1) };
+    let mut cwe_w = unsafe { out_chunk.writer(2) };
+    let mut proto_w = unsafe { out_chunk.writer(3) };
+    let mut msg_w = unsafe { out_chunk.writer(4) };
 
     let mut count: usize = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.entries.len() && count < max_chunk {
         let w = &init_data.entries[init_data.idx];
-        code_w.write_varchar(count, w.code);
-        sev_w.write_varchar(count, w.severity.as_str());
-        cwe_w.write_varchar(count, w.cwe);
-        proto_w.write_varchar(count, w.protocol);
-        msg_w.write_varchar(count, &w.message);
+        unsafe { code_w.write_varchar(count, w.code) };
+        unsafe { sev_w.write_varchar(count, w.severity.as_str()) };
+        unsafe { cwe_w.write_varchar(count, w.cwe) };
+        unsafe { proto_w.write_varchar(count, w.protocol) };
+        unsafe { msg_w.write_varchar(count, &w.message) };
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count as idx_t);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count as idx_t) };
+});
 
 // ---------------------------------------------------------------------------
 // Registration

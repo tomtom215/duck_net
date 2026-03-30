@@ -6,7 +6,7 @@ use quack_rs::prelude::*;
 
 use crate::sip;
 
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 fn sip_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -18,63 +18,47 @@ fn sip_result_type() -> LogicalType {
     ])
 }
 
-/// sip_options(host) -> STRUCT
-unsafe extern "C" fn cb_sip_options(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// sip_options(host) -> STRUCT
+quack_rs::scalar_callback!(cb_sip_options, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
+    let host_reader = unsafe { chunk.reader(0) };
 
-    let mut alive_writer = StructVector::field_writer(output, 0);
-    let mut code_writer = StructVector::field_writer(output, 1);
-    let text_vec = duckdb_struct_vector_get_child(output, 2);
-    let ua_vec = duckdb_struct_vector_get_child(output, 3);
-    let allow_vec = duckdb_struct_vector_get_child(output, 4);
+    let mut sw = unsafe { StructWriter::new(output, 5) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
         let result = sip::options_ping(host, 0);
 
-        unsafe { alive_writer.write_bool(row as usize, result.alive) };
-        unsafe { code_writer.write_i32(row as usize, result.status_code) };
-        write_varchar(text_vec, row, &result.status_text);
-        write_varchar(ua_vec, row, &result.user_agent);
-        write_varchar(allow_vec, row, &result.allow_methods);
+        unsafe { sw.write_bool(row as usize, 0, result.alive) };
+        unsafe { sw.write_i32(row as usize, 1, result.status_code) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.status_text) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.user_agent) };
+        unsafe { sw.write_varchar(row as usize, 4, &result.allow_methods) };
     }
-}
+});
 
-/// sip_options(host, port) -> STRUCT
-unsafe extern "C" fn cb_sip_options_port(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// sip_options(host, port) -> STRUCT
+quack_rs::scalar_callback!(cb_sip_options_port, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let port_reader = chunk.reader(1);
+    let host_reader = unsafe { chunk.reader(0) };
+    let port_reader = unsafe { chunk.reader(1) };
 
-    let mut alive_writer = StructVector::field_writer(output, 0);
-    let mut code_writer = StructVector::field_writer(output, 1);
-    let text_vec = duckdb_struct_vector_get_child(output, 2);
-    let ua_vec = duckdb_struct_vector_get_child(output, 3);
-    let allow_vec = duckdb_struct_vector_get_child(output, 4);
+    let mut sw = unsafe { StructWriter::new(output, 5) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let port = port_reader.read_i32(row as usize) as u16;
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let port = unsafe { port_reader.read_i32(row as usize) } as u16;
         let result = sip::options_ping(host, port);
 
-        unsafe { alive_writer.write_bool(row as usize, result.alive) };
-        unsafe { code_writer.write_i32(row as usize, result.status_code) };
-        write_varchar(text_vec, row, &result.status_text);
-        write_varchar(ua_vec, row, &result.user_agent);
-        write_varchar(allow_vec, row, &result.allow_methods);
+        unsafe { sw.write_bool(row as usize, 0, result.alive) };
+        unsafe { sw.write_i32(row as usize, 1, result.status_code) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.status_text) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.user_agent) };
+        unsafe { sw.write_varchar(row as usize, 4, &result.allow_methods) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

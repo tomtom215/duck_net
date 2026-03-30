@@ -7,7 +7,7 @@ use quack_rs::prelude::*;
 use crate::ldap;
 use crate::ldap_write;
 
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 // ===== ldap_search table function =====
 
@@ -64,18 +64,19 @@ unsafe extern "C" fn ldap_search_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn ldap_search_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<LdapSearchBindData>::get_from_function(info) {
+// ldap_search scan callback
+quack_rs::table_scan_callback!(ldap_search_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<LdapSearchBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<LdapSearchInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<LdapSearchInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -92,17 +93,17 @@ unsafe extern "C" fn ldap_search_scan(info: duckdb_function_info, output: duckdb
         if !result.success {
             let fi = FunctionInfo::new(info);
             fi.set_error(&result.message);
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
         init_data.entries = result.entries;
     }
 
     // Flatten entries into rows
-    let out_chunk = DataChunk::from_raw(output);
-    let mut dn_w = out_chunk.writer(0);
-    let mut attr_w = out_chunk.writer(1);
-    let mut val_w = out_chunk.writer(2);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut dn_w = unsafe { out_chunk.writer(0) };
+    let mut attr_w = unsafe { out_chunk.writer(1) };
+    let mut val_w = unsafe { out_chunk.writer(2) };
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
@@ -118,25 +119,25 @@ unsafe extern "C" fn ldap_search_scan(info: duckdb_function_info, output: duckdb
                     // For simplicity, we output all attributes of one entry at once
                     break;
                 }
-                dn_w.write_varchar(count as usize, &entry.dn);
-                attr_w.write_varchar(count as usize, attr_name);
-                val_w.write_varchar(count as usize, val);
+                unsafe { dn_w.write_varchar(count as usize, &entry.dn) };
+                unsafe { attr_w.write_varchar(count as usize, attr_name) };
+                unsafe { val_w.write_varchar(count as usize, val) };
                 count += 1;
                 emitted = true;
             }
         }
         if !emitted {
             // Entry with no attributes
-            dn_w.write_varchar(count as usize, &entry.dn);
-            attr_w.write_varchar(count as usize, "");
-            val_w.write_varchar(count as usize, "");
+            unsafe { dn_w.write_varchar(count as usize, &entry.dn) };
+            unsafe { attr_w.write_varchar(count as usize, "") };
+            unsafe { val_w.write_varchar(count as usize, "") };
             count += 1;
         }
         init_data.idx += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count) };
+});
 
 // ===== ldap_bind scalar =====
 
@@ -147,114 +148,99 @@ fn ldap_bind_result_type() -> LogicalType {
     ])
 }
 
-unsafe extern "C" fn cb_ldap_bind(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ldap_bind(url, bind_dn, password) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_ldap_bind, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let dn_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
+    let url_reader = unsafe { chunk.reader(0) };
+    let dn_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let dn = dn_reader.read_str(row as usize);
-        let pass = pass_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let dn = unsafe { dn_reader.read_str(row as usize) };
+        let pass = unsafe { pass_reader.read_str(row as usize) };
         let result = ldap::bind(url, dn, pass);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let message_vec = duckdb_struct_vector_get_child(output, 1);
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
     }
-}
+});
 
-/// ldap_add(url, bind_dn, password, entry_dn, attributes) -> STRUCT(success, message)
-unsafe extern "C" fn cb_ldap_add(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ldap_add(url, bind_dn, password, entry_dn, attributes) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_ldap_add, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let dn_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let entry_dn_reader = chunk.reader(3);
-    let attrs_reader = chunk.reader(4);
+    let url_reader = unsafe { chunk.reader(0) };
+    let dn_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let entry_dn_reader = unsafe { chunk.reader(3) };
+    let attrs_reader = unsafe { chunk.reader(4) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let dn = dn_reader.read_str(row as usize);
-        let pass = pass_reader.read_str(row as usize);
-        let entry_dn = entry_dn_reader.read_str(row as usize);
-        let attrs = attrs_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let dn = unsafe { dn_reader.read_str(row as usize) };
+        let pass = unsafe { pass_reader.read_str(row as usize) };
+        let entry_dn = unsafe { entry_dn_reader.read_str(row as usize) };
+        let attrs = unsafe { attrs_reader.read_str(row as usize) };
         let result = ldap_write::add(url, dn, pass, entry_dn, attrs);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let message_vec = duckdb_struct_vector_get_child(output, 1);
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
     }
-}
+});
 
-/// ldap_modify(url, bind_dn, password, entry_dn, modifications) -> STRUCT(success, message)
-unsafe extern "C" fn cb_ldap_modify(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ldap_modify(url, bind_dn, password, entry_dn, modifications) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_ldap_modify, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let dn_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let entry_dn_reader = chunk.reader(3);
-    let mods_reader = chunk.reader(4);
+    let url_reader = unsafe { chunk.reader(0) };
+    let dn_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let entry_dn_reader = unsafe { chunk.reader(3) };
+    let mods_reader = unsafe { chunk.reader(4) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let dn = dn_reader.read_str(row as usize);
-        let pass = pass_reader.read_str(row as usize);
-        let entry_dn = entry_dn_reader.read_str(row as usize);
-        let mods = mods_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let dn = unsafe { dn_reader.read_str(row as usize) };
+        let pass = unsafe { pass_reader.read_str(row as usize) };
+        let entry_dn = unsafe { entry_dn_reader.read_str(row as usize) };
+        let mods = unsafe { mods_reader.read_str(row as usize) };
         let result = ldap_write::modify(url, dn, pass, entry_dn, mods);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let message_vec = duckdb_struct_vector_get_child(output, 1);
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
     }
-}
+});
 
-/// ldap_delete(url, bind_dn, password, entry_dn) -> STRUCT(success, message)
-unsafe extern "C" fn cb_ldap_delete(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ldap_delete(url, bind_dn, password, entry_dn) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_ldap_delete, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let dn_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let entry_dn_reader = chunk.reader(3);
+    let url_reader = unsafe { chunk.reader(0) };
+    let dn_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let entry_dn_reader = unsafe { chunk.reader(3) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let dn = dn_reader.read_str(row as usize);
-        let pass = pass_reader.read_str(row as usize);
-        let entry_dn = entry_dn_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let dn = unsafe { dn_reader.read_str(row as usize) };
+        let pass = unsafe { pass_reader.read_str(row as usize) };
+        let entry_dn = unsafe { entry_dn_reader.read_str(row as usize) };
         let result = ldap_write::delete(url, dn, pass, entry_dn);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let message_vec = duckdb_struct_vector_get_child(output, 1);
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

@@ -7,7 +7,7 @@ use quack_rs::prelude::*;
 use crate::imap;
 use crate::imap_write;
 
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 // ===== imap_list table function =====
 
@@ -85,18 +85,19 @@ unsafe extern "C" fn imap_list_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn imap_list_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<ImapListBindData>::get_from_function(info) {
+// imap_list_scan table scan callback
+quack_rs::table_scan_callback!(imap_list_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<ImapListBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<ImapListInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<ImapListInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -112,39 +113,39 @@ unsafe extern "C" fn imap_list_scan(info: duckdb_function_info, output: duckdb_d
             bind_data.limit,
         );
         if !result.success {
-            let fi = FunctionInfo::new(info);
+            let fi = unsafe { FunctionInfo::new(info) };
             fi.set_error(&result.message);
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
         init_data.messages = result.messages;
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut uid_w = out_chunk.writer(0);
-    let mut from_w = out_chunk.writer(1);
-    let mut to_w = out_chunk.writer(2);
-    let mut subject_w = out_chunk.writer(3);
-    let mut date_w = out_chunk.writer(4);
-    let mut size_w = out_chunk.writer(5);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut uid_w = unsafe { out_chunk.writer(0) };
+    let mut from_w = unsafe { out_chunk.writer(1) };
+    let mut to_w = unsafe { out_chunk.writer(2) };
+    let mut subject_w = unsafe { out_chunk.writer(3) };
+    let mut date_w = unsafe { out_chunk.writer(4) };
+    let mut size_w = unsafe { out_chunk.writer(5) };
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.messages.len() && count < max_chunk {
         let msg = &init_data.messages[init_data.idx];
-        uid_w.write_i64(count as usize, msg.uid);
-        from_w.write_varchar(count as usize, &msg.from);
-        to_w.write_varchar(count as usize, &msg.to);
-        subject_w.write_varchar(count as usize, &msg.subject);
-        date_w.write_varchar(count as usize, &msg.date);
-        size_w.write_i64(count as usize, msg.size);
+        unsafe { uid_w.write_i64(count as usize, msg.uid) };
+        unsafe { from_w.write_varchar(count as usize, &msg.from) };
+        unsafe { to_w.write_varchar(count as usize, &msg.to) };
+        unsafe { subject_w.write_varchar(count as usize, &msg.subject) };
+        unsafe { date_w.write_varchar(count as usize, &msg.date) };
+        unsafe { size_w.write_i64(count as usize, msg.size) };
         init_data.idx += 1;
         count += 1;
     }
 
-    duckdb_data_chunk_set_size(output, count);
-}
+    unsafe { duckdb_data_chunk_set_size(output, count) };
+});
 
 // ===== imap_fetch scalar =====
 
@@ -156,33 +157,29 @@ fn imap_fetch_result_type() -> LogicalType {
     ])
 }
 
-unsafe extern "C" fn cb_imap_fetch(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// imap_fetch(url, username, password, uid) -> STRUCT(success, body, message)
+quack_rs::scalar_callback!(cb_imap_fetch, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let uid_reader = chunk.reader(3);
+    let url_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let uid_reader = unsafe { chunk.reader(3) };
+
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let pass = pass_reader.read_str(row as usize);
-        let uid = uid_reader.read_i64(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let pass = unsafe { pass_reader.read_str(row as usize) };
+        let uid = unsafe { uid_reader.read_i64(row as usize) };
 
         let result = imap::fetch_message(url, user, pass, "INBOX", uid);
-        let mut success_w = StructVector::field_writer(output, 0);
-        let body_vec = duckdb_struct_vector_get_child(output, 1);
-        let message_vec = duckdb_struct_vector_get_child(output, 2);
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(body_vec, row, &result.body);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
 fn imap_write_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -191,99 +188,87 @@ fn imap_write_result_type() -> LogicalType {
     ])
 }
 
-/// imap_move(url, username, password, mailbox, uid, dest_mailbox) -> STRUCT(success, message)
-unsafe extern "C" fn cb_imap_move(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// imap_move(url, username, password, mailbox, uid, dest_mailbox) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_imap_move, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let mailbox_reader = chunk.reader(3);
-    let uid_reader = chunk.reader(4);
-    let dest_reader = chunk.reader(5);
+    let url_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let mailbox_reader = unsafe { chunk.reader(3) };
+    let uid_reader = unsafe { chunk.reader(4) };
+    let dest_reader = unsafe { chunk.reader(5) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let pass = pass_reader.read_str(row as usize);
-        let mailbox = mailbox_reader.read_str(row as usize);
-        let uid = uid_reader.read_i64(row as usize);
-        let dest = dest_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let pass = unsafe { pass_reader.read_str(row as usize) };
+        let mailbox = unsafe { mailbox_reader.read_str(row as usize) };
+        let uid = unsafe { uid_reader.read_i64(row as usize) };
+        let dest = unsafe { dest_reader.read_str(row as usize) };
 
         let result = imap_write::move_message(url, user, pass, mailbox, uid, dest);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let message_vec = duckdb_struct_vector_get_child(output, 1);
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
     }
-}
+});
 
-/// imap_delete(url, username, password, mailbox, uid) -> STRUCT(success, message)
-unsafe extern "C" fn cb_imap_delete(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// imap_delete(url, username, password, mailbox, uid) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_imap_delete, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let mailbox_reader = chunk.reader(3);
-    let uid_reader = chunk.reader(4);
+    let url_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let mailbox_reader = unsafe { chunk.reader(3) };
+    let uid_reader = unsafe { chunk.reader(4) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let pass = pass_reader.read_str(row as usize);
-        let mailbox = mailbox_reader.read_str(row as usize);
-        let uid = uid_reader.read_i64(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let pass = unsafe { pass_reader.read_str(row as usize) };
+        let mailbox = unsafe { mailbox_reader.read_str(row as usize) };
+        let uid = unsafe { uid_reader.read_i64(row as usize) };
 
         let result = imap_write::delete_message(url, user, pass, mailbox, uid);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let message_vec = duckdb_struct_vector_get_child(output, 1);
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
     }
-}
+});
 
-/// imap_flag(url, username, password, mailbox, uid, flags) -> STRUCT(success, message)
-unsafe extern "C" fn cb_imap_flag(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// imap_flag(url, username, password, mailbox, uid, flags) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_imap_flag, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let mailbox_reader = chunk.reader(3);
-    let uid_reader = chunk.reader(4);
-    let flags_reader = chunk.reader(5);
+    let url_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let mailbox_reader = unsafe { chunk.reader(3) };
+    let uid_reader = unsafe { chunk.reader(4) };
+    let flags_reader = unsafe { chunk.reader(5) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let pass = pass_reader.read_str(row as usize);
-        let mailbox = mailbox_reader.read_str(row as usize);
-        let uid = uid_reader.read_i64(row as usize);
-        let flags = flags_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let pass = unsafe { pass_reader.read_str(row as usize) };
+        let mailbox = unsafe { mailbox_reader.read_str(row as usize) };
+        let uid = unsafe { uid_reader.read_i64(row as usize) };
+        let flags = unsafe { flags_reader.read_str(row as usize) };
 
         let result = imap_write::flag_message(url, user, pass, mailbox, uid, flags);
 
-        let mut success_w = StructVector::field_writer(output, 0);
-        let message_vec = duckdb_struct_vector_get_child(output, 1);
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

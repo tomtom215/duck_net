@@ -8,7 +8,7 @@ use quack_rs::prelude::*;
 
 use crate::ping as ping_mod;
 
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 fn ping_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -19,59 +19,45 @@ fn ping_result_type() -> LogicalType {
     ])
 }
 
-/// ping(host) -> STRUCT(alive, latency_ms, ttl, message)
-unsafe extern "C" fn cb_ping(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ping(host) -> STRUCT(alive, latency_ms, ttl, message)
+quack_rs::scalar_callback!(cb_ping, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
+    let host_reader = unsafe { chunk.reader(0) };
 
-    let mut alive_w = StructVector::field_writer(output, 0);
-    let mut latency_w = StructVector::field_writer(output, 1);
-    let mut ttl_w = StructVector::field_writer(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
         let result = ping_mod::ping(host, 5);
 
-        alive_w.write_bool(row as usize, result.alive);
-        latency_w.write_f64(row as usize, result.latency_ms);
-        ttl_w.write_i32(row as usize, result.ttl);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.alive) };
+        unsafe { sw.write_f64(row as usize, 1, result.latency_ms) };
+        unsafe { sw.write_i32(row as usize, 2, result.ttl) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
     }
-}
+});
 
-/// ping(host, timeout_secs) -> STRUCT
-unsafe extern "C" fn cb_ping_timeout(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ping(host, timeout_secs) -> STRUCT
+quack_rs::scalar_callback!(cb_ping_timeout, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let timeout_reader = chunk.reader(1);
+    let host_reader = unsafe { chunk.reader(0) };
+    let timeout_reader = unsafe { chunk.reader(1) };
 
-    let mut alive_w = StructVector::field_writer(output, 0);
-    let mut latency_w = StructVector::field_writer(output, 1);
-    let mut ttl_w = StructVector::field_writer(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let timeout = timeout_reader.read_i32(row as usize) as u32;
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let timeout = unsafe { timeout_reader.read_i32(row as usize) } as u32;
         let result = ping_mod::ping(host, timeout);
 
-        alive_w.write_bool(row as usize, result.alive);
-        latency_w.write_f64(row as usize, result.latency_ms);
-        ttl_w.write_i32(row as usize, result.ttl);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.alive) };
+        unsafe { sw.write_f64(row as usize, 1, result.latency_ms) };
+        unsafe { sw.write_i32(row as usize, 2, result.ttl) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
     }
-}
+});
 
 // ===== traceroute table function =====
 
@@ -122,18 +108,19 @@ unsafe extern "C" fn traceroute_init(info: duckdb_init_info) {
     );
 }
 
-unsafe extern "C" fn traceroute_scan(info: duckdb_function_info, output: duckdb_data_chunk) {
-    let bind_data = match FfiBindData::<TracerouteBindData>::get_from_function(info) {
+// traceroute table scan callback
+quack_rs::table_scan_callback!(traceroute_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<TracerouteBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
-    let init_data = match FfiInitData::<TracerouteInitData>::get_mut(info) {
+    let init_data = match unsafe { FfiInitData::<TracerouteInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            duckdb_data_chunk_set_size(output, 0);
+            unsafe { duckdb_data_chunk_set_size(output, 0) };
             return;
         }
     };
@@ -145,33 +132,33 @@ unsafe extern "C" fn traceroute_scan(info: duckdb_function_info, output: duckdb_
             Err(e) => {
                 let fi = FunctionInfo::new(info);
                 fi.set_error(&e);
-                duckdb_data_chunk_set_size(output, 0);
+                unsafe { duckdb_data_chunk_set_size(output, 0) };
                 return;
             }
         }
     }
 
-    let out_chunk = DataChunk::from_raw(output);
-    let mut hop_w = out_chunk.writer(0);
-    let mut ip_w = out_chunk.writer(1);
-    let mut host_w = out_chunk.writer(2);
-    let mut lat_w = out_chunk.writer(3);
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut hop_w = unsafe { out_chunk.writer(0) };
+    let mut ip_w = unsafe { out_chunk.writer(1) };
+    let mut host_w = unsafe { out_chunk.writer(2) };
+    let mut lat_w = unsafe { out_chunk.writer(3) };
 
     let mut count: idx_t = 0;
     let max_chunk = 2048;
 
     while init_data.idx < init_data.hops.len() && count < max_chunk {
         let h = &init_data.hops[init_data.idx];
-        hop_w.write_i32(count as usize, h.hop);
-        ip_w.write_varchar(count as usize, &h.ip);
-        host_w.write_varchar(count as usize, &h.hostname);
-        lat_w.write_f64(count as usize, h.latency_ms);
+        unsafe { hop_w.write_i32(count as usize, h.hop) };
+        unsafe { ip_w.write_varchar(count as usize, &h.ip) };
+        unsafe { host_w.write_varchar(count as usize, &h.hostname) };
+        unsafe { lat_w.write_f64(count as usize, h.latency_ms) };
         init_data.idx += 1;
         count += 1;
     }
 
-    out_chunk.set_size(count as usize);
-}
+    unsafe { out_chunk.set_size(count as usize) };
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

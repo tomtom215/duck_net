@@ -79,6 +79,66 @@ pub(crate) unsafe fn write_varchar(vec: duckdb_vector, row: usize, s: &str) {
     w.write_varchar(row, s);
 }
 
+/// A convenience wrapper over a STRUCT output vector that holds one `VectorWriter`
+/// per child field. This eliminates the need for separate `StructVector::field_writer`
+/// / `duckdb_struct_vector_get_child` / `write_varchar` calls.
+pub(crate) struct StructWriter {
+    writers: Vec<VectorWriter>,
+}
+
+impl StructWriter {
+    /// Create a `StructWriter` for a STRUCT vector with `field_count` child fields.
+    ///
+    /// # Safety
+    /// `output` must be a valid DuckDB STRUCT vector with at least `field_count` children.
+    pub unsafe fn new(output: duckdb_vector, field_count: usize) -> Self {
+        let writers = (0..field_count)
+            .map(|i| StructVector::field_writer(output, i))
+            .collect();
+        Self { writers }
+    }
+
+    /// Write a boolean value to the given field at the given row.
+    ///
+    /// # Safety
+    /// Row index must be within the vector's allocated capacity.
+    pub unsafe fn write_bool(&mut self, row: usize, field: usize, val: bool) {
+        self.writers[field].write_bool(row, val);
+    }
+
+    /// Write an i32 value to the given field at the given row.
+    ///
+    /// # Safety
+    /// Row index must be within the vector's allocated capacity.
+    pub unsafe fn write_i32(&mut self, row: usize, field: usize, val: i32) {
+        self.writers[field].write_i32(row, val);
+    }
+
+    /// Write an i64 value to the given field at the given row.
+    ///
+    /// # Safety
+    /// Row index must be within the vector's allocated capacity.
+    pub unsafe fn write_i64(&mut self, row: usize, field: usize, val: i64) {
+        self.writers[field].write_i64(row, val);
+    }
+
+    /// Write a varchar (string) value to the given field at the given row.
+    ///
+    /// # Safety
+    /// Row index must be within the vector's allocated capacity.
+    pub unsafe fn write_varchar(&mut self, row: usize, field: usize, val: &str) {
+        self.writers[field].write_varchar(row, val);
+    }
+
+    /// Write an f64 value to the given field at the given row.
+    ///
+    /// # Safety
+    /// Row index must be within the vector's allocated capacity.
+    pub unsafe fn write_f64(&mut self, row: usize, field: usize, val: f64) {
+        self.writers[field].write_f64(row, val);
+    }
+}
+
 /// Write an HttpResponse into the output STRUCT vector at the given row.
 /// `map_offset` tracks the cumulative offset into the MAP child vector across rows.
 pub(crate) unsafe fn write_response(
@@ -138,103 +198,83 @@ fn method_as_ptr(m: Method) -> *mut c_void {
 
 // ===== Unified Callbacks =====
 
-/// Callback: (url VARCHAR) -> STRUCT
-unsafe extern "C" fn cb_url_only(
-    info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let method = method_from_info(info);
-    let chunk = DataChunk::from_raw(input);
+// Callback: (url VARCHAR) -> STRUCT
+quack_rs::scalar_callback!(cb_url_only, |info, input, output| {
+    let method = unsafe { method_from_info(info) };
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
         let resp = http::execute(method, url, &[], None);
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// Callback: (url VARCHAR, headers MAP) -> STRUCT
-unsafe extern "C" fn cb_url_headers(
-    info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let method = method_from_info(info);
-    let chunk = DataChunk::from_raw(input);
+// Callback: (url VARCHAR, headers MAP) -> STRUCT
+quack_rs::scalar_callback!(cb_url_headers, |info, input, output| {
+    let method = unsafe { method_from_info(info) };
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let headers = read_headers_map(input, 1, row);
+        let url = unsafe { url_reader.read_str(row) };
+        let headers = unsafe { read_headers_map(input, 1, row) };
         let resp = http::execute(method, url, &headers, None);
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// Callback: (url VARCHAR, body VARCHAR) -> STRUCT
-unsafe extern "C" fn cb_url_body(
-    info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let method = method_from_info(info);
-    let chunk = DataChunk::from_raw(input);
+// Callback: (url VARCHAR, body VARCHAR) -> STRUCT
+quack_rs::scalar_callback!(cb_url_body, |info, input, output| {
+    let method = unsafe { method_from_info(info) };
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let body_reader = chunk.reader(1);
+    let url_reader = unsafe { chunk.reader(0) };
+    let body_reader = unsafe { chunk.reader(1) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let body = body_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let body = unsafe { body_reader.read_str(row) };
         let resp = http::execute(method, url, &[], Some(body));
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// Callback: (url VARCHAR, headers MAP, body VARCHAR) -> STRUCT
-unsafe extern "C" fn cb_url_headers_body(
-    info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let method = method_from_info(info);
-    let chunk = DataChunk::from_raw(input);
+// Callback: (url VARCHAR, headers MAP, body VARCHAR) -> STRUCT
+quack_rs::scalar_callback!(cb_url_headers_body, |info, input, output| {
+    let method = unsafe { method_from_info(info) };
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let body_reader = chunk.reader(2);
+    let url_reader = unsafe { chunk.reader(0) };
+    let body_reader = unsafe { chunk.reader(2) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let headers = read_headers_map(input, 1, row);
-        let body = body_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let headers = unsafe { read_headers_map(input, 1, row) };
+        let body = unsafe { body_reader.read_str(row) };
         let resp = http::execute(method, url, &headers, Some(body));
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// Callback: http_request(method VARCHAR, url VARCHAR, headers MAP, body VARCHAR) -> STRUCT
-unsafe extern "C" fn cb_generic(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// Callback: http_request(method VARCHAR, url VARCHAR, headers MAP, body VARCHAR) -> STRUCT
+quack_rs::scalar_callback!(cb_generic, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let method_reader = chunk.reader(0);
-    let url_reader = chunk.reader(1);
-    let body_reader = chunk.reader(3);
+    let method_reader = unsafe { chunk.reader(0) };
+    let url_reader = unsafe { chunk.reader(1) };
+    let body_reader = unsafe { chunk.reader(3) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let method_str = method_reader.read_str(row);
+        let method_str = unsafe { method_reader.read_str(row) };
         let method = match Method::from_str(method_str) {
             Some(m) => m,
             None => {
@@ -244,121 +284,101 @@ unsafe extern "C" fn cb_generic(
                     headers: vec![],
                     body: String::new(),
                 };
-                write_response(output, row, &resp, &mut map_offset);
+                unsafe { write_response(output, row, &resp, &mut map_offset) };
                 continue;
             }
         };
-        let url = url_reader.read_str(row);
-        let headers = read_headers_map(input, 2, row);
-        let body = body_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let headers = unsafe { read_headers_map(input, 2, row) };
+        let body = unsafe { body_reader.read_str(row) };
         let body_opt = if body.is_empty() { None } else { Some(body) };
         let resp = http::execute(method, url, &headers, body_opt);
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// Callback: http_post_multipart(url, form_fields MAP, file_fields MAP) -> STRUCT
-unsafe extern "C" fn cb_multipart(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// Callback: http_post_multipart(url, form_fields MAP, file_fields MAP) -> STRUCT
+quack_rs::scalar_callback!(cb_multipart, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let form_fields = read_headers_map(input, 1, row);
-        let file_fields = read_headers_map(input, 2, row);
+        let url = unsafe { url_reader.read_str(row) };
+        let form_fields = unsafe { read_headers_map(input, 1, row) };
+        let file_fields = unsafe { read_headers_map(input, 2, row) };
         let resp = http::execute_multipart(url, &[], &form_fields, &file_fields);
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// Callback: http_post_multipart(url, headers MAP, form_fields MAP, file_fields MAP) -> STRUCT
-unsafe extern "C" fn cb_multipart_hdrs(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// Callback: http_post_multipart(url, headers MAP, form_fields MAP, file_fields MAP) -> STRUCT
+quack_rs::scalar_callback!(cb_multipart_hdrs, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let headers = read_headers_map(input, 1, row);
-        let form_fields = read_headers_map(input, 2, row);
-        let file_fields = read_headers_map(input, 3, row);
+        let url = unsafe { url_reader.read_str(row) };
+        let headers = unsafe { read_headers_map(input, 1, row) };
+        let form_fields = unsafe { read_headers_map(input, 2, row) };
+        let file_fields = unsafe { read_headers_map(input, 3, row) };
         let resp = http::execute_multipart(url, &headers, &form_fields, &file_fields);
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
 // ===== Auth Helper Callbacks =====
 
-/// Callback: http_basic_auth(username VARCHAR, password VARCHAR) -> VARCHAR
-/// Returns "Basic <base64(username:password)>"
-unsafe extern "C" fn cb_basic_auth(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
+// Callback: http_basic_auth(username VARCHAR, password VARCHAR) -> VARCHAR
+// Returns "Basic <base64(username:password)>"
+quack_rs::scalar_callback!(cb_basic_auth, |_info, input, output| {
     use base64::Engine as _;
-    let chunk = DataChunk::from_raw(input);
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let user_reader = chunk.reader(0);
-    let pass_reader = chunk.reader(1);
-    let mut writer = VectorWriter::from_vector(output);
+    let user_reader = unsafe { chunk.reader(0) };
+    let pass_reader = unsafe { chunk.reader(1) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let user = user_reader.read_str(row);
-        let pass = pass_reader.read_str(row);
+        let user = unsafe { user_reader.read_str(row) };
+        let pass = unsafe { pass_reader.read_str(row) };
         let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
         let header = format!("Basic {encoded}");
-        writer.write_varchar(row, &header);
+        unsafe { writer.write_varchar(row, &header) };
     }
-}
+});
 
-/// Callback: http_bearer_auth(token VARCHAR) -> VARCHAR
-/// Returns "Bearer <token>"
-unsafe extern "C" fn cb_bearer_auth(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// Callback: http_bearer_auth(token VARCHAR) -> VARCHAR
+// Returns "Bearer <token>"
+quack_rs::scalar_callback!(cb_bearer_auth, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let token_reader = chunk.reader(0);
-    let mut writer = VectorWriter::from_vector(output);
+    let token_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let token = token_reader.read_str(row);
+        let token = unsafe { token_reader.read_str(row) };
         let header = format!("Bearer {token}");
-        writer.write_varchar(row, &header);
+        unsafe { writer.write_varchar(row, &header) };
     }
-}
+});
 
-/// Callback: http_oauth2_token(token_url, client_id, client_secret) -> VARCHAR
-unsafe extern "C" fn cb_oauth2_token(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// Callback: http_oauth2_token(token_url, client_id, client_secret) -> VARCHAR
+quack_rs::scalar_callback!(cb_oauth2_token, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let id_reader = chunk.reader(1);
-    let secret_reader = chunk.reader(2);
-    let mut writer = VectorWriter::from_vector(output);
+    let url_reader = unsafe { chunk.reader(0) };
+    let id_reader = unsafe { chunk.reader(1) };
+    let secret_reader = unsafe { chunk.reader(2) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let token_url = url_reader.read_str(row);
-        let client_id = id_reader.read_str(row);
-        let client_secret = secret_reader.read_str(row);
+        let token_url = unsafe { url_reader.read_str(row) };
+        let client_id = unsafe { id_reader.read_str(row) };
+        let client_secret = unsafe { secret_reader.read_str(row) };
 
         let form_body = format!(
             "grant_type=client_credentials&client_id={}&client_secret={}",
@@ -384,29 +404,25 @@ unsafe extern "C" fn cb_oauth2_token(
         } else {
             format!("OAuth2 error: {} {}", resp.status, resp.reason)
         };
-        writer.write_varchar(row, &header);
+        unsafe { writer.write_varchar(row, &header) };
     }
-}
+});
 
-/// Callback: http_oauth2_token(token_url, client_id, client_secret, scope) -> VARCHAR
-unsafe extern "C" fn cb_oauth2_token_scoped(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// Callback: http_oauth2_token(token_url, client_id, client_secret, scope) -> VARCHAR
+quack_rs::scalar_callback!(cb_oauth2_token_scoped, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let id_reader = chunk.reader(1);
-    let secret_reader = chunk.reader(2);
-    let scope_reader = chunk.reader(3);
-    let mut writer = VectorWriter::from_vector(output);
+    let url_reader = unsafe { chunk.reader(0) };
+    let id_reader = unsafe { chunk.reader(1) };
+    let secret_reader = unsafe { chunk.reader(2) };
+    let scope_reader = unsafe { chunk.reader(3) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let token_url = url_reader.read_str(row);
-        let client_id = id_reader.read_str(row);
-        let client_secret = secret_reader.read_str(row);
-        let scope = scope_reader.read_str(row);
+        let token_url = unsafe { url_reader.read_str(row) };
+        let client_id = unsafe { id_reader.read_str(row) };
+        let client_secret = unsafe { secret_reader.read_str(row) };
+        let scope = unsafe { scope_reader.read_str(row) };
 
         let form_body = format!(
             "grant_type=client_credentials&client_id={}&client_secret={}&scope={}",
@@ -433,9 +449,9 @@ unsafe extern "C" fn cb_oauth2_token_scoped(
         } else {
             format!("OAuth2 error: {} {}", resp.status, resp.reason)
         };
-        writer.write_varchar(row, &header);
+        unsafe { writer.write_varchar(row, &header) };
     }
-}
+});
 
 // ===== Registration =====
 

@@ -6,7 +6,7 @@ use quack_rs::prelude::*;
 
 use crate::memcached;
 
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 fn memcached_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -16,92 +16,74 @@ fn memcached_result_type() -> LogicalType {
     ])
 }
 
-/// memcached_get(host, key) -> STRUCT(success, value, message)
-unsafe extern "C" fn cb_memcached_get(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// memcached_get(host, key) -> STRUCT(success, value, message)
+quack_rs::scalar_callback!(cb_memcached_get, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
+    let host_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let value_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
 
         let result = memcached::get(host, key);
 
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(value_vec, row, &result.value);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-/// memcached_set(host, key, value) -> STRUCT (TTL = 0, never expire)
-unsafe extern "C" fn cb_memcached_set(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// memcached_set(host, key, value) -> STRUCT (TTL = 0, never expire)
+quack_rs::scalar_callback!(cb_memcached_set, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
-    let value_reader = chunk.reader(2);
+    let host_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+    let value_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let value_out_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let value = value_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
+        let value = unsafe { value_reader.read_str(row as usize) };
 
         let result = memcached::set(host, key, value, 0);
 
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(value_out_vec, row, &result.value);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-/// memcached_set(host, key, value, ttl) -> STRUCT
-unsafe extern "C" fn cb_memcached_set_ttl(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// memcached_set(host, key, value, ttl) -> STRUCT
+quack_rs::scalar_callback!(cb_memcached_set_ttl, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
-    let value_reader = chunk.reader(2);
-    let ttl_reader = chunk.reader(3);
+    let host_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+    let value_reader = unsafe { chunk.reader(2) };
+    let ttl_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let value_out_vec = duckdb_struct_vector_get_child(output, 1);
-    let message_vec = duckdb_struct_vector_get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let value = value_reader.read_str(row as usize);
-        let ttl = ttl_reader.read_i32(row as usize) as u32;
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
+        let value = unsafe { value_reader.read_str(row as usize) };
+        let ttl = unsafe { ttl_reader.read_i32(row as usize) } as u32;
 
         let result = memcached::set(host, key, value, ttl);
 
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(value_out_vec, row, &result.value);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

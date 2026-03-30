@@ -6,6 +6,7 @@ use quack_rs::prelude::*;
 
 use crate::smtp::{self, SmtpConfig};
 
+use super::scalars::StructWriter;
 
 /// STRUCT(success BOOLEAN, message VARCHAR)
 fn smtp_result_type() -> LogicalType {
@@ -15,34 +16,25 @@ fn smtp_result_type() -> LogicalType {
     ])
 }
 
-unsafe fn write_smtp_result(output: duckdb_vector, row: usize, success: bool, message: &str) {
-    let mut success_w = StructVector::field_writer(output, 0);
-    let mut message_w = StructVector::field_writer(output, 1);
-
-    success_w.write_bool(row, success);
-    message_w.write_varchar(row, message);
-}
-
-/// smtp_send(server, from, to, subject, body) -> STRUCT(success, message)
-unsafe extern "C" fn cb_smtp_send_5(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// smtp_send(server, from, to, subject, body) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_smtp_send_5, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let server_reader = chunk.reader(0);
-    let from_reader = chunk.reader(1);
-    let to_reader = chunk.reader(2);
-    let subject_reader = chunk.reader(3);
-    let body_reader = chunk.reader(4);
+    let server_reader = unsafe { chunk.reader(0) };
+    let from_reader = unsafe { chunk.reader(1) };
+    let to_reader = unsafe { chunk.reader(2) };
+    let subject_reader = unsafe { chunk.reader(3) };
+    let body_reader = unsafe { chunk.reader(4) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let server = server_reader.read_str(row);
+        let server = unsafe { server_reader.read_str(row) };
         let (host, port, use_tls) = match smtp::parse_server_url(server) {
             Ok(v) => v,
             Err(e) => {
-                write_smtp_result(output, row, false, &e);
+                unsafe { sw.write_bool(row, 0, false) };
+                unsafe { sw.write_varchar(row, 1, &e) };
                 continue;
             }
         };
@@ -51,41 +43,41 @@ unsafe extern "C" fn cb_smtp_send_5(
             host,
             port,
             use_tls,
-            from: from_reader.read_str(row).to_string(),
-            to: to_reader.read_str(row).to_string(),
-            subject: subject_reader.read_str(row).to_string(),
-            body: body_reader.read_str(row).to_string(),
+            from: unsafe { from_reader.read_str(row) }.to_string(),
+            to: unsafe { to_reader.read_str(row) }.to_string(),
+            subject: unsafe { subject_reader.read_str(row) }.to_string(),
+            body: unsafe { body_reader.read_str(row) }.to_string(),
             username: None,
             password: None,
         };
 
         let result = smtp::send(&config);
-        write_smtp_result(output, row, result.success, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
-}
+});
 
-/// smtp_send(server, from, to, subject, body, username, password) -> STRUCT(success, message)
-unsafe extern "C" fn cb_smtp_send_7(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// smtp_send(server, from, to, subject, body, username, password) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_smtp_send_7, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let server_reader = chunk.reader(0);
-    let from_reader = chunk.reader(1);
-    let to_reader = chunk.reader(2);
-    let subject_reader = chunk.reader(3);
-    let body_reader = chunk.reader(4);
-    let user_reader = chunk.reader(5);
-    let pass_reader = chunk.reader(6);
+    let server_reader = unsafe { chunk.reader(0) };
+    let from_reader = unsafe { chunk.reader(1) };
+    let to_reader = unsafe { chunk.reader(2) };
+    let subject_reader = unsafe { chunk.reader(3) };
+    let body_reader = unsafe { chunk.reader(4) };
+    let user_reader = unsafe { chunk.reader(5) };
+    let pass_reader = unsafe { chunk.reader(6) };
+
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let server = server_reader.read_str(row);
+        let server = unsafe { server_reader.read_str(row) };
         let (host, port, use_tls) = match smtp::parse_server_url(server) {
             Ok(v) => v,
             Err(e) => {
-                write_smtp_result(output, row, false, &e);
+                unsafe { sw.write_bool(row, 0, false) };
+                unsafe { sw.write_varchar(row, 1, &e) };
                 continue;
             }
         };
@@ -94,18 +86,19 @@ unsafe extern "C" fn cb_smtp_send_7(
             host,
             port,
             use_tls,
-            from: from_reader.read_str(row).to_string(),
-            to: to_reader.read_str(row).to_string(),
-            subject: subject_reader.read_str(row).to_string(),
-            body: body_reader.read_str(row).to_string(),
-            username: Some(user_reader.read_str(row).to_string()),
-            password: Some(pass_reader.read_str(row).to_string()),
+            from: unsafe { from_reader.read_str(row) }.to_string(),
+            to: unsafe { to_reader.read_str(row) }.to_string(),
+            subject: unsafe { subject_reader.read_str(row) }.to_string(),
+            body: unsafe { body_reader.read_str(row) }.to_string(),
+            username: Some(unsafe { user_reader.read_str(row) }.to_string()),
+            password: Some(unsafe { pass_reader.read_str(row) }.to_string()),
         };
 
         let result = smtp::send(&config);
-        write_smtp_result(output, row, result.success, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

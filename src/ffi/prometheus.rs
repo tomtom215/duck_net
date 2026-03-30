@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::prometheus;
-
-use super::scalars::write_varchar;
 
 fn prometheus_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -17,71 +14,57 @@ fn prometheus_result_type() -> LogicalType {
     ])
 }
 
-/// prometheus_query(url, promql) -> STRUCT(success, result_type, body, message)
-unsafe extern "C" fn cb_prometheus_query(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// prometheus_query(url, promql) -> STRUCT(success, result_type, body, message)
+quack_rs::scalar_callback!(cb_prometheus_query, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let promql_reader = chunk.reader(1);
+    let url_reader = unsafe { chunk.reader(0) };
+    let promql_reader = unsafe { chunk.reader(1) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let rtype_vec = duckdb_struct_vector_get_child(output, 1);
-    let body_vec = duckdb_struct_vector_get_child(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let promql = promql_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let promql = unsafe { promql_reader.read_str(row) };
 
         let result = prometheus::query(url, promql);
 
-        success_w.write_bool(row, result.success);
-        write_varchar(rtype_vec, row, &result.result_type);
-        write_varchar(body_vec, row, &result.body);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.result_type) };
+        unsafe { sw.write_varchar(row, 2, &result.body) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
-}
+});
 
-/// prometheus_query_range(url, promql, start, end, step) -> STRUCT
-unsafe extern "C" fn cb_prometheus_query_range(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// prometheus_query_range(url, promql, start, end, step) -> STRUCT
+quack_rs::scalar_callback!(cb_prometheus_query_range, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let promql_reader = chunk.reader(1);
-    let start_reader = chunk.reader(2);
-    let end_reader = chunk.reader(3);
-    let step_reader = chunk.reader(4);
+    let url_reader = unsafe { chunk.reader(0) };
+    let promql_reader = unsafe { chunk.reader(1) };
+    let start_reader = unsafe { chunk.reader(2) };
+    let end_reader = unsafe { chunk.reader(3) };
+    let step_reader = unsafe { chunk.reader(4) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let rtype_vec = duckdb_struct_vector_get_child(output, 1);
-    let body_vec = duckdb_struct_vector_get_child(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let promql = promql_reader.read_str(row);
-        let start = start_reader.read_str(row);
-        let end = end_reader.read_str(row);
-        let step = step_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let promql = unsafe { promql_reader.read_str(row) };
+        let start = unsafe { start_reader.read_str(row) };
+        let end = unsafe { end_reader.read_str(row) };
+        let step = unsafe { step_reader.read_str(row) };
 
         let result = prometheus::query_range(url, promql, start, end, step);
 
-        success_w.write_bool(row, result.success);
-        write_varchar(rtype_vec, row, &result.result_type);
-        write_varchar(body_vec, row, &result.body);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.result_type) };
+        unsafe { sw.write_varchar(row, 2, &result.body) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
-}
+});
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // prometheus_query(url, promql)

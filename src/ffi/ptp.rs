@@ -6,7 +6,7 @@ use quack_rs::prelude::*;
 
 use crate::ptp;
 
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 fn sntp_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -42,76 +42,59 @@ fn ptp_probe_result_type() -> LogicalType {
     ])
 }
 
-/// sntp_query(server) -> STRUCT(offset_ns, delay_ns, stratum, leap_indicator, version,
-///     poll_interval, precision, root_delay_us, root_dispersion_us, reference_id,
-///     reference_time_unix, receive_time_unix, transmit_time_unix, server_time_unix)
-unsafe extern "C" fn cb_sntp_query(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// sntp_query(server) -> STRUCT(offset_ns, delay_ns, stratum, leap_indicator, version,
+//     poll_interval, precision, root_delay_us, root_dispersion_us, reference_id,
+//     reference_time_unix, receive_time_unix, transmit_time_unix, server_time_unix)
+quack_rs::scalar_callback!(cb_sntp_query, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let server_reader = chunk.reader(0);
+    let server_reader = unsafe { chunk.reader(0) };
 
-    let mut offset_w = StructVector::field_writer(output, 0);
-    let mut delay_w = StructVector::field_writer(output, 1);
-    let mut stratum_w = StructVector::field_writer(output, 2);
-    let mut leap_w = StructVector::field_writer(output, 3);
-    let mut version_w = StructVector::field_writer(output, 4);
-    let mut poll_w = StructVector::field_writer(output, 5);
-    let mut precision_w = StructVector::field_writer(output, 6);
-    let mut root_delay_w = StructVector::field_writer(output, 7);
-    let mut root_disp_w = StructVector::field_writer(output, 8);
-    let refid_vec = StructVector::get_child(output, 9);
-    let mut ref_time_w = StructVector::field_writer(output, 10);
-    let mut rx_time_w = StructVector::field_writer(output, 11);
-    let mut tx_time_w = StructVector::field_writer(output, 12);
-    let mut srv_time_w = StructVector::field_writer(output, 13);
+    let mut sw = unsafe { StructWriter::new(output, 14) };
 
     for row in 0..row_count {
-        let server = server_reader.read_str(row as usize);
+        let server = unsafe { server_reader.read_str(row as usize) };
         match ptp::sntp_query(server) {
             Ok(result) => {
-                offset_w.write_f64(row as usize, result.offset_ns);
-                delay_w.write_f64(row as usize, result.delay_ns);
-                stratum_w.write_i32(row as usize, result.stratum as i32);
-                leap_w.write_i32(row as usize, result.leap_indicator as i32);
-                version_w.write_i32(row as usize, result.version as i32);
-                poll_w.write_i32(row as usize, result.poll_interval as i32);
-                precision_w.write_i32(row as usize, result.precision as i32);
-                root_delay_w.write_f64(row as usize, result.root_delay_us);
-                root_disp_w.write_f64(row as usize, result.root_dispersion_us);
-                write_varchar(refid_vec, row as usize, &result.reference_id);
-                ref_time_w.write_f64(row as usize, result.reference_time_unix);
-                rx_time_w.write_f64(row as usize, result.receive_time_unix);
-                tx_time_w.write_f64(row as usize, result.transmit_time_unix);
-                srv_time_w.write_f64(row as usize, result.server_time_unix);
+                unsafe { sw.write_f64(row as usize, 0, result.offset_ns) };
+                unsafe { sw.write_f64(row as usize, 1, result.delay_ns) };
+                unsafe { sw.write_i32(row as usize, 2, result.stratum as i32) };
+                unsafe { sw.write_i32(row as usize, 3, result.leap_indicator as i32) };
+                unsafe { sw.write_i32(row as usize, 4, result.version as i32) };
+                unsafe { sw.write_i32(row as usize, 5, result.poll_interval as i32) };
+                unsafe { sw.write_i32(row as usize, 6, result.precision as i32) };
+                unsafe { sw.write_f64(row as usize, 7, result.root_delay_us) };
+                unsafe { sw.write_f64(row as usize, 8, result.root_dispersion_us) };
+                unsafe { sw.write_varchar(row as usize, 9, &result.reference_id) };
+                unsafe { sw.write_f64(row as usize, 10, result.reference_time_unix) };
+                unsafe { sw.write_f64(row as usize, 11, result.receive_time_unix) };
+                unsafe { sw.write_f64(row as usize, 12, result.transmit_time_unix) };
+                unsafe { sw.write_f64(row as usize, 13, result.server_time_unix) };
             }
             Err(e) => {
-                offset_w.write_f64(row as usize, 0.0);
-                delay_w.write_f64(row as usize, 0.0);
-                stratum_w.write_i32(row as usize, -1);
-                leap_w.write_i32(row as usize, 0);
-                version_w.write_i32(row as usize, 0);
-                poll_w.write_i32(row as usize, 0);
-                precision_w.write_i32(row as usize, 0);
-                root_delay_w.write_f64(row as usize, 0.0);
-                root_disp_w.write_f64(row as usize, 0.0);
-                write_varchar(refid_vec, row as usize, &format!("Error: {e}"));
-                ref_time_w.write_f64(row as usize, 0.0);
-                rx_time_w.write_f64(row as usize, 0.0);
-                tx_time_w.write_f64(row as usize, 0.0);
-                srv_time_w.write_f64(row as usize, 0.0);
+                unsafe { sw.write_f64(row as usize, 0, 0.0) };
+                unsafe { sw.write_f64(row as usize, 1, 0.0) };
+                unsafe { sw.write_i32(row as usize, 2, -1) };
+                unsafe { sw.write_i32(row as usize, 3, 0) };
+                unsafe { sw.write_i32(row as usize, 4, 0) };
+                unsafe { sw.write_i32(row as usize, 5, 0) };
+                unsafe { sw.write_i32(row as usize, 6, 0) };
+                unsafe { sw.write_f64(row as usize, 7, 0.0) };
+                unsafe { sw.write_f64(row as usize, 8, 0.0) };
+                unsafe { sw.write_varchar(row as usize, 9, &format!("Error: {e}")) };
+                unsafe { sw.write_f64(row as usize, 10, 0.0) };
+                unsafe { sw.write_f64(row as usize, 11, 0.0) };
+                unsafe { sw.write_f64(row as usize, 12, 0.0) };
+                unsafe { sw.write_f64(row as usize, 13, 0.0) };
             }
         }
     }
-}
+});
 
 /// Helper to write a PtpProbeResult (or error defaults) into the output vectors at a given row.
 #[allow(clippy::too_many_arguments)]
 unsafe fn write_ptp_probe_row(
-    output: duckdb_vector,
+    sw: &mut StructWriter,
     row: usize,
     best_offset_ns: f64,
     best_delay_ns: f64,
@@ -124,129 +107,122 @@ unsafe fn write_ptp_probe_row(
     reference_id: &str,
     server_time_unix: f64,
 ) {
-    let mut best_offset_w = StructVector::field_writer(output, 0);
-    let mut best_delay_w = StructVector::field_writer(output, 1);
-    let mut avg_offset_w = StructVector::field_writer(output, 2);
-    let mut min_delay_w = StructVector::field_writer(output, 3);
-    let mut max_delay_w = StructVector::field_writer(output, 4);
-    let mut stddev_w = StructVector::field_writer(output, 5);
-    let mut samples_w = StructVector::field_writer(output, 6);
-    let mut stratum_w = StructVector::field_writer(output, 7);
-    let refid_vec = StructVector::get_child(output, 8);
-    let mut srv_time_w = StructVector::field_writer(output, 9);
-
-    best_offset_w.write_f64(row as usize, best_offset_ns);
-    best_delay_w.write_f64(row as usize, best_delay_ns);
-    avg_offset_w.write_f64(row as usize, avg_offset_ns);
-    min_delay_w.write_f64(row as usize, min_delay_ns);
-    max_delay_w.write_f64(row as usize, max_delay_ns);
-    stddev_w.write_f64(row as usize, stddev_ns);
-    samples_w.write_i32(row as usize, samples);
-    stratum_w.write_i32(row as usize, stratum);
-    write_varchar(refid_vec, row as usize, reference_id);
-    srv_time_w.write_f64(row as usize, server_time_unix);
+    sw.write_f64(row, 0, best_offset_ns);
+    sw.write_f64(row, 1, best_delay_ns);
+    sw.write_f64(row, 2, avg_offset_ns);
+    sw.write_f64(row, 3, min_delay_ns);
+    sw.write_f64(row, 4, max_delay_ns);
+    sw.write_f64(row, 5, stddev_ns);
+    sw.write_i32(row, 6, samples);
+    sw.write_i32(row, 7, stratum);
+    sw.write_varchar(row, 8, reference_id);
+    sw.write_f64(row, 9, server_time_unix);
 }
 
-/// ptp_probe(server, count) -> STRUCT(best_offset_ns, best_delay_ns, avg_offset_ns,
-///     min_delay_ns, max_delay_ns, stddev_ns, samples, stratum, reference_id, server_time_unix)
-unsafe extern "C" fn cb_ptp_probe(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ptp_probe(server, count) -> STRUCT(best_offset_ns, best_delay_ns, avg_offset_ns,
+//     min_delay_ns, max_delay_ns, stddev_ns, samples, stratum, reference_id, server_time_unix)
+quack_rs::scalar_callback!(cb_ptp_probe, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let server_reader = chunk.reader(0);
-    let count_reader = chunk.reader(1);
+    let server_reader = unsafe { chunk.reader(0) };
+    let count_reader = unsafe { chunk.reader(1) };
+
+    let mut sw = unsafe { StructWriter::new(output, 10) };
 
     for row in 0..row_count {
-        let server = server_reader.read_str(row as usize);
-        let count = count_reader.read_i32(row as usize) as u8;
+        let server = unsafe { server_reader.read_str(row as usize) };
+        let count = unsafe { count_reader.read_i32(row as usize) } as u8;
         match ptp::ptp_probe(server, count) {
             Ok(result) => {
-                write_ptp_probe_row(
-                    output,
-                    row,
-                    result.best_offset_ns,
-                    result.best_delay_ns,
-                    result.avg_offset_ns,
-                    result.min_delay_ns,
-                    result.max_delay_ns,
-                    result.stddev_ns,
-                    result.samples as i32,
-                    result.stratum as i32,
-                    &result.reference_id,
-                    result.server_time_unix,
-                );
+                unsafe {
+                    write_ptp_probe_row(
+                        &mut sw,
+                        row,
+                        result.best_offset_ns,
+                        result.best_delay_ns,
+                        result.avg_offset_ns,
+                        result.min_delay_ns,
+                        result.max_delay_ns,
+                        result.stddev_ns,
+                        result.samples as i32,
+                        result.stratum as i32,
+                        &result.reference_id,
+                        result.server_time_unix,
+                    )
+                };
             }
             Err(e) => {
-                write_ptp_probe_row(
-                    output,
-                    row,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0,
-                    -1,
-                    &format!("Error: {e}"),
-                    0.0,
-                );
+                unsafe {
+                    write_ptp_probe_row(
+                        &mut sw,
+                        row,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0,
+                        -1,
+                        &format!("Error: {e}"),
+                        0.0,
+                    )
+                };
             }
         }
     }
-}
+});
 
-/// ptp_probe(server) -> same as above with default count=4
-unsafe extern "C" fn cb_ptp_probe_default(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ptp_probe(server) -> same as above with default count=4
+quack_rs::scalar_callback!(cb_ptp_probe_default, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let server_reader = chunk.reader(0);
+    let server_reader = unsafe { chunk.reader(0) };
+
+    let mut sw = unsafe { StructWriter::new(output, 10) };
 
     for row in 0..row_count {
-        let server = server_reader.read_str(row as usize);
+        let server = unsafe { server_reader.read_str(row as usize) };
         match ptp::ptp_probe(server, 4) {
             Ok(result) => {
-                write_ptp_probe_row(
-                    output,
-                    row,
-                    result.best_offset_ns,
-                    result.best_delay_ns,
-                    result.avg_offset_ns,
-                    result.min_delay_ns,
-                    result.max_delay_ns,
-                    result.stddev_ns,
-                    result.samples as i32,
-                    result.stratum as i32,
-                    &result.reference_id,
-                    result.server_time_unix,
-                );
+                unsafe {
+                    write_ptp_probe_row(
+                        &mut sw,
+                        row,
+                        result.best_offset_ns,
+                        result.best_delay_ns,
+                        result.avg_offset_ns,
+                        result.min_delay_ns,
+                        result.max_delay_ns,
+                        result.stddev_ns,
+                        result.samples as i32,
+                        result.stratum as i32,
+                        &result.reference_id,
+                        result.server_time_unix,
+                    )
+                };
             }
             Err(e) => {
-                write_ptp_probe_row(
-                    output,
-                    row,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0,
-                    -1,
-                    &format!("Error: {e}"),
-                    0.0,
-                );
+                unsafe {
+                    write_ptp_probe_row(
+                        &mut sw,
+                        row,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0,
+                        -1,
+                        &format!("Error: {e}"),
+                        0.0,
+                    )
+                };
             }
         }
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     ScalarFunctionBuilder::new("sntp_query")

@@ -6,7 +6,7 @@ use quack_rs::prelude::*;
 
 use crate::amqp;
 
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 fn amqp_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -15,63 +15,53 @@ fn amqp_result_type() -> LogicalType {
     ])
 }
 
-/// amqp_publish(url, exchange, routing_key, message) -> STRUCT(success, message)
-unsafe extern "C" fn cb_amqp_publish(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// amqp_publish(url, exchange, routing_key, message) -> STRUCT(success, message)
+quack_rs::scalar_callback!(cb_amqp_publish, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let exchange_reader = chunk.reader(1);
-    let rk_reader = chunk.reader(2);
-    let msg_reader = chunk.reader(3);
+    let url_reader = unsafe { chunk.reader(0) };
+    let exchange_reader = unsafe { chunk.reader(1) };
+    let rk_reader = unsafe { chunk.reader(2) };
+    let msg_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let exchange = exchange_reader.read_str(row);
-        let routing_key = rk_reader.read_str(row);
-        let msg = msg_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let exchange = unsafe { exchange_reader.read_str(row) };
+        let routing_key = unsafe { rk_reader.read_str(row) };
+        let msg = unsafe { msg_reader.read_str(row) };
 
         let result = amqp::publish(url, exchange, routing_key, msg, None);
-        success_w.write_bool(row, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
-}
+});
 
-/// amqp_publish(url, exchange, routing_key, message, content_type) -> STRUCT
-unsafe extern "C" fn cb_amqp_publish_ct(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// amqp_publish(url, exchange, routing_key, message, content_type) -> STRUCT
+quack_rs::scalar_callback!(cb_amqp_publish_ct, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let exchange_reader = chunk.reader(1);
-    let rk_reader = chunk.reader(2);
-    let msg_reader = chunk.reader(3);
-    let ct_reader = chunk.reader(4);
+    let url_reader = unsafe { chunk.reader(0) };
+    let exchange_reader = unsafe { chunk.reader(1) };
+    let rk_reader = unsafe { chunk.reader(2) };
+    let msg_reader = unsafe { chunk.reader(3) };
+    let ct_reader = unsafe { chunk.reader(4) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let message_vec = duckdb_struct_vector_get_child(output, 1);
+    let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let exchange = exchange_reader.read_str(row);
-        let routing_key = rk_reader.read_str(row);
-        let msg = msg_reader.read_str(row);
-        let ct = ct_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let exchange = unsafe { exchange_reader.read_str(row) };
+        let routing_key = unsafe { rk_reader.read_str(row) };
+        let msg = unsafe { msg_reader.read_str(row) };
+        let ct = unsafe { ct_reader.read_str(row) };
 
         let result = amqp::publish(url, exchange, routing_key, msg, Some(ct));
-        success_w.write_bool(row, result.success);
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

@@ -7,7 +7,7 @@ use quack_rs::prelude::*;
 use crate::scp;
 use crate::ssh;
 
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 fn ssh_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -35,273 +35,219 @@ fn scp_write_result_type() -> LogicalType {
     ])
 }
 
-/// ssh_exec(host, user, key_file, command) -> STRUCT(success, exit_code, stdout, stderr)
-unsafe extern "C" fn cb_ssh_exec(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ssh_exec(host, user, key_file, command) -> STRUCT(success, exit_code, stdout, stderr)
+quack_rs::scalar_callback!(cb_ssh_exec, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let key_reader = chunk.reader(2);
-    let cmd_reader = chunk.reader(3);
+    let host_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let key_reader = unsafe { chunk.reader(2) };
+    let cmd_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let mut exit_w = StructVector::field_writer(output, 1);
-    let stdout_vec = StructVector::get_child(output, 2);
-    let stderr_vec = StructVector::get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let key_file = key_reader.read_str(row as usize);
-        let command = cmd_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let key_file = unsafe { key_reader.read_str(row as usize) };
+        let command = unsafe { cmd_reader.read_str(row as usize) };
 
         let result = ssh::exec(host, 22, user, key_file, command);
 
-        success_w.write_bool(row as usize, result.success);
-        exit_w.write_i32(row as usize, result.exit_code);
-        write_varchar(stdout_vec, row as usize, &result.stdout);
-        write_varchar(stderr_vec, row as usize, &result.stderr);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_i32(row as usize, 1, result.exit_code) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.stdout) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.stderr) };
     }
-}
+});
 
-/// ssh_exec(host, port, user, key_file, command) -> STRUCT
-unsafe extern "C" fn cb_ssh_exec_port(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ssh_exec(host, port, user, key_file, command) -> STRUCT
+quack_rs::scalar_callback!(cb_ssh_exec_port, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let port_reader = chunk.reader(1);
-    let user_reader = chunk.reader(2);
-    let key_reader = chunk.reader(3);
-    let cmd_reader = chunk.reader(4);
+    let host_reader = unsafe { chunk.reader(0) };
+    let port_reader = unsafe { chunk.reader(1) };
+    let user_reader = unsafe { chunk.reader(2) };
+    let key_reader = unsafe { chunk.reader(3) };
+    let cmd_reader = unsafe { chunk.reader(4) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let mut exit_w = StructVector::field_writer(output, 1);
-    let stdout_vec = StructVector::get_child(output, 2);
-    let stderr_vec = StructVector::get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let port = port_reader.read_i32(row as usize) as u16;
-        let user = user_reader.read_str(row as usize);
-        let key_file = key_reader.read_str(row as usize);
-        let command = cmd_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let port = unsafe { port_reader.read_i32(row as usize) } as u16;
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let key_file = unsafe { key_reader.read_str(row as usize) };
+        let command = unsafe { cmd_reader.read_str(row as usize) };
 
         let result = ssh::exec(host, port, user, key_file, command);
 
-        success_w.write_bool(row as usize, result.success);
-        exit_w.write_i32(row as usize, result.exit_code);
-        write_varchar(stdout_vec, row as usize, &result.stdout);
-        write_varchar(stderr_vec, row as usize, &result.stderr);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_i32(row as usize, 1, result.exit_code) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.stdout) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.stderr) };
     }
-}
+});
 
-/// ssh_exec_password(host, user, password, command) -> STRUCT
-unsafe extern "C" fn cb_ssh_exec_password(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// ssh_exec_password(host, user, password, command) -> STRUCT
+quack_rs::scalar_callback!(cb_ssh_exec_password, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let cmd_reader = chunk.reader(3);
+    let host_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let cmd_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let mut exit_w = StructVector::field_writer(output, 1);
-    let stdout_vec = StructVector::get_child(output, 2);
-    let stderr_vec = StructVector::get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let password = pass_reader.read_str(row as usize);
-        let command = cmd_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let password = unsafe { pass_reader.read_str(row as usize) };
+        let command = unsafe { cmd_reader.read_str(row as usize) };
 
         let result = ssh::exec_password(host, 22, user, password, command);
 
-        success_w.write_bool(row as usize, result.success);
-        exit_w.write_i32(row as usize, result.exit_code);
-        write_varchar(stdout_vec, row as usize, &result.stdout);
-        write_varchar(stderr_vec, row as usize, &result.stderr);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_i32(row as usize, 1, result.exit_code) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.stdout) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.stderr) };
     }
-}
+});
 
-/// scp_read(host, user, key_file, remote_path) -> STRUCT(success, data, size, message)
-unsafe extern "C" fn cb_scp_read(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// scp_read(host, user, key_file, remote_path) -> STRUCT(success, data, size, message)
+quack_rs::scalar_callback!(cb_scp_read, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let key_reader = chunk.reader(2);
-    let path_reader = chunk.reader(3);
+    let host_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let key_reader = unsafe { chunk.reader(2) };
+    let path_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let data_vec = StructVector::get_child(output, 1);
-    let mut size_w = StructVector::field_writer(output, 2);
-    let message_vec = StructVector::get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let key_file = key_reader.read_str(row as usize);
-        let remote_path = path_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let key_file = unsafe { key_reader.read_str(row as usize) };
+        let remote_path = unsafe { path_reader.read_str(row as usize) };
 
         let result = scp::scp_read(host, 22, user, key_file, remote_path);
 
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(data_vec, row as usize, &result.data);
-        size_w.write_i64(row as usize, result.size);
-        write_varchar(message_vec, row as usize, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.data) };
+        unsafe { sw.write_i64(row as usize, 2, result.size) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
     }
-}
+});
 
-/// scp_read(host, port, user, key_file, remote_path) -> STRUCT(success, data, size, message)
-unsafe extern "C" fn cb_scp_read_port(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// scp_read(host, port, user, key_file, remote_path) -> STRUCT(success, data, size, message)
+quack_rs::scalar_callback!(cb_scp_read_port, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let port_reader = chunk.reader(1);
-    let user_reader = chunk.reader(2);
-    let key_reader = chunk.reader(3);
-    let path_reader = chunk.reader(4);
+    let host_reader = unsafe { chunk.reader(0) };
+    let port_reader = unsafe { chunk.reader(1) };
+    let user_reader = unsafe { chunk.reader(2) };
+    let key_reader = unsafe { chunk.reader(3) };
+    let path_reader = unsafe { chunk.reader(4) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let data_vec = StructVector::get_child(output, 1);
-    let mut size_w = StructVector::field_writer(output, 2);
-    let message_vec = StructVector::get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let port = port_reader.read_i32(row as usize) as u16;
-        let user = user_reader.read_str(row as usize);
-        let key_file = key_reader.read_str(row as usize);
-        let remote_path = path_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let port = unsafe { port_reader.read_i32(row as usize) } as u16;
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let key_file = unsafe { key_reader.read_str(row as usize) };
+        let remote_path = unsafe { path_reader.read_str(row as usize) };
 
         let result = scp::scp_read(host, port, user, key_file, remote_path);
 
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(data_vec, row as usize, &result.data);
-        size_w.write_i64(row as usize, result.size);
-        write_varchar(message_vec, row as usize, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.data) };
+        unsafe { sw.write_i64(row as usize, 2, result.size) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
     }
-}
+});
 
-/// scp_read_password(host, user, password, remote_path) -> STRUCT(success, data, size, message)
-unsafe extern "C" fn cb_scp_read_password(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// scp_read_password(host, user, password, remote_path) -> STRUCT(success, data, size, message)
+quack_rs::scalar_callback!(cb_scp_read_password, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let path_reader = chunk.reader(3);
+    let host_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let path_reader = unsafe { chunk.reader(3) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let data_vec = StructVector::get_child(output, 1);
-    let mut size_w = StructVector::field_writer(output, 2);
-    let message_vec = StructVector::get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let password = pass_reader.read_str(row as usize);
-        let remote_path = path_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let password = unsafe { pass_reader.read_str(row as usize) };
+        let remote_path = unsafe { path_reader.read_str(row as usize) };
 
         let result = scp::scp_read_password(host, 22, user, password, remote_path);
 
-        success_w.write_bool(row as usize, result.success);
-        write_varchar(data_vec, row as usize, &result.data);
-        size_w.write_i64(row as usize, result.size);
-        write_varchar(message_vec, row as usize, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_varchar(row as usize, 1, &result.data) };
+        unsafe { sw.write_i64(row as usize, 2, result.size) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
     }
-}
+});
 
-/// scp_write(host, user, key_file, remote_path, data) -> STRUCT(success, bytes_written, message)
-unsafe extern "C" fn cb_scp_write(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// scp_write(host, user, key_file, remote_path, data) -> STRUCT(success, bytes_written, message)
+quack_rs::scalar_callback!(cb_scp_write, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let key_reader = chunk.reader(2);
-    let path_reader = chunk.reader(3);
-    let data_reader = chunk.reader(4);
+    let host_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let key_reader = unsafe { chunk.reader(2) };
+    let path_reader = unsafe { chunk.reader(3) };
+    let data_reader = unsafe { chunk.reader(4) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let mut bytes_w = StructVector::field_writer(output, 1);
-    let message_vec = StructVector::get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let key_file = key_reader.read_str(row as usize);
-        let remote_path = path_reader.read_str(row as usize);
-        let data = data_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let key_file = unsafe { key_reader.read_str(row as usize) };
+        let remote_path = unsafe { path_reader.read_str(row as usize) };
+        let data = unsafe { data_reader.read_str(row as usize) };
 
         let result = scp::scp_write(host, 22, user, key_file, remote_path, data);
 
-        success_w.write_bool(row as usize, result.success);
-        bytes_w.write_i64(row as usize, result.bytes_written);
-        write_varchar(message_vec, row as usize, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_i64(row as usize, 1, result.bytes_written) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
-/// scp_write_password(host, user, password, remote_path, data) -> STRUCT(success, bytes_written, message)
-unsafe extern "C" fn cb_scp_write_password(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// scp_write_password(host, user, password, remote_path, data) -> STRUCT(success, bytes_written, message)
+quack_rs::scalar_callback!(cb_scp_write_password, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let host_reader = chunk.reader(0);
-    let user_reader = chunk.reader(1);
-    let pass_reader = chunk.reader(2);
-    let path_reader = chunk.reader(3);
-    let data_reader = chunk.reader(4);
+    let host_reader = unsafe { chunk.reader(0) };
+    let user_reader = unsafe { chunk.reader(1) };
+    let pass_reader = unsafe { chunk.reader(2) };
+    let path_reader = unsafe { chunk.reader(3) };
+    let data_reader = unsafe { chunk.reader(4) };
 
-    let mut success_w = StructVector::field_writer(output, 0);
-    let mut bytes_w = StructVector::field_writer(output, 1);
-    let message_vec = StructVector::get_child(output, 2);
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let host = host_reader.read_str(row as usize);
-        let user = user_reader.read_str(row as usize);
-        let password = pass_reader.read_str(row as usize);
-        let remote_path = path_reader.read_str(row as usize);
-        let data = data_reader.read_str(row as usize);
+        let host = unsafe { host_reader.read_str(row as usize) };
+        let user = unsafe { user_reader.read_str(row as usize) };
+        let password = unsafe { pass_reader.read_str(row as usize) };
+        let remote_path = unsafe { path_reader.read_str(row as usize) };
+        let data = unsafe { data_reader.read_str(row as usize) };
 
         let result = scp::scp_write_password(host, 22, user, password, remote_path, data);
 
-        success_w.write_bool(row as usize, result.success);
-        bytes_w.write_i64(row as usize, result.bytes_written);
-        write_varchar(message_vec, row as usize, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_i64(row as usize, 1, result.bytes_written) };
+        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;

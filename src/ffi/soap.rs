@@ -10,70 +10,58 @@ use super::scalars::{map_varchar_varchar, read_headers_map, response_type, write
 
 // ===== SOAP Request Callbacks =====
 
-/// soap_request(url, action, body_xml) -> STRUCT
-unsafe extern "C" fn cb_soap11_3(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap_request(url, action, body_xml) -> STRUCT
+quack_rs::scalar_callback!(cb_soap11_3, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let action_reader = chunk.reader(1);
-    let body_reader = chunk.reader(2);
+    let url_reader = unsafe { chunk.reader(0) };
+    let action_reader = unsafe { chunk.reader(1) };
+    let body_reader = unsafe { chunk.reader(2) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let action = action_reader.read_str(row);
-        let body_xml = body_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let action = unsafe { action_reader.read_str(row) };
+        let body_xml = unsafe { body_reader.read_str(row) };
         let resp = soap::send_request(url, action, body_xml, None, &[], SoapVersion::V1_1);
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// soap_request(url, action, body_xml, headers MAP) -> STRUCT
-unsafe extern "C" fn cb_soap11_4h(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap_request(url, action, body_xml, headers MAP) -> STRUCT
+quack_rs::scalar_callback!(cb_soap11_4h, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let action_reader = chunk.reader(1);
-    let body_reader = chunk.reader(2);
+    let url_reader = unsafe { chunk.reader(0) };
+    let action_reader = unsafe { chunk.reader(1) };
+    let body_reader = unsafe { chunk.reader(2) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let action = action_reader.read_str(row);
-        let body_xml = body_reader.read_str(row);
-        let headers = read_headers_map(input, 3, row);
+        let url = unsafe { url_reader.read_str(row) };
+        let action = unsafe { action_reader.read_str(row) };
+        let body_xml = unsafe { body_reader.read_str(row) };
+        let headers = unsafe { read_headers_map(input, 3, row) };
         let resp = soap::send_request(url, action, body_xml, None, &headers, SoapVersion::V1_1);
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// soap_request(url, action, body_xml, soap_header) -> STRUCT
-unsafe extern "C" fn cb_soap11_4s(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap_request(url, action, body_xml, soap_header) -> STRUCT
+quack_rs::scalar_callback!(cb_soap11_4s, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let action_reader = chunk.reader(1);
-    let body_reader = chunk.reader(2);
-    let soap_hdr_reader = chunk.reader(3);
+    let url_reader = unsafe { chunk.reader(0) };
+    let action_reader = unsafe { chunk.reader(1) };
+    let body_reader = unsafe { chunk.reader(2) };
+    let soap_hdr_reader = unsafe { chunk.reader(3) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let action = action_reader.read_str(row);
-        let body_xml = body_reader.read_str(row);
-        let soap_hdr = soap_hdr_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let action = unsafe { action_reader.read_str(row) };
+        let body_xml = unsafe { body_reader.read_str(row) };
+        let soap_hdr = unsafe { soap_hdr_reader.read_str(row) };
         let resp = soap::send_request(
             url,
             action,
@@ -82,30 +70,26 @@ unsafe extern "C" fn cb_soap11_4s(
             &[],
             SoapVersion::V1_1,
         );
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// soap_request(url, action, body_xml, soap_header, headers MAP) -> STRUCT
-unsafe extern "C" fn cb_soap11_5(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap_request(url, action, body_xml, soap_header, headers MAP) -> STRUCT
+quack_rs::scalar_callback!(cb_soap11_5, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let action_reader = chunk.reader(1);
-    let body_reader = chunk.reader(2);
-    let soap_hdr_reader = chunk.reader(3);
+    let url_reader = unsafe { chunk.reader(0) };
+    let action_reader = unsafe { chunk.reader(1) };
+    let body_reader = unsafe { chunk.reader(2) };
+    let soap_hdr_reader = unsafe { chunk.reader(3) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let action = action_reader.read_str(row);
-        let body_xml = body_reader.read_str(row);
-        let soap_hdr = soap_hdr_reader.read_str(row);
-        let headers = read_headers_map(input, 4, row);
+        let url = unsafe { url_reader.read_str(row) };
+        let action = unsafe { action_reader.read_str(row) };
+        let body_xml = unsafe { body_reader.read_str(row) };
+        let soap_hdr = unsafe { soap_hdr_reader.read_str(row) };
+        let headers = unsafe { read_headers_map(input, 4, row) };
         let resp = soap::send_request(
             url,
             action,
@@ -114,51 +98,43 @@ unsafe extern "C" fn cb_soap11_5(
             &headers,
             SoapVersion::V1_1,
         );
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// soap12_request(url, action, body_xml) -> STRUCT
-unsafe extern "C" fn cb_soap12_3(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap12_request(url, action, body_xml) -> STRUCT
+quack_rs::scalar_callback!(cb_soap12_3, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let action_reader = chunk.reader(1);
-    let body_reader = chunk.reader(2);
+    let url_reader = unsafe { chunk.reader(0) };
+    let action_reader = unsafe { chunk.reader(1) };
+    let body_reader = unsafe { chunk.reader(2) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let action = action_reader.read_str(row);
-        let body_xml = body_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let action = unsafe { action_reader.read_str(row) };
+        let body_xml = unsafe { body_reader.read_str(row) };
         let resp = soap::send_request(url, action, body_xml, None, &[], SoapVersion::V1_2);
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// soap12_request(url, action, body_xml, soap_header) -> STRUCT
-unsafe extern "C" fn cb_soap12_4s(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap12_request(url, action, body_xml, soap_header) -> STRUCT
+quack_rs::scalar_callback!(cb_soap12_4s, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let action_reader = chunk.reader(1);
-    let body_reader = chunk.reader(2);
-    let soap_hdr_reader = chunk.reader(3);
+    let url_reader = unsafe { chunk.reader(0) };
+    let action_reader = unsafe { chunk.reader(1) };
+    let body_reader = unsafe { chunk.reader(2) };
+    let soap_hdr_reader = unsafe { chunk.reader(3) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let action = action_reader.read_str(row);
-        let body_xml = body_reader.read_str(row);
-        let soap_hdr = soap_hdr_reader.read_str(row);
+        let url = unsafe { url_reader.read_str(row) };
+        let action = unsafe { action_reader.read_str(row) };
+        let body_xml = unsafe { body_reader.read_str(row) };
+        let soap_hdr = unsafe { soap_hdr_reader.read_str(row) };
         let resp = soap::send_request(
             url,
             action,
@@ -167,30 +143,26 @@ unsafe extern "C" fn cb_soap12_4s(
             &[],
             SoapVersion::V1_2,
         );
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
-/// soap12_request(url, action, body_xml, soap_header, headers MAP) -> STRUCT
-unsafe extern "C" fn cb_soap12_5(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap12_request(url, action, body_xml, soap_header, headers MAP) -> STRUCT
+quack_rs::scalar_callback!(cb_soap12_5, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
-    let action_reader = chunk.reader(1);
-    let body_reader = chunk.reader(2);
-    let soap_hdr_reader = chunk.reader(3);
+    let url_reader = unsafe { chunk.reader(0) };
+    let action_reader = unsafe { chunk.reader(1) };
+    let body_reader = unsafe { chunk.reader(2) };
+    let soap_hdr_reader = unsafe { chunk.reader(3) };
     let mut map_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row);
-        let action = action_reader.read_str(row);
-        let body_xml = body_reader.read_str(row);
-        let soap_hdr = soap_hdr_reader.read_str(row);
-        let headers = read_headers_map(input, 4, row);
+        let url = unsafe { url_reader.read_str(row) };
+        let action = unsafe { action_reader.read_str(row) };
+        let body_xml = unsafe { body_reader.read_str(row) };
+        let soap_hdr = unsafe { soap_hdr_reader.read_str(row) };
+        let headers = unsafe { read_headers_map(input, 4, row) };
         let resp = soap::send_request(
             url,
             action,
@@ -199,66 +171,54 @@ unsafe extern "C" fn cb_soap12_5(
             &headers,
             SoapVersion::V1_2,
         );
-        write_response(output, row, &resp, &mut map_offset);
+        unsafe { write_response(output, row, &resp, &mut map_offset) };
     }
-}
+});
 
 // ===== SOAP Parsing Callbacks =====
 
-/// soap_extract_body(xml VARCHAR) -> VARCHAR
-unsafe extern "C" fn cb_extract_body(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap_extract_body(xml VARCHAR) -> VARCHAR
+quack_rs::scalar_callback!(cb_extract_body, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let xml_reader = chunk.reader(0);
-    let mut writer = VectorWriter::from_vector(output);
+    let xml_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let xml = xml_reader.read_str(row);
+        let xml = unsafe { xml_reader.read_str(row) };
         let body = soap::extract_body(xml).unwrap_or("");
-        writer.write_varchar(row, body);
+        unsafe { writer.write_varchar(row, body) };
     }
-}
+});
 
-/// soap_is_fault(xml VARCHAR) -> BOOLEAN
-unsafe extern "C" fn cb_is_fault(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap_is_fault(xml VARCHAR) -> BOOLEAN
+quack_rs::scalar_callback!(cb_is_fault, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let xml_reader = chunk.reader(0);
-    let data = duckdb_vector_get_data(output) as *mut bool;
+    let xml_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let xml = xml_reader.read_str(row);
-        *data.add(row) = soap::is_fault(xml);
+        let xml = unsafe { xml_reader.read_str(row) };
+        unsafe { writer.write_bool(row, soap::is_fault(xml)) };
     }
-}
+});
 
-/// soap_fault_string(xml VARCHAR) -> VARCHAR
-unsafe extern "C" fn cb_fault_string(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// soap_fault_string(xml VARCHAR) -> VARCHAR
+quack_rs::scalar_callback!(cb_fault_string, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let xml_reader = chunk.reader(0);
-    let mut writer = VectorWriter::from_vector(output);
+    let xml_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let xml = xml_reader.read_str(row);
+        let xml = unsafe { xml_reader.read_str(row) };
         match soap::fault_string(xml) {
-            Some(s) => writer.write_varchar(row, s),
-            None => writer.set_null(row),
+            Some(s) => unsafe { writer.write_varchar(row, s) },
+            None => unsafe { writer.set_null(row) },
         }
     }
-}
+});
 
 // ===== Registration =====
 

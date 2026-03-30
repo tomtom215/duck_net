@@ -9,110 +9,83 @@ use quack_rs::prelude::*;
 use crate::secrets;
 use crate::security;
 
-use super::scalars::write_varchar;
-
 // ---------------------------------------------------------------------------
 // Secrets Manager Callbacks
 // ---------------------------------------------------------------------------
 
-/// duck_net_add_secret(name, type, config_json) -> VARCHAR
-unsafe extern "C" fn cb_add_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_add_secret(name, type, config_json) -> VARCHAR
+quack_rs::scalar_callback!(cb_add_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let name_reader = chunk.reader(0);
-    let type_reader = chunk.reader(1);
-    let config_reader = chunk.reader(2);
+    let name_reader = unsafe { chunk.reader(0) };
+    let type_reader = unsafe { chunk.reader(1) };
+    let config_reader = unsafe { chunk.reader(2) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let name = name_reader.read_str(row as usize);
-        let secret_type = type_reader.read_str(row as usize);
-        let config_json = config_reader.read_str(row as usize);
+        let name = unsafe { name_reader.read_str(row) };
+        let secret_type = unsafe { type_reader.read_str(row) };
+        let config_json = unsafe { config_reader.read_str(row) };
 
         let msg = match secrets::add_secret(name, secret_type, config_json) {
             Ok(m) => m,
             Err(e) => format!("Error: {}", e),
         };
-        write_varchar(output, row, &msg);
+        unsafe { writer.write_varchar(row, &msg) };
     }
-}
+});
 
-/// duck_net_clear_secret(name) -> VARCHAR
-unsafe extern "C" fn cb_clear_secret(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_clear_secret(name) -> VARCHAR
+quack_rs::scalar_callback!(cb_clear_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let name_reader = chunk.reader(0);
+    let name_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let name = name_reader.read_str(row as usize);
+        let name = unsafe { name_reader.read_str(row) };
         let msg = match secrets::clear_secret(name) {
             Ok(m) => m,
             Err(e) => format!("Error: {}", e),
         };
-        write_varchar(output, row, &msg);
+        unsafe { writer.write_varchar(row, &msg) };
     }
-}
+});
 
-/// duck_net_clear_all_secrets() -> VARCHAR
-unsafe extern "C" fn cb_clear_all_secrets(
-    _info: duckdb_function_info,
-    _input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
+// duck_net_clear_all_secrets() -> VARCHAR
+quack_rs::scalar_callback!(cb_clear_all_secrets, |_info, _input, output| {
     let msg = secrets::clear_all_secrets();
-    write_varchar(output, 0, &msg);
-}
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+    unsafe { writer.write_varchar(0, &msg) };
+});
 
-/// duck_net_secret_type(name) -> VARCHAR
-/// Returns the type of a named secret, or NULL if not found.
-unsafe extern "C" fn cb_get_secret_type(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_secret_type(name) -> VARCHAR
+// Returns the type of a named secret, or NULL if not found.
+quack_rs::scalar_callback!(cb_get_secret_type, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let name_reader = chunk.reader(0);
-
-    let validity = duckdb_vector_get_validity(output);
+    let name_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let name = name_reader.read_str(row as usize);
+        let name = unsafe { name_reader.read_str(row) };
         match secrets::get_type(name) {
-            Some(stype) => write_varchar(output, row, &stype),
-            None => {
-                if validity.is_null() {
-                    duckdb_vector_ensure_validity_writable(output);
-                    let validity = duckdb_vector_get_validity(output);
-                    duckdb_validity_set_row_invalid(validity, row as idx_t);
-                } else {
-                    duckdb_validity_set_row_invalid(validity, row as idx_t);
-                }
-            }
+            Some(stype) => unsafe { writer.write_varchar(row, &stype) },
+            None => unsafe { writer.set_null(row) },
         }
     }
-}
+});
 
-/// duck_net_secret_redacted(name) -> VARCHAR
-/// Returns a JSON representation of a secret with sensitive values redacted.
-unsafe extern "C" fn cb_get_secret_redacted(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_secret_redacted(name) -> VARCHAR
+// Returns a JSON representation of a secret with sensitive values redacted.
+quack_rs::scalar_callback!(cb_get_secret_redacted, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let name_reader = chunk.reader(0);
+    let name_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let name = name_reader.read_str(row as usize);
+        let name = unsafe { name_reader.read_str(row) };
         let msg = match secrets::get_redacted(name) {
             Some(redacted) => {
                 let mut pairs: Vec<String> = redacted
@@ -124,137 +97,105 @@ unsafe extern "C" fn cb_get_secret_redacted(
             }
             None => format!("Secret '{}' not found", name),
         };
-        write_varchar(output, row, &msg);
+        unsafe { writer.write_varchar(row, &msg) };
     }
-}
+});
 
-/// duck_net_scrub_url(url) -> VARCHAR
-/// Scrub credentials from a URL for safe logging.
-unsafe extern "C" fn cb_scrub_url(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_scrub_url(url) -> VARCHAR
+// Scrub credentials from a URL for safe logging.
+quack_rs::scalar_callback!(cb_scrub_url, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let url_reader = chunk.reader(0);
+    let url_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let url = url_reader.read_str(row as usize);
+        let url = unsafe { url_reader.read_str(row) };
         let scrubbed = security::scrub_url(url);
-        write_varchar(output, row, &scrubbed);
+        unsafe { writer.write_varchar(row, &scrubbed) };
     }
-}
+});
 
-/// duck_net_scrub_error(msg) -> VARCHAR
-/// Scrub known credential patterns from an error message.
-unsafe extern "C" fn cb_scrub_error(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_scrub_error(msg) -> VARCHAR
+// Scrub known credential patterns from an error message.
+quack_rs::scalar_callback!(cb_scrub_error, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let msg_reader = chunk.reader(0);
+    let msg_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let msg = msg_reader.read_str(row as usize);
+        let msg = unsafe { msg_reader.read_str(row) };
         let scrubbed = security::scrub_error(msg);
-        write_varchar(output, row, &scrubbed);
+        unsafe { writer.write_varchar(row, &scrubbed) };
     }
-}
+});
 
-/// duck_net_secret(name, key) -> VARCHAR
-/// Returns a specific value from a named secret, or NULL if not found.
-unsafe extern "C" fn cb_get_secret_value(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_secret(name, key) -> VARCHAR
+// Returns a specific value from a named secret, or NULL if not found.
+quack_rs::scalar_callback!(cb_get_secret_value, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let name_reader = chunk.reader(0);
-    let key_reader = chunk.reader(1);
-
-    let validity = duckdb_vector_get_validity(output);
+    let name_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let name = name_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
+        let name = unsafe { name_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
 
         match secrets::get_value(name, key) {
-            Some(value) => {
-                write_varchar(output, row, &value);
-            }
-            None => {
-                // Set NULL for missing secrets
-                if validity.is_null() {
-                    duckdb_vector_ensure_validity_writable(output);
-                    let validity = duckdb_vector_get_validity(output);
-                    duckdb_validity_set_row_invalid(validity, row as idx_t);
-                } else {
-                    duckdb_validity_set_row_invalid(validity, row as idx_t);
-                }
-            }
+            Some(value) => unsafe { writer.write_varchar(row, &value) },
+            None => unsafe { writer.set_null(row) },
         }
     }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Security Configuration Callbacks
 // ---------------------------------------------------------------------------
 
-/// duck_net_set_ssrf_protection(enabled BOOLEAN) -> VARCHAR
-unsafe extern "C" fn cb_set_ssrf_protection(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_set_ssrf_protection(enabled BOOLEAN) -> VARCHAR
+quack_rs::scalar_callback!(cb_set_ssrf_protection, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const bool;
+    let bool_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let enabled = *data.add(row as usize);
+        let enabled = unsafe { bool_reader.read_bool(row) };
         security::set_ssrf_protection(enabled);
         let msg = if enabled {
             "SSRF protection enabled: private/reserved IPs are blocked"
         } else {
             "SSRF protection disabled: all IPs are reachable (development mode)"
         };
-        write_varchar(output, row, msg);
+        unsafe { writer.write_varchar(row, msg) };
     }
-}
+});
 
-/// duck_net_set_ssh_strict(enabled BOOLEAN) -> VARCHAR
-unsafe extern "C" fn cb_set_ssh_strict(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// duck_net_set_ssh_strict(enabled BOOLEAN) -> VARCHAR
+quack_rs::scalar_callback!(cb_set_ssh_strict, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let data = duckdb_vector_get_data(duckdb_data_chunk_get_vector(input, 0)) as *const bool;
+    let bool_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
 
     for row in 0..row_count {
-        let strict = *data.add(row as usize);
+        let strict = unsafe { bool_reader.read_bool(row) };
         security::set_ssh_strict_commands(strict);
         let msg = if strict {
             "SSH strict mode enabled: shell metacharacters (;|&$`<>) are blocked in commands"
         } else {
             "SSH strict mode disabled: only null bytes and newlines are blocked in commands"
         };
-        write_varchar(output, row, msg);
+        unsafe { writer.write_varchar(row, msg) };
     }
-}
+});
 
-/// duck_net_security_status() -> VARCHAR
-/// Returns a JSON summary of current security configuration for auditing.
-unsafe extern "C" fn cb_security_status(
-    _info: duckdb_function_info,
-    _input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
+// duck_net_security_status() -> VARCHAR
+// Returns a JSON summary of current security configuration for auditing.
+quack_rs::scalar_callback!(cb_security_status, |_info, _input, output| {
     let ssrf = security::ssrf_protection_enabled();
     let ssh_strict = security::ssh_strict_commands();
     let secrets_count = secrets::list_secrets().len();
@@ -277,8 +218,9 @@ unsafe extern "C" fn cb_security_status(
         ),
         ssrf, ssh_strict, secrets_count, rate_limit, timeout, retries,
     );
-    write_varchar(output, 0, &status);
-}
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+    unsafe { writer.write_varchar(0, &status) };
+});
 
 // ---------------------------------------------------------------------------
 // Registration

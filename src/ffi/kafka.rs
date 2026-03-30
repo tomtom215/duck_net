@@ -6,7 +6,7 @@ use quack_rs::prelude::*;
 
 use crate::kafka;
 
-use super::scalars::write_varchar;
+use super::scalars::StructWriter;
 
 fn kafka_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
@@ -17,70 +17,56 @@ fn kafka_result_type() -> LogicalType {
     ])
 }
 
-/// kafka_produce(brokers, topic, key, value) -> STRUCT(success, partition, offset, message)
-unsafe extern "C" fn cb_kafka_produce(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// kafka_produce(brokers, topic, key, value) -> STRUCT(success, partition, offset, message)
+quack_rs::scalar_callback!(cb_kafka_produce, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let brokers_reader = chunk.reader(0);
-    let topic_reader = chunk.reader(1);
-    let key_reader = chunk.reader(2);
-    let value_reader = chunk.reader(3);
+    let brokers_reader = unsafe { chunk.reader(0) };
+    let topic_reader = unsafe { chunk.reader(1) };
+    let key_reader = unsafe { chunk.reader(2) };
+    let value_reader = unsafe { chunk.reader(3) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let mut partition_writer = StructVector::field_writer(output, 1);
-    let mut offset_writer = StructVector::field_writer(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let brokers = brokers_reader.read_str(row as usize);
-        let topic = topic_reader.read_str(row as usize);
-        let key = key_reader.read_str(row as usize);
-        let value = value_reader.read_str(row as usize);
+        let brokers = unsafe { brokers_reader.read_str(row as usize) };
+        let topic = unsafe { topic_reader.read_str(row as usize) };
+        let key = unsafe { key_reader.read_str(row as usize) };
+        let value = unsafe { value_reader.read_str(row as usize) };
 
         let key_opt = if key.is_empty() { None } else { Some(key) };
         let result = kafka::produce(brokers, topic, key_opt, value);
 
-        unsafe { success_writer.write_bool(row as usize, result.success) };
-        unsafe { partition_writer.write_i32(row as usize, result.partition) };
-        unsafe { offset_writer.write_i64(row as usize, result.offset) };
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_i32(row as usize, 1, result.partition) };
+        unsafe { sw.write_i64(row as usize, 2, result.offset) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
     }
-}
+});
 
-/// kafka_produce(brokers, topic, value) -> STRUCT (no key)
-unsafe extern "C" fn cb_kafka_produce_no_key(
-    _info: duckdb_function_info,
-    input: duckdb_data_chunk,
-    output: duckdb_vector,
-) {
-    let chunk = DataChunk::from_raw(input);
+// kafka_produce(brokers, topic, value) -> STRUCT (no key)
+quack_rs::scalar_callback!(cb_kafka_produce_no_key, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
     let row_count = chunk.size();
-    let brokers_reader = chunk.reader(0);
-    let topic_reader = chunk.reader(1);
-    let value_reader = chunk.reader(2);
+    let brokers_reader = unsafe { chunk.reader(0) };
+    let topic_reader = unsafe { chunk.reader(1) };
+    let value_reader = unsafe { chunk.reader(2) };
 
-    let mut success_writer = StructVector::field_writer(output, 0);
-    let mut partition_writer = StructVector::field_writer(output, 1);
-    let mut offset_writer = StructVector::field_writer(output, 2);
-    let message_vec = duckdb_struct_vector_get_child(output, 3);
+    let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let brokers = brokers_reader.read_str(row as usize);
-        let topic = topic_reader.read_str(row as usize);
-        let value = value_reader.read_str(row as usize);
+        let brokers = unsafe { brokers_reader.read_str(row as usize) };
+        let topic = unsafe { topic_reader.read_str(row as usize) };
+        let value = unsafe { value_reader.read_str(row as usize) };
 
         let result = kafka::produce(brokers, topic, None, value);
 
-        unsafe { success_writer.write_bool(row as usize, result.success) };
-        unsafe { partition_writer.write_i32(row as usize, result.partition) };
-        unsafe { offset_writer.write_i64(row as usize, result.offset) };
-        write_varchar(message_vec, row, &result.message);
+        unsafe { sw.write_bool(row as usize, 0, result.success) };
+        unsafe { sw.write_i32(row as usize, 1, result.partition) };
+        unsafe { sw.write_i64(row as usize, 2, result.offset) };
+        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
     }
-}
+});
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
