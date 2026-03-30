@@ -92,6 +92,24 @@ pub fn extract_next_link(body: &str) -> Option<&str> {
         .or_else(|| json::extract_string(body, "__next"))
 }
 
+/// Extract the server-reported total record count from a response body.
+///
+/// Checks the following keys in order:
+/// - `@odata.count` — OData v4 (unquoted integer: `"@odata.count": 1234`)
+/// - `odata.count`  — OData v4 unescaped variant
+/// - `__count`      — OData v2 JSON (quoted string: `"__count": "1234"`)
+///
+/// OData v4 services must be queried with `$count=true` to include this field.
+/// OData v2 services must be queried with `$inlinecount=allpages`.
+pub fn extract_total_count(body: &str) -> Option<i64> {
+    // v4: unquoted integer
+    let raw = json::extract_number(body, "@odata.count")
+        .or_else(|| json::extract_number(body, "odata.count"))
+        // v2: quoted string (parse the string value as integer)
+        .or_else(|| json::extract_string(body, "__count"))?;
+    raw.parse::<i64>().ok()
+}
+
 /// Extract the `value` array count (rough — counts commas between top-level array elements).
 #[allow(dead_code)]
 pub fn extract_value_count(body: &str) -> Option<usize> {

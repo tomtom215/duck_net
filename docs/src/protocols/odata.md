@@ -6,8 +6,9 @@ duck_net supports OData queries with automatic pagination through a scalar funct
 
 | Function | Parameters | Returns |
 |----------|-----------|---------|
-| `odata_query` | `(url)` | VARCHAR (JSON response) |
+| `odata_query` | `(url)` | STRUCT (status, reason, headers, body) |
 | `odata_paginate` | `(url)` with named params | Table: page, status, headers, body |
+| `odata_extract_count` | `(body VARCHAR)` | BIGINT or NULL |
 
 ## Single Query
 
@@ -50,6 +51,30 @@ FROM odata_paginate(
 | `expand` | VARCHAR | — | OData `$expand` for related entities |
 | `top` | BIGINT | — | OData `$top` page size |
 | `max_pages` | BIGINT | `100` | Maximum number of pages to fetch |
+
+## Total Record Count
+
+`odata_extract_count(body)` extracts the server-reported total count from a response body. It handles both OData v4 (`@odata.count`, an unquoted integer) and OData v2 JSON (`__count`, a quoted string).
+
+**OData v4** — add `$count=true` to the query:
+
+```sql
+SELECT
+    odata_extract_count((odata_query('https://api.example.com/odata/Products?$count=true')).body) AS total
+;
+-- Returns the @odata.count value, or NULL if $count=true was not requested.
+```
+
+**OData v2 JSON** — add `$inlinecount=allpages` to the query:
+
+```sql
+SELECT odata_extract_count(
+    (odata_query('https://api.example.com/odata/Products?$inlinecount=allpages')).body
+) AS total;
+-- Returns the __count value parsed as BIGINT, or NULL if $inlinecount was not requested.
+```
+
+`odata_extract_count` returns `NULL` (not an error) when the count field is absent from the response — for example when `$count=true` / `$inlinecount=allpages` was not included in the request.
 
 ## OData v2 JSON Services
 

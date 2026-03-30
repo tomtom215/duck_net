@@ -25,6 +25,26 @@ quack_rs::scalar_callback!(cb_odata_query, |_info, input, output| {
     }
 });
 
+// ===== odata_extract_count scalar =====
+
+// odata_extract_count(body VARCHAR) -> BIGINT
+// Returns the server-reported total count from @odata.count (v4) or __count (v2 JSON).
+// Returns NULL when the field is absent (query did not include $count=true / $inlinecount=allpages).
+quack_rs::scalar_callback!(cb_odata_extract_count, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let body_reader = unsafe { chunk.reader(0) };
+    let mut out_w = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let body = unsafe { body_reader.read_str(row) };
+        match odata::extract_total_count(body) {
+            Some(n) => unsafe { out_w.write_i64(row, n) },
+            None => unsafe { out_w.set_null(row) },
+        }
+    }
+});
+
 // ===== odata_paginate table function =====
 
 struct ODataPaginateBindData {
@@ -178,6 +198,16 @@ quack_rs::table_scan_callback!(odata_paginate_scan, |info, output| {
 
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
+
+    // odata_extract_count(body VARCHAR) -> BIGINT
+    // Returns server-reported total count from @odata.count (v4) or __count (v2 JSON).
+    // Returns NULL when the field is absent.
+    ScalarFunctionBuilder::new("odata_extract_count")
+        .param(v)
+        .returns(TypeId::BigInt)
+        .function(cb_odata_extract_count)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
 
     // odata_query(url, headers MAP) -> STRUCT
     ScalarFunctionBuilder::new("odata_query")

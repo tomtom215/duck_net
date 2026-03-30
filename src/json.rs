@@ -90,6 +90,40 @@ pub fn dot_path<'a>(json: &'a str, path: &str) -> Option<&'a str> {
     None
 }
 
+/// Extract an unquoted numeric value from JSON by key name.
+/// Handles: `"key": 1234` (integer literals, with/without spaces).
+/// Returns the raw numeric string, or None if not found or value is not numeric.
+pub fn extract_number<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("\"{key}\"");
+    let mut search_from = 0;
+
+    while let Some(key_start) = json[search_from..].find(&needle) {
+        let after_key = search_from + key_start + needle.len();
+        let rest = json[after_key..].trim_start();
+
+        if !rest.starts_with(':') {
+            search_from = after_key;
+            continue;
+        }
+
+        let after_colon = rest[1..].trim_start();
+        // Must start with a digit or minus sign (not a quote — that's a string)
+        let first = after_colon.chars().next()?;
+        if !first.is_ascii_digit() && first != '-' {
+            search_from = after_key;
+            continue;
+        }
+
+        let value_start_abs = json.len() - after_colon.len();
+        let end = after_colon
+            .find(|c: char| !c.is_ascii_digit() && c != '-' && c != '.')
+            .unwrap_or(after_colon.len());
+
+        return Some(&json[value_start_abs..value_start_abs + end]);
+    }
+    None
+}
+
 /// Minimal percent-encoding for form URL encoding.
 pub fn form_urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
