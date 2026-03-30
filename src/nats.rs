@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
@@ -503,5 +503,192 @@ fn request_inner(
             payload.len(),
             response_payload.len()
         ),
+    ))
+}
+
+// ===== NATS subscribe table function =====
+
+/// A single message received during a NATS subscription.
+pub struct NatsSubMessage {
+    pub subject: String,
+    pub reply_to: String,
+    pub payload: String,
+}
+
+/// Result of a NATS subscribe call.
+pub struct NatsSubscribeResult {
+    pub success: bool,
+    pub messages: Vec<NatsSubMessage>,
+    pub message: String,
+}
+
+/// Subscribe to a NATS subject and collect messages until timeout or max_messages.
+///
+/// `timeout_ms` controls how long to wait for each message (100–300_000 ms).
+pub fn subscribe(
+    url: &str,
+    subject: &str,
+    max_messages: i64,
+    timeout_ms: u32,
+) -> NatsSubscribeResult {
+    if !is_valid_subject(subject) {
+        return NatsSubscribeResult {
+            success: false,
+            messages: vec![],
+            message: "Invalid NATS subject".to_string(),
+        };
+    }
+    let max = max_messages.clamp(1, 100_000) as usize;
+
+    match subscribe_inner(url, subject, max, timeout_ms) {
+        Ok((msgs, msg)) => NatsSubscribeResult {
+            success: true,
+            messages: msgs,
+            message: msg,
+        },
+        Err(e) => NatsSubscribeResult {
+            success: false,
+            messages: vec![],
+            message: e,
+        },
+    }
+}
+
+fn subscribe_inner(
+    url: &str,
+    subject: &str,
+    max_messages: usize,
+    timeout_ms: u32,
+) -> Result<(Vec<NatsSubMessage>, String), String> {
+    // Warn about plaintext NATS connections (CWE-319)
+    if !url.starts_with("nats+tls://") && !url.starts_with("tls://") {
+        crate::security_warnings::warn_plaintext(
+            "NATS",
+            "PLAINTEXT_NATS",
+            "nats+tls:// or tls:// (NATS over TLS)",
+        );
+    }
+
+    let (host, port, username, password) = parse_nats_url(url)?;
+    crate::security::validate_no_ssrf_host(&host)?;
+    crate::rate_limit::acquire_for_host(&host);
+
+    let addr = format!("{host}:{port}");
+    let stream = TcpStream::connect_timeout(
+        &addr
+            .parse()
+            .map_err(|e| format!("Invalid NATS address: {e}"))?,
+        Duration::from_secs(CONNECT_TIMEOUT_SECS),
+    )
+    .map_err(|e| format!("NATS connection failed: {}", scrub_url(&e.to_string())))?;
+
+    crate::security::validate_tcp_peer(&stream)?;
+
+    stream
+        .set_write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
+        .map_err(|e| format!("Failed to set write timeout: {e}"))?;
+
+    // Clone the stream: reader wraps the clone, writer owns the original
+    let reader = BufReader::new(
+        stream
+            .try_clone()
+            .map_err(|e| format!("Clone failed: {e}"))?,
+    );
+    let mut writer = stream;
+
+    // Handshake with IO timeout
+    let reader_stream = reader.into_inner();
+    reader_stream
+        .set_read_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
+        .map_err(|e| format!("Failed to set read timeout: {e}"))?;
+    let mut reader = BufReader::new(reader_stream);
+
+    handshake(
+        &mut reader,
+        &mut writer,
+        username.as_deref(),
+        password.as_deref(),
+    )?;
+
+    // Subscribe: SUB <subject> <sid>
+    let sid = "1";
+    let sub_cmd = format!("SUB {subject} {sid}\r\n");
+    writer
+        .write_all(sub_cmd.as_bytes())
+        .map_err(|e| format!("NATS SUB send failed: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("NATS flush failed: {e}"))?;
+
+    // Switch to subscribe timeout for message reads
+    let timeout_ms = timeout_ms.clamp(100, 300_000);
+    let reader_stream = reader.into_inner();
+    reader_stream
+        .set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+        .map_err(|e| format!("Failed to set subscribe timeout: {e}"))?;
+    let mut reader = BufReader::new(reader_stream);
+
+    let mut messages = Vec::new();
+
+    loop {
+        if messages.len() >= max_messages {
+            break;
+        }
+
+        let line = match read_line(&mut reader) {
+            Ok(l) => l,
+            Err(e) => {
+                if e.contains("timed out") || e.contains("WouldBlock") || e.contains("os error 11")
+                {
+                    break;
+                }
+                return Err(e);
+            }
+        };
+
+        if line.starts_with("MSG ") {
+            // MSG <subject> <sid> [<reply-to>] <byte_count>
+            let header = &line[4..];
+            let parts: Vec<&str> = header.split_whitespace().collect();
+            if parts.len() < 3 {
+                continue;
+            }
+            let msg_subject = parts[0].to_string();
+            let (reply_to, byte_count_str) = if parts.len() == 4 {
+                (parts[2].to_string(), parts[3])
+            } else {
+                (String::new(), parts[2])
+            };
+            let byte_count: usize = byte_count_str.trim().parse().unwrap_or(0);
+            if byte_count > MAX_PAYLOAD_SIZE {
+                continue;
+            }
+            // Read exactly byte_count bytes + CRLF
+            let mut buf = vec![0u8; byte_count + 2];
+            if reader.read_exact(&mut buf).is_err() {
+                break;
+            }
+            let payload = String::from_utf8_lossy(&buf[..byte_count]).to_string();
+            messages.push(NatsSubMessage {
+                subject: msg_subject,
+                reply_to,
+                payload,
+            });
+        } else if line == "PING" {
+            let _ = writer.write_all(b"PONG\r\n");
+            let _ = writer.flush();
+        } else if line.starts_with("-ERR") {
+            return Err(format!("NATS server error: {line}"));
+        }
+    }
+
+    // Unsubscribe
+    let _ = writer.write_all(format!("UNSUB {sid}\r\n").as_bytes());
+    let _ = writer.flush();
+
+    let count = messages.len();
+    Ok((
+        messages,
+        format!("Received {count} message(s) on '{subject}'"),
     ))
 }

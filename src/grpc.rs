@@ -5,6 +5,62 @@ use std::sync::Arc;
 
 use crate::runtime;
 
+/// Build a rustls ClientConfig for gRPC TLS, honouring any globally configured
+/// CA bundle and/or client certificate (for mTLS).
+pub(crate) fn build_grpc_tls_config(
+    _host: &str,
+    override_ca_pem: Option<&str>,
+    override_cert_and_key: Option<(&str, &str)>,
+) -> Result<rustls::ClientConfig, String> {
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    // Apply global CA bundle (or per-call override)
+    let ca_pem = override_ca_pem
+        .map(|s| s.to_string())
+        .or_else(|| crate::http::ca_bundle_pem());
+    if let Some(ref pem) = ca_pem {
+        for result in CertificateDer::pem_slice_iter(pem.as_bytes()) {
+            let cert = result.map_err(|e| format!("CA cert parse error: {e}"))?;
+            root_store.add(cert).map_err(|e| format!("CA cert add error: {e}"))?;
+        }
+    }
+
+    // Determine client cert / key (per-call override wins over global)
+    let (cert_pem_opt, key_pem_opt) = match override_cert_and_key {
+        Some((c, k)) => (Some(c.to_string()), Some(k.to_string())),
+        None => (crate::http::client_cert_pem(), crate::http::client_key_pem()),
+    };
+
+    let config = match (cert_pem_opt, key_pem_opt) {
+        (Some(cert_pem), Some(key_pem)) => {
+            let cert_chain: Vec<CertificateDer<'static>> =
+                CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+                    .collect::<Result<_, _>>()
+                    .map_err(|e| format!("Client cert parse error: {e}"))?;
+            let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
+                .map_err(|e| format!("Private key parse error: {e}"))?;
+            rustls::ClientConfig::builder_with_protocol_versions(&[
+                &rustls::version::TLS12,
+                &rustls::version::TLS13,
+            ])
+            .with_root_certificates(root_store)
+            .with_client_auth_cert(cert_chain, key)
+            .map_err(|e| format!("mTLS config error: {e}"))?
+        }
+        _ => rustls::ClientConfig::builder_with_protocol_versions(&[
+            &rustls::version::TLS12,
+            &rustls::version::TLS13,
+        ])
+        .with_root_certificates(root_store)
+        .with_no_client_auth(),
+    };
+
+    Ok(config)
+}
+
 /// Maximum gRPC response size: 16 MiB.
 pub(crate) const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
@@ -224,16 +280,7 @@ async fn call_tls(
     path: &str,
     payload: &[u8],
 ) -> Result<GrpcResult, String> {
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    let tls_config = rustls::ClientConfig::builder_with_protocol_versions(&[
-        &rustls::version::TLS12,
-        &rustls::version::TLS13,
-    ])
-    .with_root_certificates(root_store)
-    .with_no_client_auth();
-
+    let tls_config = build_grpc_tls_config(host, None, None)?;
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     let domain = rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|e| format!("Invalid TLS server name: {e}"))?;
@@ -364,6 +411,248 @@ async fn send_grpc_request(
         success: final_grpc_status == 0,
         status_code: status,
         body: body_str,
+        grpc_status: final_grpc_status,
+        grpc_message: final_grpc_message,
+    })
+}
+
+/// Result of a gRPC server-side streaming call.
+pub struct GrpcStreamResult {
+    pub success: bool,
+    pub messages: Vec<String>,
+    pub grpc_status: i32,
+    pub grpc_message: String,
+}
+
+/// Decode all gRPC length-prefixed frames from a concatenated response body.
+pub(crate) fn decode_all_grpc_messages(data: &[u8]) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut pos = 0;
+    while pos + 5 <= data.len() {
+        let length =
+            u32::from_be_bytes([data[pos + 1], data[pos + 2], data[pos + 3], data[pos + 4]])
+                as usize;
+        if length > MAX_RESPONSE_BYTES {
+            break;
+        }
+        let frame_end = match (pos + 5).checked_add(length) {
+            Some(end) => end,
+            None => break,
+        };
+        if frame_end > data.len() {
+            break;
+        }
+        results.push(String::from_utf8_lossy(&data[pos + 5..frame_end]).to_string());
+        pos = frame_end;
+    }
+    results
+}
+
+/// Make a server-side streaming gRPC call over HTTP/2.
+///
+/// Collects all response frames until the stream is closed or times out.
+pub fn call_stream(url: &str, service: &str, method: &str, json_payload: &str) -> GrpcStreamResult {
+    if !is_valid_grpc_name(service) {
+        return GrpcStreamResult {
+            success: false,
+            messages: vec![],
+            grpc_status: -1,
+            grpc_message: "Invalid service name".to_string(),
+        };
+    }
+    if !is_valid_grpc_name(method) {
+        return GrpcStreamResult {
+            success: false,
+            messages: vec![],
+            grpc_status: -1,
+            grpc_message: "Invalid method name".to_string(),
+        };
+    }
+    runtime::block_on(call_stream_async(url, service, method, json_payload))
+}
+
+async fn call_stream_async(
+    url: &str,
+    service: &str,
+    method: &str,
+    json_payload: &str,
+) -> GrpcStreamResult {
+    match call_stream_inner(url, service, method, json_payload).await {
+        Ok(r) => r,
+        Err(e) => GrpcStreamResult {
+            success: false,
+            messages: vec![],
+            grpc_status: -1,
+            grpc_message: e,
+        },
+    }
+}
+
+async fn call_stream_inner(
+    url: &str,
+    service: &str,
+    method: &str,
+    json_payload: &str,
+) -> Result<GrpcStreamResult, String> {
+    let (host, port, use_tls) = parse_url(url)?;
+    crate::security::validate_no_ssrf_host(&host)?;
+    let path = format!("/{service}/{method}");
+    let addr = format!("{host}:{port}");
+
+    let tcp = tokio::time::timeout(
+        tokio::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+        tokio::net::TcpStream::connect(&addr),
+    )
+    .await
+    .map_err(|_| "gRPC TCP connect timed out".to_string())?
+    .map_err(|e| format!("gRPC TCP connect failed: {e}"))?;
+
+    if let Ok(peer) = tcp.peer_addr() {
+        crate::security::validate_peer_socket_addr(peer)?;
+    }
+
+    let payload = encode_grpc_message(json_payload.as_bytes());
+
+    if use_tls {
+        call_stream_tls(tcp, &host, &path, &payload).await
+    } else {
+        call_stream_plaintext(tcp, &path, &payload).await
+    }
+}
+
+async fn call_stream_plaintext(
+    tcp: tokio::net::TcpStream,
+    path: &str,
+    payload: &[u8],
+) -> Result<GrpcStreamResult, String> {
+    let (mut client, h2_conn) = h2::client::handshake(tcp)
+        .await
+        .map_err(|e| format!("HTTP/2 handshake failed: {e}"))?;
+    tokio::spawn(async move {
+        let _ = h2_conn.await;
+    });
+    send_grpc_stream_request(&mut client, path, payload).await
+}
+
+async fn call_stream_tls(
+    tcp: tokio::net::TcpStream,
+    host: &str,
+    path: &str,
+    payload: &[u8],
+) -> Result<GrpcStreamResult, String> {
+    let tls_config = build_grpc_tls_config(host, None, None)?;
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+    let domain = rustls::pki_types::ServerName::try_from(host.to_string())
+        .map_err(|e| format!("Invalid TLS server name: {e}"))?;
+    let tls_stream = tokio::time::timeout(
+        tokio::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+        connector.connect(domain, tcp),
+    )
+    .await
+    .map_err(|_| "TLS handshake timed out".to_string())?
+    .map_err(|e| format!("TLS handshake failed: {e}"))?;
+    let (mut client, h2_conn) = h2::client::handshake(tls_stream)
+        .await
+        .map_err(|e| format!("HTTP/2 handshake failed: {e}"))?;
+    tokio::spawn(async move {
+        let _ = h2_conn.await;
+    });
+    send_grpc_stream_request(&mut client, path, payload).await
+}
+
+async fn send_grpc_stream_request(
+    client: &mut h2::client::SendRequest<bytes::Bytes>,
+    path: &str,
+    payload: &[u8],
+) -> Result<GrpcStreamResult, String> {
+    let request = ::http::Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("content-type", "application/grpc")
+        .header("te", "trailers")
+        .header("grpc-timeout", format!("{}S", DEFAULT_TIMEOUT_SECS))
+        .body(())
+        .map_err(|e| format!("Failed to build gRPC request: {e}"))?;
+
+    let (response, mut send_stream) = client
+        .send_request(request, false)
+        .map_err(|e| format!("Failed to send gRPC request: {e}"))?;
+    send_stream
+        .send_data(bytes::Bytes::from(payload.to_vec()), true)
+        .map_err(|e| format!("Failed to send gRPC payload: {e}"))?;
+
+    let response = tokio::time::timeout(
+        tokio::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+        response,
+    )
+    .await
+    .map_err(|_| "gRPC response timed out".to_string())?
+    .map_err(|e| format!("gRPC response error: {e}"))?;
+
+    let grpc_status_hdr = response
+        .headers()
+        .get("grpc-status")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(-1);
+    let grpc_msg_hdr = response
+        .headers()
+        .get("grpc-message")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    // Limit total stream body to avoid OOM on large streams (100 x MAX_RESPONSE_BYTES)
+    let stream_size_limit = MAX_RESPONSE_BYTES.saturating_mul(100);
+    let mut body = response.into_body();
+    let mut body_bytes = Vec::new();
+
+    loop {
+        match tokio::time::timeout(
+            tokio::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            body.data(),
+        )
+        .await
+        {
+            Err(_) => break,
+            Ok(None) => break,
+            Ok(Some(Ok(chunk))) => {
+                if body_bytes.len() + chunk.len() > stream_size_limit {
+                    return Err("gRPC stream body too large".to_string());
+                }
+                body_bytes.extend_from_slice(&chunk);
+                let _ = body.flow_control().release_capacity(chunk.len());
+            }
+            Ok(Some(Err(e))) => return Err(format!("gRPC body read error: {e}")),
+        }
+    }
+
+    let (final_grpc_status, final_grpc_message) = if grpc_status_hdr == -1 {
+        match body.trailers().await {
+            Ok(Some(trailers)) => {
+                let s = trailers
+                    .get("grpc-status")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<i32>().ok())
+                    .unwrap_or(-1);
+                let m = trailers
+                    .get("grpc-message")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+                (s, if m.is_empty() { grpc_msg_hdr } else { m })
+            }
+            _ => (grpc_status_hdr, grpc_msg_hdr),
+        }
+    } else {
+        (grpc_status_hdr, grpc_msg_hdr)
+    };
+
+    let messages = decode_all_grpc_messages(&body_bytes);
+
+    Ok(GrpcStreamResult {
+        success: final_grpc_status == 0 || final_grpc_status == -1,
+        messages,
         grpc_status: final_grpc_status,
         grpc_message: final_grpc_message,
     })

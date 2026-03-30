@@ -337,6 +337,46 @@ impl ImapSession {
 
         Ok(resp)
     }
+
+    /// Write raw bytes directly to the IMAP stream (used for IDLE protocol).
+    pub(crate) fn write_raw(&mut self, data: &[u8]) -> Result<(), String> {
+        match &mut self.stream {
+            ImapStream::Plain(r) => r
+                .get_mut()
+                .write_all(data)
+                .map_err(|e| format!("Write error: {e}")),
+            ImapStream::Tls(r) => r
+                .get_mut()
+                .write_all(data)
+                .map_err(|e| format!("Write error: {e}")),
+        }
+    }
+
+    /// Read a single raw line from the IMAP stream (used for IDLE protocol).
+    pub(crate) fn read_line_raw(&mut self) -> Result<String, String> {
+        let mut line = String::new();
+        match &mut self.stream {
+            ImapStream::Plain(r) => r.read_line(&mut line),
+            ImapStream::Tls(r) => r.read_line(&mut line),
+        }
+        .map_err(|e| format!("Read error: {e}"))?;
+        Ok(line.trim_end_matches(['\r', '\n']).to_string())
+    }
+
+    /// Set the read timeout on the underlying TCP stream.
+    pub(crate) fn set_read_timeout(&self, timeout: Duration) -> Result<(), String> {
+        match &self.stream {
+            ImapStream::Plain(r) => r
+                .get_ref()
+                .set_read_timeout(Some(timeout))
+                .map_err(|e| format!("Failed to set timeout: {e}")),
+            ImapStream::Tls(r) => r
+                .get_ref()
+                .get_ref()
+                .set_read_timeout(Some(timeout))
+                .map_err(|e| format!("Failed to set timeout: {e}")),
+        }
+    }
 }
 
 pub(crate) fn imap_escape(s: &str) -> String {
@@ -436,4 +476,167 @@ fn extract_fetch_body(resp: &str) -> String {
         }
     }
     resp.to_string()
+}
+
+// ===== IMAP IDLE =====
+
+/// A server-push notification received during an IMAP IDLE session.
+pub struct ImapIdleNotification {
+    /// Notification type: "EXISTS", "EXPUNGE", "FETCH", "FLAGS", or "OTHER".
+    pub notification_type: String,
+    /// Sequence number or count associated with the notification (0 if not applicable).
+    pub count: i64,
+    /// Full raw notification line from the server.
+    pub data: String,
+}
+
+/// Result of an IMAP IDLE call.
+pub struct ImapIdleResult {
+    pub success: bool,
+    pub notifications: Vec<ImapIdleNotification>,
+    pub message: String,
+}
+
+/// Open an IMAP IDLE session on the given mailbox and collect server-push
+/// notifications until `timeout_secs` elapses or `max_notifications` are
+/// received.
+///
+/// Useful for detecting new-mail events without polling.
+pub fn idle(
+    url: &str,
+    username: &str,
+    password: &str,
+    mailbox: &str,
+    timeout_secs: u64,
+    max_notifications: usize,
+) -> ImapIdleResult {
+    let timeout_secs = timeout_secs.clamp(1, 300);
+    let max_notifications = max_notifications.min(10_000);
+
+    match idle_inner(url, username, password, mailbox, timeout_secs, max_notifications) {
+        Ok((notifications, msg)) => ImapIdleResult {
+            success: true,
+            notifications,
+            message: msg,
+        },
+        Err(e) => ImapIdleResult {
+            success: false,
+            notifications: vec![],
+            message: e,
+        },
+    }
+}
+
+fn idle_inner(
+    url: &str,
+    username: &str,
+    password: &str,
+    mailbox: &str,
+    timeout_secs: u64,
+    max_notifications: usize,
+) -> Result<(Vec<ImapIdleNotification>, String), String> {
+    let (host, port, use_tls) = parse_imap_url(url)?;
+    crate::security::validate_no_ssrf_host(&host)?;
+
+    if !use_tls {
+        crate::security_warnings::warn_plaintext("IMAP", "PLAINTEXT_IMAP", "imaps://");
+    }
+
+    let mut session = ImapSession::connect(&host, port, use_tls)?;
+    session.read_response("*")?;
+
+    session.command(&format!(
+        "LOGIN \"{}\" \"{}\"",
+        imap_escape(username),
+        imap_escape(password)
+    ))?;
+
+    session.command(&format!("SELECT \"{}\"", imap_escape(mailbox)))?;
+
+    // Send IDLE command manually so we can intercept the continuation response
+    session.tag_counter += 1;
+    let idle_tag = format!("A{:04}", session.tag_counter);
+    let idle_cmd = format!("{idle_tag} IDLE\r\n");
+    session.write_raw(idle_cmd.as_bytes())?;
+
+    // Server responds with "+ idling" (or similar continuation)
+    let cont = session.read_line_raw()?;
+    if !cont.starts_with('+') {
+        return Err(format!("IDLE not supported or failed: {cont}"));
+    }
+
+    // Set read timeout for the idle window
+    session.set_read_timeout(Duration::from_secs(timeout_secs))?;
+
+    let mut notifications = Vec::new();
+
+    loop {
+        if notifications.len() >= max_notifications {
+            break;
+        }
+
+        match session.read_line_raw() {
+            Ok(line) => {
+                if line.is_empty() {
+                    continue;
+                }
+                // Parse untagged responses: "* N TYPE [extra]"
+                let trimmed = line.trim();
+                if trimmed.starts_with("* ") {
+                    let rest = &trimmed[2..];
+                    let mut parts = rest.splitn(3, ' ');
+                    let first = parts.next().unwrap_or("");
+                    let second = parts.next().unwrap_or("");
+                    let _extra = parts.next().unwrap_or("");
+
+                    let (count, notification_type) = if let Ok(n) = first.parse::<i64>() {
+                        (n, second.to_ascii_uppercase())
+                    } else {
+                        (0, first.to_ascii_uppercase())
+                    };
+
+                    let kind = notification_type.as_str();
+                    if matches!(kind, "EXISTS" | "EXPUNGE" | "FETCH" | "FLAGS" | "RECENT") {
+                        notifications.push(ImapIdleNotification {
+                            notification_type,
+                            count,
+                            data: trimmed.to_string(),
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                // Timeout = idle window expired, that's normal
+                if e.contains("timed out")
+                    || e.contains("WouldBlock")
+                    || e.contains("os error 11")
+                {
+                    break;
+                }
+                // Server closed connection
+                if e.contains("Connection reset")
+                    || e.contains("EOF")
+                    || e.contains("broken pipe")
+                {
+                    break;
+                }
+                return Err(e);
+            }
+        }
+    }
+
+    // Send DONE to terminate IDLE
+    let _ = session.write_raw(b"DONE\r\n");
+
+    // Restore normal timeout and read the IDLE completion response
+    let _ = session.set_read_timeout(Duration::from_secs(TIMEOUT_SECS));
+    let _ = session.read_response(&idle_tag);
+
+    session.command("LOGOUT").ok();
+
+    let count = notifications.len();
+    Ok((
+        notifications,
+        format!("Received {count} notification(s) from '{mailbox}'"),
+    ))
 }

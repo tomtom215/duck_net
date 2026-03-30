@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
+use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::redis_client;
@@ -286,5 +287,122 @@ pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con.as_raw_connection())?;
 
+    // redis_subscribe(url, channel, [max_messages=1000], [timeout_secs=10])
+    // -> TABLE(channel VARCHAR, payload VARCHAR)
+    TableFunctionBuilder::new("redis_subscribe")
+        .param(v) // url
+        .param(v) // channel
+        .named_param("max_messages", TypeId::BigInt)
+        .named_param("timeout_secs", TypeId::BigInt)
+        .bind(redis_subscribe_bind)
+        .init(redis_subscribe_init)
+        .scan(redis_subscribe_scan)
+        .register(con.as_raw_connection())?;
+
     Ok(())
 }
+
+// ===== redis_subscribe table function =====
+
+struct RedisSubscribeBindData {
+    url: String,
+    channel: String,
+    max_messages: i64,
+    timeout_secs: i64,
+}
+
+struct RedisSubscribeInitData {
+    messages: Vec<redis_client::RedisSubMessage>,
+    idx: usize,
+    fetched: bool,
+}
+
+unsafe extern "C" fn redis_subscribe_bind(info: duckdb_bind_info) {
+    let bind = BindInfo::new(info);
+    let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
+    let channel = bind.get_parameter_value(1).as_str().unwrap_or_default();
+
+    let max_val = bind.get_named_parameter_value("max_messages");
+    let max_messages = if max_val.is_null() { 1000 } else { max_val.as_i64() };
+
+    let timeout_val = bind.get_named_parameter_value("timeout_secs");
+    let timeout_secs = if timeout_val.is_null() { 10 } else { timeout_val.as_i64() };
+
+    bind.add_result_column("channel", TypeId::Varchar);
+    bind.add_result_column("payload", TypeId::Varchar);
+
+    FfiBindData::<RedisSubscribeBindData>::set(
+        info,
+        RedisSubscribeBindData {
+            url,
+            channel,
+            max_messages,
+            timeout_secs,
+        },
+    );
+}
+
+unsafe extern "C" fn redis_subscribe_init(info: duckdb_init_info) {
+    FfiInitData::<RedisSubscribeInitData>::set(
+        info,
+        RedisSubscribeInitData {
+            messages: vec![],
+            idx: 0,
+            fetched: false,
+        },
+    );
+}
+
+quack_rs::table_scan_callback!(redis_subscribe_scan, |info, output| {
+    let bind_data =
+        match unsafe { FfiBindData::<RedisSubscribeBindData>::get_from_function(info) } {
+            Some(d) => d,
+            None => {
+                unsafe { DataChunk::from_raw(output).set_size(0) };
+                return;
+            }
+        };
+    let init_data =
+        match unsafe { FfiInitData::<RedisSubscribeInitData>::get_mut(info) } {
+            Some(d) => d,
+            None => {
+                unsafe { DataChunk::from_raw(output).set_size(0) };
+                return;
+            }
+        };
+
+    if !init_data.fetched {
+        init_data.fetched = true;
+        let result = redis_client::subscribe(
+            &bind_data.url,
+            &bind_data.channel,
+            bind_data.max_messages,
+            bind_data.timeout_secs,
+        );
+        if !result.success {
+            let fi = FunctionInfo::new(info);
+            fi.set_error(&result.message);
+            unsafe { DataChunk::from_raw(output).set_size(0) };
+            return;
+        }
+        init_data.messages = result.messages;
+    }
+
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut ch_w = unsafe { out_chunk.writer(0) };
+    let mut payload_w = unsafe { out_chunk.writer(1) };
+
+    let mut count: idx_t = 0;
+    let max_chunk = 2048;
+
+    while init_data.idx < init_data.messages.len() && count < max_chunk {
+        let m = &init_data.messages[init_data.idx];
+        let row = count as usize;
+        unsafe { ch_w.write_varchar(row, &m.channel) };
+        unsafe { payload_w.write_varchar(row, &m.payload) };
+        init_data.idx += 1;
+        count += 1;
+    }
+
+    unsafe { out_chunk.set_size(count as usize) };
+});

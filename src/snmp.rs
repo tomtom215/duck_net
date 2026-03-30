@@ -4,6 +4,326 @@
 use std::net::UdpSocket;
 use std::time::Duration;
 
+// ===== SNMPv3 =====
+
+use hmac::{Hmac, Mac};
+use md5_digest::Md5;
+use sha1::Sha1;
+
+/// SNMPv3 authentication protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnmpV3AuthProtocol {
+    Md5,
+    Sha1,
+    None,
+}
+
+impl SnmpV3AuthProtocol {
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s.to_ascii_uppercase().as_str() {
+            "MD5" => Ok(Self::Md5),
+            "SHA" | "SHA1" | "SHA-1" => Ok(Self::Sha1),
+            "NONE" | "" => Ok(Self::None),
+            _ => Err(format!("Unknown auth protocol: {s}. Use MD5, SHA1, or NONE")),
+        }
+    }
+
+    fn digest_len(&self) -> usize {
+        match self {
+            Self::Md5 => 16,
+            Self::Sha1 => 20,
+            Self::None => 0,
+        }
+    }
+}
+
+/// Convert a passphrase to a localised SNMP authentication key.
+///
+/// Implements the RFC 3414 §2.6 password-to-key algorithm.
+fn password_to_key(password: &[u8], engine_id: &[u8], protocol: SnmpV3AuthProtocol) -> Vec<u8> {
+    // Step 1: Expand password to 1 MiB
+    let target_len = 1_048_576usize;
+    let mut expanded = Vec::with_capacity(target_len);
+    let pw_len = password.len();
+    if pw_len == 0 {
+        return vec![0u8; protocol.digest_len()];
+    }
+    let mut index = 0usize;
+    while expanded.len() < target_len {
+        expanded.push(password[index % pw_len]);
+        index += 1;
+    }
+
+    // Step 2: Hash the expanded password
+    let key = match protocol {
+        SnmpV3AuthProtocol::Md5 => {
+            use md5_digest::Digest;
+            let mut h = Md5::new();
+            h.update(&expanded);
+            h.finalize().to_vec()
+        }
+        SnmpV3AuthProtocol::Sha1 => {
+            use sha1::Digest;
+            let mut h = Sha1::new();
+            h.update(&expanded);
+            h.finalize().to_vec()
+        }
+        SnmpV3AuthProtocol::None => return vec![],
+    };
+
+    // Step 3: Localise the key using the engine ID (RFC 3414 §2.6)
+    let local_key = match protocol {
+        SnmpV3AuthProtocol::Md5 => {
+            use md5_digest::Digest;
+            let mut h = Md5::new();
+            h.update(&key);
+            h.update(engine_id);
+            h.update(&key);
+            h.finalize().to_vec()
+        }
+        SnmpV3AuthProtocol::Sha1 => {
+            use sha1::Digest;
+            let mut h = Sha1::new();
+            h.update(&key);
+            h.update(engine_id);
+            h.update(&key);
+            h.finalize().to_vec()
+        }
+        SnmpV3AuthProtocol::None => vec![],
+    };
+
+    local_key
+}
+
+/// Compute HMAC-MD5 or HMAC-SHA1 over `data` using `auth_key`, then truncate
+/// to the first 12 bytes (the SNMP authentication parameter, RFC 3414 §7.3.1).
+fn compute_auth_param(
+    auth_key: &[u8],
+    data: &[u8],
+    protocol: SnmpV3AuthProtocol,
+) -> [u8; 12] {
+    let full_mac = match protocol {
+        SnmpV3AuthProtocol::Md5 => {
+            let mut mac = <Hmac<Md5>>::new_from_slice(auth_key)
+                .expect("HMAC accepts any key size");
+            mac.update(data);
+            mac.finalize().into_bytes().to_vec()
+        }
+        SnmpV3AuthProtocol::Sha1 => {
+            let mut mac = <Hmac<Sha1>>::new_from_slice(auth_key)
+                .expect("HMAC accepts any key size");
+            mac.update(data);
+            mac.finalize().into_bytes().to_vec()
+        }
+        SnmpV3AuthProtocol::None => return [0u8; 12],
+    };
+    let mut result = [0u8; 12];
+    let copy_len = full_mac.len().min(12);
+    result[..copy_len].copy_from_slice(&full_mac[..copy_len]);
+    result
+}
+
+/// Build a minimal SNMPv3 message:
+///   - authNoPriv (authentication, no encryption)
+///   - or noAuthNoPriv (no security)
+///
+/// `request_id` is a 32-bit unique identifier for this exchange.
+/// Returns (packet_bytes, auth_param_offset) where the auth_param_offset is
+/// the byte position of the 12-byte authentication parameter so it can be
+/// patched in after the MAC is computed over the whole message.
+fn build_v3_request(
+    oid: &str,
+    username: &str,
+    engine_id: &[u8],
+    auth_key: &[u8],
+    auth_protocol: SnmpV3AuthProtocol,
+    pdu_type: u8, // 0xA0 = GET, 0xA1 = GET-NEXT
+    request_id: i64,
+) -> Result<(Vec<u8>, Option<usize>), String> {
+    let oid_bytes = encode_oid(oid)?;
+    let request_id_bytes = encode_integer(request_id);
+
+    // Variable binding: SEQUENCE { OID, NULL }
+    let mut varbind = Vec::new();
+    varbind.extend_from_slice(&oid_bytes);
+    varbind.push(0x05);
+    varbind.push(0x00);
+    let varbind_seq = wrap_sequence(&varbind);
+    let varbind_list = wrap_sequence(&varbind_seq);
+
+    // PDU
+    let mut pdu_content = Vec::new();
+    pdu_content.extend_from_slice(&request_id_bytes);
+    pdu_content.extend_from_slice(&encode_integer(0)); // error-status
+    pdu_content.extend_from_slice(&encode_integer(0)); // error-index
+    pdu_content.extend_from_slice(&varbind_list);
+    let pdu = wrap_tlv(pdu_type, &pdu_content);
+
+    // scopedPDU: SEQUENCE { contextEngineID, contextName, pdu }
+    let context_engine = encode_octet_string(engine_id);
+    let context_name = encode_octet_string(b"");
+    let mut scoped = Vec::new();
+    scoped.extend_from_slice(&context_engine);
+    scoped.extend_from_slice(&context_name);
+    scoped.extend_from_slice(&pdu);
+    let scoped_pdu = wrap_sequence(&scoped);
+
+    // USM security parameters: SEQUENCE { engineID, engineBoots, engineTime,
+    //                                     userName, authParam(12 zeros), privParam }
+    let usm_engine_id = encode_octet_string(engine_id);
+    let usm_boots = encode_integer(0);
+    let usm_time = encode_integer(0);
+    let usm_username = encode_octet_string(username.as_bytes());
+    // 12-byte zero auth parameter placeholder
+    let usm_auth_placeholder = encode_octet_string(&[0u8; 12]);
+    let usm_priv = encode_octet_string(b"");
+
+    let mut usm_content = Vec::new();
+    usm_content.extend_from_slice(&usm_engine_id);
+    usm_content.extend_from_slice(&usm_boots);
+    usm_content.extend_from_slice(&usm_time);
+    usm_content.extend_from_slice(&usm_username);
+    usm_content.extend_from_slice(&usm_auth_placeholder);
+    usm_content.extend_from_slice(&usm_priv);
+    let usm_seq = wrap_sequence(&usm_content);
+    let security_params = encode_octet_string(&usm_seq);
+
+    // msgGlobalData: SEQUENCE { msgID, msgMaxSize, msgFlags, msgSecurityModel }
+    let msg_id = encode_integer(request_id & 0x7FFFFFFF); // msgID fits in i32
+    let msg_max_size = encode_integer(65507);
+    // msgFlags: bit 0 = auth, bit 1 = priv, bit 2 = reportable
+    let auth_flag: u8 = if auth_protocol == SnmpV3AuthProtocol::None { 0x04 } else { 0x05 };
+    let msg_flags = encode_octet_string(&[auth_flag]);
+    let msg_security_model = encode_integer(3); // USM = 3
+
+    let mut global_data_content = Vec::new();
+    global_data_content.extend_from_slice(&msg_id);
+    global_data_content.extend_from_slice(&msg_max_size);
+    global_data_content.extend_from_slice(&msg_flags);
+    global_data_content.extend_from_slice(&msg_security_model);
+    let global_data = wrap_sequence(&global_data_content);
+
+    // SNMPv3 message: SEQUENCE { version(3), globalData, securityParams, scopedPDU }
+    let version = encode_integer(3);
+    let mut message_content = Vec::new();
+    message_content.extend_from_slice(&version);
+    message_content.extend_from_slice(&global_data);
+    message_content.extend_from_slice(&security_params);
+    message_content.extend_from_slice(&scoped_pdu);
+    let message = wrap_sequence(&message_content);
+
+    if auth_protocol == SnmpV3AuthProtocol::None || auth_key.is_empty() {
+        return Ok((message, None));
+    }
+
+    // Find the auth parameter placeholder offset in the full message so we can
+    // patch the real MAC into it. Search for the 14-byte signature:
+    // 04 0C [12 zero bytes] = OCTET STRING length=12 followed by 12 zero bytes.
+    let signature = {
+        let mut s = vec![0x04u8, 0x0C];
+        s.extend_from_slice(&[0u8; 12]);
+        s
+    };
+    let auth_offset = message
+        .windows(14)
+        .position(|w| w == signature.as_slice())
+        .map(|pos| pos + 2); // skip the 04 0C tag+len bytes
+
+    Ok((message, auth_offset))
+}
+
+/// Perform an SNMPv3 GET request (authNoPriv).
+pub fn v3_get(
+    host: &str,
+    oid: &str,
+    username: &str,
+    auth_protocol: SnmpV3AuthProtocol,
+    auth_password: &str,
+    engine_id: &[u8],
+) -> Result<SnmpResult, String> {
+    let auth_key = if auth_protocol != SnmpV3AuthProtocol::None {
+        password_to_key(auth_password.as_bytes(), engine_id, auth_protocol)
+    } else {
+        vec![]
+    };
+
+    let (mut packet, auth_offset) = build_v3_request(
+        oid,
+        username,
+        engine_id,
+        &auth_key,
+        auth_protocol,
+        0xA0,
+        1,
+    )?;
+
+    if let (Some(offset), false) = (auth_offset, auth_key.is_empty()) {
+        let mac = compute_auth_param(&auth_key, &packet, auth_protocol);
+        packet[offset..offset + 12].copy_from_slice(&mac);
+    }
+
+    let response = send_udp(host, SNMP_PORT, &packet)?;
+    parse_response(&response).and_then(|results| {
+        results.into_iter().next().ok_or_else(|| "No values in SNMPv3 response".to_string())
+    })
+}
+
+/// Perform an SNMPv3 WALK starting from `oid` (authNoPriv).
+pub fn v3_walk(
+    host: &str,
+    oid: &str,
+    username: &str,
+    auth_protocol: SnmpV3AuthProtocol,
+    auth_password: &str,
+    engine_id: &[u8],
+    max_entries: usize,
+) -> Result<Vec<SnmpResult>, String> {
+    let auth_key = if auth_protocol != SnmpV3AuthProtocol::None {
+        password_to_key(auth_password.as_bytes(), engine_id, auth_protocol)
+    } else {
+        vec![]
+    };
+
+    let max_entries = max_entries.min(MAX_WALK_ENTRIES);
+    let base_oid = oid;
+    let mut current_oid = oid.to_string();
+    let mut results = Vec::new();
+    let mut request_id = 2i64;
+
+    for _ in 0..max_entries {
+        let (mut packet, auth_offset) = build_v3_request(
+            &current_oid,
+            username,
+            engine_id,
+            &auth_key,
+            auth_protocol,
+            0xA1, // GET-NEXT
+            request_id,
+        )?;
+
+        if let (Some(offset), false) = (auth_offset, auth_key.is_empty()) {
+            let mac = compute_auth_param(&auth_key, &packet, auth_protocol);
+            packet[offset..offset + 12].copy_from_slice(&mac);
+        }
+
+        let response = send_udp(host, SNMP_PORT, &packet)?;
+        let parsed = parse_response(&response)?;
+
+        if let Some(result) = parsed.into_iter().next() {
+            if !result.oid.starts_with(base_oid) {
+                break;
+            }
+            current_oid = result.oid.clone();
+            results.push(result);
+        } else {
+            break;
+        }
+        request_id += 1;
+    }
+
+    Ok(results)
+}
+
 const SNMP_PORT: u16 = 161;
 const TIMEOUT_SECS: u64 = 10;
 const MAX_RESPONSE_BYTES: usize = 65535;

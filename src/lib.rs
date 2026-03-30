@@ -31,6 +31,7 @@ mod memcached;
 mod mqtt;
 mod nats;
 mod ntp;
+mod oauth2;
 mod ocsp;
 mod metadata;
 mod odata;

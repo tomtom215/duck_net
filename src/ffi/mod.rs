@@ -25,6 +25,7 @@ mod mqtt;
 mod nats;
 mod ntp;
 mod ocsp;
+mod oauth2;
 mod odata;
 mod ping;
 mod prometheus;
@@ -143,6 +144,12 @@ pub fn register_all(con: &Connection) -> Result<(), ExtensionError> {
 
         // DuckDB secrets manager bridge
         duckdb_secrets_bridge::register_all(con)?;
+
+        // Configuration: TLS / rate-limiting / retry / timeout
+        scalars_config::register_all(con)?;
+
+        // OAuth2 client credentials
+        oauth2::register_all(con)?;
     }
     Ok(())
 }

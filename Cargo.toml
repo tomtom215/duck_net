@@ -60,6 +60,11 @@ tokio-rustls = "0.26"
 # RADIUS authentication hashing
 md5 = "0.7"
 
+# SNMPv3 authentication (HMAC-SHA1 / HMAC-MD5 via digest traits)
+sha1 = { version = "0.10", features = ["oid"] }
+# md-5 renamed to avoid conflict with radius's md5 = "0.7" crate
+md5_digest = { version = "0.10", package = "md-5" }
+
 # Cryptographic random number generation
 getrandom = "0.3"
 
