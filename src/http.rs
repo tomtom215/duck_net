@@ -75,7 +75,7 @@ pub static AGENT: LazyLock<Agent> = LazyLock::new(|| {
         .root_certs(RootCerts::PlatformVerifier)
         .build();
 
-    Agent::config_builder()
+    let config = Agent::config_builder()
         .tls_config(tls)
         .http_status_as_error(false)
         // Disable automatic redirects: we implement our own redirect following
@@ -83,8 +83,16 @@ pub static AGENT: LazyLock<Agent> = LazyLock::new(|| {
         // private/internal networks (CWE-918 / redirect-based SSRF).
         .max_redirects(0)
         .timeout_global(Some(Duration::from_secs(DEFAULT_TIMEOUT_SECS)))
-        .build()
-        .into()
+        .build();
+
+    // SsrfSafeResolver resolves and validates in one atomic step, eliminating
+    // the DNS rebinding TOCTOU window between validate_no_ssrf() and ureq's
+    // own resolution (CWE-918).
+    Agent::with_parts(
+        config,
+        ureq::unversioned::transport::DefaultConnector::default(),
+        crate::security::SsrfSafeResolver,
+    )
 });
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

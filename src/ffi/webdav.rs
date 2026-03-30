@@ -23,14 +23,7 @@ struct WebDavListInitData {
 
 unsafe extern "C" fn webdav_list_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
-    let url_val = bind.get_parameter(0);
-    let url_cstr = duckdb_get_varchar(url_val);
-    let url = std::ffi::CStr::from_ptr(url_cstr)
-        .to_str()
-        .unwrap_or("")
-        .to_string();
-    duckdb_free(url_cstr as *mut _);
-    duckdb_destroy_value(&mut { url_val });
+    let url = bind.get_parameter_value(0).as_str_or_default();
 
     bind.add_result_column("href", TypeId::Varchar);
     bind.add_result_column("name", TypeId::Varchar);
@@ -64,14 +57,14 @@ quack_rs::table_scan_callback!(webdav_list_scan, |info, output| {
     let bind_data = match unsafe { FfiBindData::<WebDavListBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
     let init_data = match unsafe { FfiInitData::<WebDavListInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
@@ -82,7 +75,7 @@ quack_rs::table_scan_callback!(webdav_list_scan, |info, output| {
             Err(e) => {
                 let fi = unsafe { FunctionInfo::new(info) };
                 fi.set_error(&e);
-                unsafe { duckdb_data_chunk_set_size(output, 0) };
+                unsafe { DataChunk::from_raw(output).set_size(0) };
                 return;
             }
         }
@@ -111,7 +104,7 @@ quack_rs::table_scan_callback!(webdav_list_scan, |info, output| {
         count += 1;
     }
 
-    unsafe { duckdb_data_chunk_set_size(output, count as idx_t) };
+    unsafe { out_chunk.set_size(count) };
 });
 
 // ===== Scalar functions =====

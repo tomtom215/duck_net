@@ -156,6 +156,82 @@ pub fn validate_no_ssrf_host(host: &str) -> Result<(), String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SSRF-safe ureq Resolver (CWE-918 — DNS rebinding prevention)
+// ---------------------------------------------------------------------------
+
+/// An SSRF-aware [`ureq::unversioned::resolver::Resolver`] that resolves and
+/// validates addresses in one atomic step, eliminating the TOCTOU window that
+/// would exist if `validate_no_ssrf_host()` checked the hostname and ureq then
+/// re-resolved it independently for connection.
+///
+/// When SSRF protection is enabled (the default):
+/// - The hostname is resolved via `ToSocketAddrs`.
+/// - Every resolved address is checked against `is_private_ip()`.
+/// - If **any** address is private/reserved, the request is blocked.
+/// - Only wholly-public address sets are returned to the connector.
+///
+/// When SSRF protection is disabled (via `set_ssrf_protection(false)`),
+/// this delegates to `DefaultResolver` so normal resolution proceeds.
+#[derive(Debug)]
+pub struct SsrfSafeResolver;
+
+impl ureq::unversioned::resolver::Resolver for SsrfSafeResolver {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        config: &ureq::config::Config,
+        timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs};
+
+        // When SSRF protection is disabled, behave exactly like DefaultResolver.
+        if !ssrf_protection_enabled() {
+            return DefaultResolver::default().resolve(uri, config, timeout);
+        }
+
+        let scheme = uri.scheme().ok_or(ureq::Error::HostNotFound)?;
+        let authority = uri.authority().ok_or(ureq::Error::HostNotFound)?;
+
+        // Build "host:port" string (DefaultResolver helper knows default ports).
+        let host_port = DefaultResolver::host_and_port(scheme, authority)
+            .ok_or(ureq::Error::HostNotFound)?;
+
+        // Resolve via the OS resolver — identical to DefaultResolver's sync path.
+        let socket_addrs: Vec<std::net::SocketAddr> = host_port
+            .to_socket_addrs()
+            .map_err(|_| ureq::Error::HostNotFound)?
+            .collect();
+
+        if socket_addrs.is_empty() {
+            return Err(ureq::Error::HostNotFound);
+        }
+
+        // Block if ANY resolved address is a private/reserved IP (CWE-918).
+        // Checking all addresses prevents split-horizon DNS bypass attempts.
+        for addr in &socket_addrs {
+            if is_private_ip(&addr.ip()) {
+                return Err(ureq::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    format!(
+                        "SSRF protection: hostname '{}' resolves to private/reserved IP {}. \
+                         Use duck_net_set_ssrf_protection(false) to disable for local development.",
+                        authority.host(),
+                        addr.ip()
+                    ),
+                )));
+            }
+        }
+
+        let mut result: ResolvedSocketAddrs = self.empty();
+        for addr in socket_addrs.into_iter().take(16) {
+            result.push(addr);
+        }
+
+        Ok(result)
+    }
+}
+
 /// Extract the hostname portion from a URL.
 fn extract_hostname(url: &str) -> Option<String> {
     // Strip scheme: find "://" separator and take everything after it.
