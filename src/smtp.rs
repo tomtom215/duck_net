@@ -82,6 +82,9 @@ fn send_inner(config: &SmtpConfig) -> Result<String, String> {
     // SSRF protection: block connections to private/reserved IPs (CWE-918)
     crate::security::validate_no_ssrf_host(&config.host)?;
 
+    // Rate limiting: apply per-host token bucket (honours global + per-domain config)
+    crate::rate_limit::acquire_for_host(&config.host);
+
     let addr = format!("{}:{}", config.host, config.port);
     let stream = TcpStream::connect_timeout(
         &addr
@@ -90,6 +93,9 @@ fn send_inner(config: &SmtpConfig) -> Result<String, String> {
         Duration::from_secs(10),
     )
     .map_err(|e| format!("Connection failed to {addr}: {e}"))?;
+
+    // Post-connect SSRF check: validate actual peer IP to prevent DNS rebinding (CWE-918)
+    crate::security::validate_tcp_peer(&stream)?;
 
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
@@ -152,9 +158,12 @@ fn send_over_tls(config: &SmtpConfig, stream: TcpStream) -> Result<String, Strin
 
     let root_store =
         rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let tls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
+    let tls_config = rustls::ClientConfig::builder_with_protocol_versions(&[
+        &rustls::version::TLS12,
+        &rustls::version::TLS13,
+    ])
+    .with_root_certificates(root_store)
+    .with_no_client_auth();
 
     let server_name = ServerName::try_from(config.host.clone())
         .map_err(|e| format!("Invalid server name: {e}"))?;

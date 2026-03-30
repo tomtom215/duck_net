@@ -54,6 +54,11 @@ async fn list_services_inner(url: &str) -> Result<GrpcReflectionResult, String> 
     .map_err(|_| "gRPC TCP connect timed out".to_string())?
     .map_err(|e| format!("gRPC TCP connect failed: {e}"))?;
 
+    // Post-connect SSRF check: validate actual peer IP to prevent DNS rebinding (CWE-918)
+    if let Ok(peer) = tcp.peer_addr() {
+        crate::security::validate_peer_socket_addr(peer)?;
+    }
+
     // Protobuf-encoded ServerReflectionRequest with list_services = ""
     // Field 7, wire type 2 (length-delimited), length 0
     let proto_payload: &[u8] = &[0x3A, 0x00];
@@ -63,9 +68,12 @@ async fn list_services_inner(url: &str) -> Result<GrpcReflectionResult, String> 
         let mut root_store = rustls::RootCertStore::empty();
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-        let tls_config = rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
+        let tls_config = rustls::ClientConfig::builder_with_protocol_versions(&[
+            &rustls::version::TLS12,
+            &rustls::version::TLS13,
+        ])
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
 
         let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
         let domain = rustls::pki_types::ServerName::try_from(host.to_string())

@@ -83,7 +83,7 @@ pub fn warnings_enabled() -> bool {
 
 /// Initialize the warnings store. Called once at extension load.
 pub fn init() {
-    let mut store = WARNINGS.lock().unwrap();
+    let mut store = WARNINGS.lock().unwrap_or_else(|p| p.into_inner());
     if store.is_none() {
         *store = Some(WarningStore {
             seen: HashSet::new(),
@@ -92,13 +92,21 @@ pub fn init() {
     }
 }
 
-/// Emit a security warning (deduped by code). Returns the message if new.
+/// Emit a security warning (deduped by code).
+///
+/// Each unique warning (identified by `code`) is:
+/// 1. Stored in the in-session log (queryable via `duck_net_security_warnings()`).
+/// 2. Printed immediately to stderr so users see it in DuckDB CLI output and
+///    application logs without having to query the warnings table (Fix 19 / CWE-532).
+///
+/// Returns the message string if this code was new, `None` if already emitted
+/// or warnings are disabled.
 pub fn warn(warning: SecurityWarning) -> Option<String> {
     if !warnings_enabled() {
         return None;
     }
 
-    let mut store = WARNINGS.lock().unwrap();
+    let mut store = WARNINGS.lock().unwrap_or_else(|p| p.into_inner());
     let ws = store.as_mut()?;
 
     if ws.seen.contains(warning.code) {
@@ -107,13 +115,23 @@ pub fn warn(warning: SecurityWarning) -> Option<String> {
 
     ws.seen.insert(warning.code);
     let msg = warning.message.clone();
+
+    // Surface the warning immediately on stderr so it appears in DuckDB CLI output
+    // and application logs (DuckDB itself uses stderr for its own notice messages).
+    eprintln!(
+        "[duck_net] {} ({}): {}",
+        warning.severity.as_str(),
+        warning.code,
+        msg
+    );
+
     ws.entries.push(warning);
     Some(msg)
 }
 
 /// Retrieve all warnings emitted this session.
 pub fn list_warnings() -> Vec<SecurityWarning> {
-    let store = WARNINGS.lock().unwrap();
+    let store = WARNINGS.lock().unwrap_or_else(|p| p.into_inner());
     match store.as_ref() {
         Some(ws) => ws.entries.clone(),
         None => Vec::new(),
@@ -122,7 +140,7 @@ pub fn list_warnings() -> Vec<SecurityWarning> {
 
 /// Clear all accumulated warnings.
 pub fn clear_warnings() -> usize {
-    let mut store = WARNINGS.lock().unwrap();
+    let mut store = WARNINGS.lock().unwrap_or_else(|p| p.into_inner());
     match store.as_mut() {
         Some(ws) => {
             let count = ws.entries.len();
@@ -295,6 +313,29 @@ pub fn warn_secret_value_exposed(secret_name: &str) {
              secret name directly to protocol functions (e.g., http_get_secret) \
              rather than extracting raw values. \
              Suppress with: SELECT duck_net_set_security_warnings(false);"
+        ),
+    });
+}
+
+/// Warn when a DNS lookup returns private/reserved IP addresses.
+///
+/// `dns_lookup()` returns whatever the DNS server answers — it does not apply
+/// SSRF filtering. If the result contains a private IP, the caller may
+/// inadvertently connect to an internal service (CWE-918).
+pub fn warn_dns_private_result(hostname: &str, private_ips: &[String]) {
+    warn(SecurityWarning {
+        code: "DNS_PRIVATE_IP_RESULT",
+        cwe: "CWE-918",
+        severity: Severity::Medium,
+        protocol: "dns",
+        message: format!(
+            "Security warning: DNS lookup for '{}' returned private/reserved IP address(es): {}. \
+             Connecting to these addresses may reach internal network services. \
+             duck_net's HTTP/SSRF protection applies to http_get/http_post etc., \
+             but NOT to dns_lookup results used in application logic. \
+             Suppress with: SELECT duck_net_set_security_warnings(false);",
+            hostname,
+            private_ips.join(", ")
         ),
     });
 }

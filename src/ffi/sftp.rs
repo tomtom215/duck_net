@@ -92,21 +92,13 @@ quack_rs::scalar_callback!(cb_sftp_read_blob, |_info, input, output| {
     let url_reader = unsafe { chunk.reader(0) };
 
     let mut sw = unsafe { StructWriter::new(output, 4) };
-    let data_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
         let r = sftp::read_blob(url, None);
 
         unsafe { sw.write_bool(row, 0, r.success) };
-        unsafe {
-            duckdb_vector_assign_string_element_len(
-                data_vec,
-                row as idx_t,
-                r.data.as_ptr() as *const _,
-                r.data.len() as idx_t,
-            );
-        }
+        unsafe { sw.write_blob(row, 1, &r.data) };
         unsafe { sw.write_i64(row, 2, r.size) };
         unsafe { sw.write_varchar(row, 3, &r.message) };
     }
@@ -120,7 +112,6 @@ quack_rs::scalar_callback!(cb_sftp_read_blob_key, |_info, input, output| {
     let key_reader = unsafe { chunk.reader(1) };
 
     let mut sw = unsafe { StructWriter::new(output, 4) };
-    let data_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
 
     for row in 0..row_count {
         let url = unsafe { url_reader.read_str(row) };
@@ -128,14 +119,7 @@ quack_rs::scalar_callback!(cb_sftp_read_blob_key, |_info, input, output| {
         let r = sftp::read_blob(url, Some(key_file));
 
         unsafe { sw.write_bool(row, 0, r.success) };
-        unsafe {
-            duckdb_vector_assign_string_element_len(
-                data_vec,
-                row as idx_t,
-                r.data.as_ptr() as *const _,
-                r.data.len() as idx_t,
-            );
-        }
+        unsafe { sw.write_blob(row, 1, &r.data) };
         unsafe { sw.write_i64(row, 2, r.size) };
         unsafe { sw.write_varchar(row, 3, &r.message) };
     }
@@ -186,14 +170,14 @@ quack_rs::table_scan_callback!(sftp_list_scan, |info, output| {
     let bind_data = match unsafe { FfiBindData::<SftpListBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
     let init_data = match unsafe { FfiInitData::<SftpListInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
@@ -204,7 +188,7 @@ quack_rs::table_scan_callback!(sftp_list_scan, |info, output| {
             Err(e) => {
                 let fi = FunctionInfo::new(info);
                 fi.set_error(&e);
-                unsafe { duckdb_data_chunk_set_size(output, 0) };
+                unsafe { DataChunk::from_raw(output).set_size(0) };
                 return;
             }
         }
@@ -227,7 +211,7 @@ quack_rs::table_scan_callback!(sftp_list_scan, |info, output| {
         count += 1;
     }
 
-    unsafe { duckdb_data_chunk_set_size(output, count) };
+    unsafe { out_chunk.set_size(count as usize) };
 });
 
 // ===== Registration =====

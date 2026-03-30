@@ -32,6 +32,7 @@ mod mqtt;
 mod nats;
 mod ntp;
 mod ocsp;
+mod metadata;
 mod odata;
 mod pagination;
 mod ping;

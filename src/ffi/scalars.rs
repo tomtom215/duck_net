@@ -47,8 +47,7 @@ pub(crate) unsafe fn read_headers_map(
 ) -> Vec<(String, String)> {
     let map_vec = duckdb_data_chunk_get_vector(input, col);
 
-    let validity = duckdb_vector_get_validity(map_vec);
-    if !validity.is_null() && !duckdb_validity_row_is_valid(validity, row as idx_t) {
+    if !VectorReader::from_vector(map_vec, row + 1).is_valid(row) {
         return vec![];
     }
 

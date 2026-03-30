@@ -240,15 +240,21 @@ impl ImapSession {
         )
         .map_err(|e| format!("Connection failed: {e}"))?;
 
+        // Post-connect SSRF check: validate actual peer IP to prevent DNS rebinding (CWE-918)
+        crate::security::validate_tcp_peer(&tcp)?;
+
         tcp.set_read_timeout(Some(timeout)).ok();
         tcp.set_write_timeout(Some(timeout)).ok();
 
         let stream = if use_tls {
             let mut root_store = RootCertStore::empty();
             root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            let config = ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth();
+            let config = ClientConfig::builder_with_protocol_versions(&[
+                &rustls::version::TLS12,
+                &rustls::version::TLS13,
+            ])
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
             let server_name = host
                 .to_string()
                 .try_into()

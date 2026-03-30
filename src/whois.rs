@@ -52,6 +52,9 @@ pub fn query_server(server: &str, query: &str) -> Result<String, String> {
     )
     .map_err(|e| format!("Failed to connect to WHOIS server {server}: {e}"))?;
 
+    // Post-connect SSRF check: validate actual peer IP to prevent DNS rebinding (CWE-918)
+    crate::security::validate_tcp_peer(&stream)?;
+
     stream
         .set_read_timeout(Some(timeout))
         .map_err(|e| format!("Failed to set read timeout: {e}"))?;

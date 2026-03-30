@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use std::ffi::CStr;
-
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
@@ -72,19 +70,13 @@ struct TracerouteInitData {
 
 unsafe extern "C" fn traceroute_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
-    let val = bind.get_parameter(0);
-    let cstr = duckdb_get_varchar(val);
-    let host = CStr::from_ptr(cstr).to_str().unwrap_or("").to_string();
-    duckdb_free(cstr as *mut _);
-    duckdb_destroy_value(&mut { val });
+    let host = bind.get_parameter_value(0).as_str_or_default();
 
-    let max_val = bind.get_named_parameter("max_hops");
+    let max_val = bind.get_named_parameter_value("max_hops");
     let max_hops = if max_val.is_null() {
-        30
+        30u32
     } else {
-        let n = duckdb_get_int64(max_val) as u32;
-        duckdb_destroy_value(&mut { max_val });
-        n
+        max_val.as_i64() as u32
     };
 
     bind.add_result_column("hop", TypeId::Integer);
@@ -111,14 +103,14 @@ quack_rs::table_scan_callback!(traceroute_scan, |info, output| {
     let bind_data = match unsafe { FfiBindData::<TracerouteBindData>::get_from_function(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
     let init_data = match unsafe { FfiInitData::<TracerouteInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
@@ -130,7 +122,7 @@ quack_rs::table_scan_callback!(traceroute_scan, |info, output| {
             Err(e) => {
                 let fi = FunctionInfo::new(info);
                 fi.set_error(&e);
-                unsafe { duckdb_data_chunk_set_size(output, 0) };
+                unsafe { DataChunk::from_raw(output).set_size(0) };
                 return;
             }
         }

@@ -146,13 +146,150 @@ pub fn validate_no_ssrf_host(host: &str) -> Result<(), String> {
         }
         Err(_) => {
             // Block on DNS resolution failure to prevent DNS rebinding attacks.
-            // If this is a legitimate host, retrying will succeed.
+            // A rebinding attacker could return NXDOMAIN on the first lookup and
+            // a private IP on the second (actual connection) lookup.
             Err(format!(
-                "SSRF protection: cannot resolve hostname '{}'. \
+                "SSRF protection: connection blocked — hostname '{}' could not be resolved. \
                  Use duck_net_set_ssrf_protection(false) to disable for local development.",
                 host
             ))
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SSRF-safe ureq Resolver (CWE-918 — DNS rebinding prevention)
+// ---------------------------------------------------------------------------
+
+/// An SSRF-aware [`ureq::unversioned::resolver::Resolver`] that resolves and
+/// validates addresses in one atomic step, eliminating the TOCTOU window that
+/// would exist if `validate_no_ssrf_host()` checked the hostname and ureq then
+/// re-resolved it independently for connection.
+///
+/// When SSRF protection is enabled (the default):
+/// - The hostname is resolved via `ToSocketAddrs`.
+/// - Every resolved address is checked against `is_private_ip()`.
+/// - If **any** address is private/reserved, the request is blocked.
+/// - Only wholly-public address sets are returned to the connector.
+///
+/// When SSRF protection is disabled (via `set_ssrf_protection(false)`),
+/// this delegates to `DefaultResolver` so normal resolution proceeds.
+#[derive(Debug)]
+pub struct SsrfSafeResolver;
+
+impl ureq::unversioned::resolver::Resolver for SsrfSafeResolver {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        config: &ureq::config::Config,
+        timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs};
+
+        // When SSRF protection is disabled, behave exactly like DefaultResolver.
+        if !ssrf_protection_enabled() {
+            return DefaultResolver::default().resolve(uri, config, timeout);
+        }
+
+        let scheme = uri.scheme().ok_or(ureq::Error::HostNotFound)?;
+        let authority = uri.authority().ok_or(ureq::Error::HostNotFound)?;
+
+        // Build "host:port" string (DefaultResolver helper knows default ports).
+        let host_port = DefaultResolver::host_and_port(scheme, authority)
+            .ok_or(ureq::Error::HostNotFound)?;
+
+        // Resolve via the OS resolver — identical to DefaultResolver's sync path.
+        let socket_addrs: Vec<std::net::SocketAddr> = host_port
+            .to_socket_addrs()
+            .map_err(|_| ureq::Error::HostNotFound)?
+            .collect();
+
+        if socket_addrs.is_empty() {
+            return Err(ureq::Error::HostNotFound);
+        }
+
+        // Block if ANY resolved address is a private/reserved IP (CWE-918).
+        // Checking all addresses prevents split-horizon DNS bypass attempts.
+        for addr in &socket_addrs {
+            if is_private_ip(&addr.ip()) {
+                return Err(ureq::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    format!(
+                        "SSRF protection: hostname '{}' resolves to private/reserved IP {}. \
+                         Use duck_net_set_ssrf_protection(false) to disable for local development.",
+                        authority.host(),
+                        addr.ip()
+                    ),
+                )));
+            }
+        }
+
+        let mut result: ResolvedSocketAddrs = self.empty();
+        for addr in socket_addrs.into_iter().take(16) {
+            result.push(addr);
+        }
+
+        Ok(result)
+    }
+}
+
+/// Check whether an IP address string is private/reserved.
+///
+/// Returns `true` if the address is private, `false` if public or unparseable.
+/// Used by DNS functions to warn callers about private IP results.
+pub fn is_private_ip_str(ip_str: &str) -> bool {
+    ip_str.parse::<IpAddr>().is_ok_and(|ip| is_private_ip(&ip))
+}
+
+/// Validate a `SocketAddr` directly (for use with tokio or other async TCP streams).
+///
+/// Use this when you have a `SocketAddr` from `TcpStream::peer_addr()` but
+/// the stream type is not `std::net::TcpStream` (e.g., `tokio::net::TcpStream`).
+pub fn validate_peer_socket_addr(peer: std::net::SocketAddr) -> Result<(), String> {
+    if !ssrf_protection_enabled() {
+        return Ok(());
+    }
+    if is_private_ip(&peer.ip()) {
+        Err(format!(
+            "SSRF protection: connected peer IP {} is private/reserved. \
+             This may indicate a DNS rebinding attack. \
+             Use duck_net_set_ssrf_protection(false) to disable for local development.",
+            peer.ip()
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Validate the actual peer IP of an established TCP connection (CWE-918 DNS rebinding).
+///
+/// Calling `validate_no_ssrf_host()` before connecting leaves a TOCTOU window:
+/// an attacker can return a public IP on the pre-flight lookup and then change
+/// DNS to a private IP for the actual connection. Calling this function on the
+/// connected `TcpStream` eliminates that window by checking the real peer address.
+///
+/// This should be called immediately after `TcpStream::connect_timeout()` and
+/// before any data is sent.
+pub fn validate_tcp_peer(stream: &std::net::TcpStream) -> Result<(), String> {
+    if !ssrf_protection_enabled() {
+        return Ok(());
+    }
+    match stream.peer_addr() {
+        Ok(peer) => {
+            if is_private_ip(&peer.ip()) {
+                Err(format!(
+                    "SSRF protection: connected peer IP {} is private/reserved. \
+                     This may indicate a DNS rebinding attack. \
+                     Use duck_net_set_ssrf_protection(false) to disable for local development.",
+                    peer.ip()
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        Err(e) => Err(format!(
+            "SSRF protection: cannot verify peer address for rebinding check: {e}"
+        )),
     }
 }
 
@@ -210,14 +347,80 @@ fn extract_hostname(url: &str) -> Option<String> {
 
 /// Scrub credentials from a URL for safe inclusion in error messages.
 ///
-/// Replaces `scheme://user:pass@host` with `scheme://***@host`.
+/// Replaces `scheme://user:pass@host` with `scheme://***@host` and
+/// redacts sensitive query parameters (CWE-532) such as `access_token`,
+/// `api_key`, `password`, `secret`, `key`, `auth`, `token`, `signature`.
 pub fn scrub_url(url: &str) -> String {
-    if let Some(at) = url.find('@') {
-        if let Some(scheme_end) = url.find("://") {
-            return format!("{}://***@{}", &url[..scheme_end], &url[at + 1..]);
+    // Strip userinfo (scheme://user:pass@host → scheme://***@host)
+    let url = if let (Some(scheme_end), Some(at)) = (url.find("://"), url.find('@')) {
+        if at > scheme_end {
+            format!("{}://***@{}", &url[..scheme_end], &url[at + 1..])
+        } else {
+            url.to_string()
         }
-    }
-    url.to_string()
+    } else {
+        url.to_string()
+    };
+
+    // Redact sensitive query-string parameters
+    scrub_query_params(&url)
+}
+
+/// Redact values of sensitive query parameters in a URL string.
+///
+/// Replaces `?param=VALUE&...` with `?param=***&...` for known sensitive
+/// parameter names. Case-insensitive match on the parameter name.
+fn scrub_query_params(url: &str) -> String {
+    // Sensitive query parameter names (lower-case for comparison)
+    const SENSITIVE_PARAMS: &[&str] = &[
+        "access_token",
+        "api_key",
+        "apikey",
+        "auth",
+        "client_secret",
+        "key",
+        "password",
+        "private_key",
+        "secret",
+        "secret_key",
+        "signature",
+        "token",
+        "x-amz-security-token",
+        "x-amz-credential",
+        "sas",
+    ];
+
+    let query_start = match url.find('?') {
+        Some(pos) => pos,
+        None => return url.to_string(),
+    };
+
+    let (base, query_and_fragment) = url.split_at(query_start);
+    // query_and_fragment starts with '?'
+    let fragment_start = query_and_fragment.find('#');
+    let (query_part, fragment_part) = match fragment_start {
+        Some(pos) => (
+            &query_and_fragment[1..pos],
+            &query_and_fragment[pos..],
+        ),
+        None => (&query_and_fragment[1..], ""),
+    };
+
+    let redacted: Vec<String> = query_part
+        .split('&')
+        .map(|pair| {
+            if let Some(eq) = pair.find('=') {
+                let name = &pair[..eq];
+                let lower = name.to_ascii_lowercase();
+                if SENSITIVE_PARAMS.iter().any(|&p| p == lower) {
+                    return format!("{}=***", name);
+                }
+            }
+            pair.to_string()
+        })
+        .collect();
+
+    format!("{}?{}{}", base, redacted.join("&"), fragment_part)
 }
 
 /// Scrub known sensitive parameter values from an error message.
@@ -441,7 +644,6 @@ pub fn validate_port(port: u16) -> Result<(), String> {
 
 /// Escape special characters in LDAP filter values per RFC 4515 (CWE-90).
 /// See [`crate::security_validate::ldap_escape_filter_value`].
-#[allow(dead_code)]
 pub fn ldap_escape_filter_value(value: &str) -> String {
     crate::security_validate::ldap_escape_filter_value(value)
 }

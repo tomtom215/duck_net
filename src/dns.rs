@@ -11,7 +11,7 @@ use crate::runtime;
 static RESOLVER: LazyLock<TokioResolver> = LazyLock::new(|| {
     runtime::block_on(async {
         TokioResolver::builder_tokio()
-            .expect("Failed to create DNS resolver builder")
+            .unwrap_or_else(|e| panic!("duck_net: failed to create DNS resolver: {e}"))
             .build()
     })
 });
@@ -44,7 +44,17 @@ pub fn lookup(hostname: &str) -> Result<Vec<String>, String> {
             .lookup_ip(hostname)
             .await
             .map_err(|e| format!("DNS lookup failed for {hostname}: {e}"))?;
-        Ok(response.iter().map(|ip: IpAddr| ip.to_string()).collect())
+        let ips: Vec<String> = response.iter().map(|ip: IpAddr| ip.to_string()).collect();
+        // Warn if any result is a private/reserved IP (CWE-918)
+        let private: Vec<String> = ips
+            .iter()
+            .filter(|s| crate::security::is_private_ip_str(s))
+            .cloned()
+            .collect();
+        if !private.is_empty() {
+            crate::security_warnings::warn_dns_private_result(hostname, &private);
+        }
+        Ok(ips)
     })
 }
 

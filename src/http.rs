@@ -62,10 +62,10 @@ pub fn get_timeout_secs() -> u64 {
 }
 
 pub fn set_retry_statuses(statuses: Vec<u16>) {
-    *GLOBAL_RETRY_STATUSES.lock().unwrap() = statuses;
+    *GLOBAL_RETRY_STATUSES.lock().unwrap_or_else(|p| p.into_inner()) = statuses;
 }
 pub fn get_retry_statuses() -> Vec<u16> {
-    GLOBAL_RETRY_STATUSES.lock().unwrap().clone()
+    GLOBAL_RETRY_STATUSES.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
 pub static AGENT: LazyLock<Agent> = LazyLock::new(|| {
@@ -75,7 +75,7 @@ pub static AGENT: LazyLock<Agent> = LazyLock::new(|| {
         .root_certs(RootCerts::PlatformVerifier)
         .build();
 
-    Agent::config_builder()
+    let config = Agent::config_builder()
         .tls_config(tls)
         .http_status_as_error(false)
         // Disable automatic redirects: we implement our own redirect following
@@ -83,8 +83,16 @@ pub static AGENT: LazyLock<Agent> = LazyLock::new(|| {
         // private/internal networks (CWE-918 / redirect-based SSRF).
         .max_redirects(0)
         .timeout_global(Some(Duration::from_secs(DEFAULT_TIMEOUT_SECS)))
-        .build()
-        .into()
+        .build();
+
+    // SsrfSafeResolver resolves and validates in one atomic step, eliminating
+    // the DNS rebinding TOCTOU window between validate_no_ssrf() and ureq's
+    // own resolution (CWE-918).
+    Agent::with_parts(
+        config,
+        ureq::unversioned::transport::DefaultConnector::default(),
+        crate::security::SsrfSafeResolver,
+    )
 });
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -380,9 +388,12 @@ pub fn execute_raw_method(
                 .canonical_reason()
                 .unwrap_or("")
                 .to_string();
+            // Cap response headers to prevent memory exhaustion from malicious servers (CWE-400)
+            const MAX_RESPONSE_HEADERS: usize = 256;
             let resp_headers: Vec<(String, String)> = response
                 .headers()
                 .iter()
+                .take(MAX_RESPONSE_HEADERS)
                 .map(|(name, value)| {
                     let (name, value): (&ureq::http::HeaderName, &ureq::http::HeaderValue) =
                         (name, value);
@@ -469,7 +480,17 @@ pub fn execute_with_retry(
         let result = follow_redirect(method, url, headers, body, raw);
 
         if retry.should_retry(attempt, result.status) {
-            let delay = retry.delay_for_attempt(attempt);
+            // RFC 7231 §7.1.3: honour Retry-After header if present.
+            // Supports numeric seconds only; HTTP-date form is ignored (uses backoff).
+            // Cap at 300 s to prevent a single request from sleeping indefinitely.
+            const MAX_RETRY_AFTER_SECS: u64 = 300;
+            let delay = result
+                .headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))
+                .and_then(|(_, v)| v.trim().parse::<u64>().ok())
+                .map(|secs| Duration::from_secs(secs.min(MAX_RETRY_AFTER_SECS)))
+                .unwrap_or_else(|| retry.delay_for_attempt(attempt));
             std::thread::sleep(delay);
             attempt += 1;
             continue;
@@ -518,9 +539,12 @@ fn execute_inner(
         .unwrap_or("")
         .to_string();
 
+    // Cap response headers to prevent memory exhaustion from malicious servers (CWE-400)
+    const MAX_RESPONSE_HEADERS: usize = 256;
     let resp_headers: Vec<(String, String)> = response
         .headers()
         .iter()
+        .take(MAX_RESPONSE_HEADERS)
         .map(|(name, value)| {
             let (name, value): (&ureq::http::HeaderName, &ureq::http::HeaderValue) = (name, value);
             (
@@ -616,9 +640,12 @@ fn execute_multipart_inner(
         .unwrap_or("")
         .to_string();
 
+    // Cap response headers to prevent memory exhaustion from malicious servers (CWE-400)
+    const MAX_RESPONSE_HEADERS: usize = 256;
     let resp_headers: Vec<(String, String)> = response
         .headers()
         .iter()
+        .take(MAX_RESPONSE_HEADERS)
         .map(|(name, value)| {
             let (name, value): (&ureq::http::HeaderName, &ureq::http::HeaderValue) = (name, value);
             (

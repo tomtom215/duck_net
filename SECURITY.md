@@ -11,6 +11,7 @@ duck_net enforces security at every layer: input validation, network safety (SSR
 | Threat | CWE | Mitigation |
 |--------|-----|------------|
 | Server-Side Request Forgery | CWE-918 | Block all private/reserved IPv4 and IPv6 ranges by default (including CGN, benchmark, NAT64, Teredo, 6to4 ranges) |
+| DNS Rebinding TOCTOU | CWE-918 | `SsrfSafeResolver` resolves and validates every IP atomically inside ureq's Resolver API, eliminating the window between the pre-flight SSRF check and the connection |
 | Redirect-based SSRF | CWE-918 | Manual redirect following with per-hop SSRF validation; redirect limit of 10 |
 | Credential Exposure in Logs | CWE-532 | Scrub URLs, error messages, and Authorization headers before returning to SQL |
 | HTTP Header Injection | CWE-113 | RFC 7230 header name/value validation; CRLF in header values is blocked |

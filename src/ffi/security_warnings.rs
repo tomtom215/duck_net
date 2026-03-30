@@ -39,6 +39,22 @@ quack_rs::scalar_callback!(cb_clear_security_warnings, |_info, _input, output| {
     unsafe { out_w.write_varchar(0, &msg) };
 });
 
+// duck_net_warnings_enabled() -> BOOLEAN
+// Returns TRUE if security warnings are currently enabled.
+quack_rs::scalar_callback!(cb_warnings_enabled, |_info, _input, output| {
+    let enabled = security_warnings::warnings_enabled();
+    let mut out_w = unsafe { VectorWriter::from_vector(output) };
+    unsafe { out_w.write_bool(0, enabled) };
+});
+
+// duck_net_warnings_count() -> BIGINT
+// Returns the number of warnings emitted this session (without scanning the table).
+quack_rs::scalar_callback!(cb_warnings_count, |_info, _input, output| {
+    let count = security_warnings::list_warnings().len() as i64;
+    let mut out_w = unsafe { VectorWriter::from_vector(output) };
+    unsafe { out_w.write_i64(0, count) };
+});
+
 // ---------------------------------------------------------------------------
 // Security Warnings Table Function
 // ---------------------------------------------------------------------------
@@ -74,7 +90,7 @@ quack_rs::table_scan_callback!(warnings_scan, |info, output| {
     let init_data = match unsafe { FfiInitData::<WarningsInitData>::get_mut(info) } {
         Some(d) => d,
         None => {
-            unsafe { duckdb_data_chunk_set_size(output, 0) };
+            unsafe { DataChunk::from_raw(output).set_size(0) };
             return;
         }
     };
@@ -104,7 +120,7 @@ quack_rs::table_scan_callback!(warnings_scan, |info, output| {
         count += 1;
     }
 
-    unsafe { duckdb_data_chunk_set_size(output, count as idx_t) };
+    unsafe { out_chunk.set_size(count) };
 });
 
 // ---------------------------------------------------------------------------
@@ -133,6 +149,18 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(warnings_bind)
         .init(warnings_init)
         .scan(warnings_scan)
+        .register(con)?;
+
+    // duck_net_warnings_enabled() -> BOOLEAN
+    ScalarFunctionBuilder::new("duck_net_warnings_enabled")
+        .returns(TypeId::Boolean)
+        .function(cb_warnings_enabled)
+        .register(con)?;
+
+    // duck_net_warnings_count() -> BIGINT
+    ScalarFunctionBuilder::new("duck_net_warnings_count")
+        .returns(TypeId::BigInt)
+        .function(cb_warnings_count)
         .register(con)?;
 
     Ok(())

@@ -164,6 +164,9 @@ impl russh::client::Handler for SshHandler {
             KnownHostResult::NotFound => {
                 // Warn about TOFU host key verification (CWE-295)
                 crate::security_warnings::warn_tofu("SSH", "TOFU_SSH");
+                // Persist the key to ~/.ssh/known_hosts so subsequent connections
+                // benefit from key-pinning rather than re-issuing TOFU each time.
+                let _ = append_known_host(&host, &key_type, &key_data);
                 true
             }
             KnownHostResult::Changed => false, // Potential MITM
@@ -219,6 +222,51 @@ fn check_known_hosts(host: &str, key_type: &str, key_data: &str) -> KnownHostRes
     }
 
     KnownHostResult::NotFound
+}
+
+/// Append a newly-learned host key to ~/.ssh/known_hosts.
+///
+/// On first TOFU acceptance, we persist the key so that future connections
+/// see `Matched` instead of `NotFound`, turning TOFU into proper key-pinning.
+/// Failures are silently ignored — if the file cannot be written (read-only FS,
+/// container, etc.) the TOFU warning was already emitted and the connection proceeds.
+fn append_known_host(host: &str, key_type: &str, key_data: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let path = dirs_known_hosts().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "HOME not set")
+    })?;
+
+    // Ensure ~/.ssh/ directory exists with 0700 permissions
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+            }
+        }
+    }
+
+    // Append host key in known_hosts format: "host keytype keydata\n"
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&path)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Set 0600 on newly-created file
+        let meta = file.metadata()?;
+        if meta.len() == 0 {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        }
+    }
+
+    writeln!(file, "{host} {key_type} {key_data}")?;
+    Ok(())
 }
 
 fn dirs_known_hosts() -> Option<String> {

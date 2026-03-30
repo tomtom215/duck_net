@@ -9,6 +9,9 @@ use tokio::runtime::Runtime;
 /// Shared tokio runtime for all async operations (DNS, SFTP).
 /// Runs on a dedicated thread to avoid "cannot start a runtime from within a runtime" panics
 /// when DuckDB is hosted inside another async runtime (e.g., Python with asyncio).
+///
+/// Panics only if the OS refuses to allocate threads/timers — an unrecoverable condition
+/// that should never occur on any supported platform.
 static RT: LazyLock<Runtime> = LazyLock::new(|| {
     std::thread::Builder::new()
         .name("duck_net-async".into())
@@ -17,7 +20,7 @@ static RT: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .expect("Failed to create tokio runtime")
+        .unwrap_or_else(|e| panic!("duck_net: failed to create tokio runtime: {e}"))
 });
 
 /// Run an async future to completion, safely handling the case where
