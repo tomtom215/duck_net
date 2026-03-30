@@ -80,10 +80,16 @@ pub fn query(
     http::execute(Method::Get, &url, &all_headers, None)
 }
 
-/// Extract the `@odata.nextLink` from a response body for pagination.
+/// Extract the next-page URL from a response body for pagination.
+///
+/// Checks the following keys in order:
+/// - `@odata.nextLink` — OData v4 standard
+/// - `odata.nextLink`  — OData v4 (unescaped variant found in some implementations)
+/// - `__next`          — OData v2 JSON responses
 pub fn extract_next_link(body: &str) -> Option<&str> {
     json::extract_string(body, "@odata.nextLink")
         .or_else(|| json::extract_string(body, "odata.nextLink"))
+        .or_else(|| json::extract_string(body, "__next"))
 }
 
 /// Extract the `value` array count (rough — counts commas between top-level array elements).

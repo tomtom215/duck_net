@@ -32,7 +32,7 @@ Protocols that are request-response and stateless are excellent fits. Protocols 
 | **LDAP** | `ldap_search` (table), `ldap_bind` | LDAP directory search (flattened dn/attribute/value) and bind authentication |
 | **TLS Inspect** | `tls_inspect(host, [port])` | Connect to a TLS server and extract X.509 certificate details (subject, issuer, SANs, expiry, algorithms) |
 | **WHOIS** | `whois_lookup`, `whois_query` | Raw WHOIS text and structured domain info (registrar, dates, nameservers, status) |
-| **OData** | `odata_query`, `odata_paginate` (table) | OData v4 queries with $filter/$select/$top/$orderby/$expand and automatic pagination via @odata.nextLink |
+| **OData** | `odata_query`, `odata_paginate` (table) | OData queries with $filter/$select/$top/$orderby/$expand and automatic pagination via @odata.nextLink (v4) and __next (v2 JSON) |
 | **JSON-RPC / XML-RPC** | `jsonrpc_call(url, method, [params])`, `xmlrpc_call` | JSON-RPC 2.0 and XML-RPC remote procedure calls |
 
 ### Tier 2: Infrastructure & Monitoring
