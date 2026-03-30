@@ -28,7 +28,7 @@ pub fn get_global_rps() -> u32 {
 /// Set per-domain rate limits from a JSON-like config string.
 /// Format: `{"domain1": rps1, "domain2": rps2}` or `domain1=rps1,domain2=rps2`.
 pub fn set_domain_limits(config: &str) -> Result<String, String> {
-    let mut limits = DOMAIN_LIMITS.lock().unwrap();
+    let mut limits = DOMAIN_LIMITS.lock().unwrap_or_else(|p| p.into_inner());
     limits.clear();
 
     let config = config.trim();
@@ -158,6 +158,53 @@ fn evict_stale_buckets(limiters: &mut HashMap<String, TokenBucket>) {
     limiters.retain(|_, bucket| bucket.last_refill > cutoff);
 }
 
+/// Acquire a rate limit token for a raw hostname (non-HTTP protocols).
+///
+/// Use this for protocols that don't have a full URL: SMTP, FTP, SFTP, LDAP,
+/// Redis, MQTT, AMQP, Kafka, NATS, gRPC, ZeroMQ, Memcached, etc.
+/// The hostname is used directly as the rate-limit key (same as `acquire_for_url`
+/// would extract from an HTTP URL).
+pub fn acquire_for_host(host: &str) {
+    if host.is_empty() {
+        return;
+    }
+    // Strip port if present: "redis.example.com:6379" → "redis.example.com"
+    let host = if let Some(colon) = host.rfind(':') {
+        let after = &host[colon + 1..];
+        if after.chars().all(|c| c.is_ascii_digit()) {
+            &host[..colon]
+        } else {
+            host
+        }
+    } else {
+        host
+    };
+
+    let rps = effective_rps(host);
+    if rps == 0 {
+        return;
+    }
+
+    let wait = {
+        let mut limiters = LIMITERS.lock().unwrap_or_else(|p| p.into_inner());
+        if limiters.len() >= MAX_TRACKED_DOMAINS {
+            evict_stale_buckets(&mut limiters);
+        }
+        let bucket = limiters
+            .entry(host.to_string())
+            .or_insert_with(|| TokenBucket::new(rps as f64));
+        if (bucket.max_tokens - rps as f64).abs() > 0.01 {
+            bucket.max_tokens = rps as f64;
+            bucket.refill_rate = rps as f64;
+        }
+        bucket.acquire()
+    };
+
+    if !wait.is_zero() {
+        std::thread::sleep(wait);
+    }
+}
+
 /// Acquire a rate limit token for the given URL. Blocks if necessary.
 pub fn acquire_for_url(url: &str) {
     let domain = match domain_from_url(url) {
@@ -171,7 +218,7 @@ pub fn acquire_for_url(url: &str) {
     }
 
     let wait = {
-        let mut limiters = LIMITERS.lock().unwrap();
+        let mut limiters = LIMITERS.lock().unwrap_or_else(|p| p.into_inner());
         // Evict stale entries to prevent unbounded memory growth (CWE-400)
         if limiters.len() >= MAX_TRACKED_DOMAINS {
             evict_stale_buckets(&mut limiters);

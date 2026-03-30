@@ -42,7 +42,7 @@ pub fn get_or_connect(
 
     // Try to get from cache
     {
-        let mut cache = FTP_CACHE.lock().unwrap();
+        let mut cache = FTP_CACHE.lock().unwrap_or_else(|p| p.into_inner());
         evict_expired(&mut cache);
 
         if let Some(entry) = cache.remove(&key) {
@@ -68,7 +68,7 @@ pub fn get_or_connect(
 /// Return a connection to the cache for reuse.
 pub fn return_to_cache(host: &str, port: u16, username: &str, stream: FtpStream) {
     let key = (host.to_string(), port, username.to_string());
-    let mut cache = FTP_CACHE.lock().unwrap();
+    let mut cache = FTP_CACHE.lock().unwrap_or_else(|p| p.into_inner());
     evict_expired(&mut cache);
     // Limit cache size to prevent unbounded growth
     if cache.len() < 32 {

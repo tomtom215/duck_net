@@ -50,6 +50,17 @@ FROM generate_series(1, 100) AS t(id);
 
 Rate limiting is **disabled by default** (0 requests/second = unlimited). It is recommended to enable rate limiting when making bulk API calls or interacting with rate-limited services.
 
+## Scope Limitation
+
+duck_net configuration functions (`duck_net_set_rate_limit`, `duck_net_set_domain_rate_limits`, `duck_net_set_ssrf_protection`, etc.) store state in **process-global `static` variables**. This is a consequence of DuckDB's extension API, which does not expose a per-connection or per-session state hook.
+
+**Practical implications:**
+
+- Settings apply to the entire DuckDB process, not just the current connection.
+- In multi-connection environments (e.g., DuckDB server with concurrent clients), one client's `duck_net_set_rate_limit(5)` affects all other clients.
+- There is no way to restore the previous value automatically when a query completes.
+- For production deployments with concurrent users, prefer external rate limiting (reverse proxy, API gateway) over duck_net's built-in rate limiter.
+
 ## Security Considerations
 
 - Rate limiting is enforced client-side and does not replace server-side rate limits.

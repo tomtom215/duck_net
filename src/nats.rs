@@ -233,6 +233,9 @@ fn publish_inner(url: &str, subject: &str, payload: &str) -> Result<String, Stri
     // SSRF protection: block connections to private/reserved IPs (CWE-918)
     crate::security::validate_no_ssrf_host(&host)?;
 
+    // Rate limiting: apply per-host token bucket (honours global + per-domain config)
+    crate::rate_limit::acquire_for_host(&host);
+
     let addr = format!("{host}:{port}");
     let stream = TcpStream::connect_timeout(
         &addr
@@ -241,6 +244,9 @@ fn publish_inner(url: &str, subject: &str, payload: &str) -> Result<String, Stri
         Duration::from_secs(CONNECT_TIMEOUT_SECS),
     )
     .map_err(|e| format!("NATS connection failed: {e}"))?;
+
+    // Post-connect SSRF check: validate actual peer IP to prevent DNS rebinding (CWE-918)
+    crate::security::validate_tcp_peer(&stream)?;
 
     stream
         .set_read_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
@@ -347,6 +353,9 @@ fn request_inner(
     // SSRF protection: block connections to private/reserved IPs (CWE-918)
     crate::security::validate_no_ssrf_host(&host)?;
 
+    // Rate limiting: apply per-host token bucket (honours global + per-domain config)
+    crate::rate_limit::acquire_for_host(&host);
+
     // Clamp timeout to 100..30000 ms
     let timeout_ms = timeout_ms.clamp(100, 30000);
 
@@ -358,6 +367,9 @@ fn request_inner(
         Duration::from_secs(CONNECT_TIMEOUT_SECS),
     )
     .map_err(|e| format!("NATS connection failed: {e}"))?;
+
+    // Post-connect SSRF check: validate actual peer IP to prevent DNS rebinding (CWE-918)
+    crate::security::validate_tcp_peer(&stream)?;
 
     stream
         .set_write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))

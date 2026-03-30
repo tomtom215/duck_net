@@ -234,7 +234,6 @@ pub fn validate_snmp_community(community: &str) -> Result<(), String> {
 ///
 /// Characters that MUST be escaped: `*`, `(`, `)`, `\`, NUL.
 /// This prevents LDAP injection attacks (CWE-90).
-#[allow(dead_code)]
 pub fn ldap_escape_filter_value(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len() + 16);
     for byte in value.bytes() {

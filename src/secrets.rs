@@ -115,7 +115,7 @@ const SENSITIVE_KEYS: &[&str] = &[
 
 /// Initialize the secrets store. Called once at extension load.
 pub fn init() {
-    let mut store = SECRETS.lock().unwrap();
+    let mut store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     if store.is_none() {
         *store = Some(HashMap::new());
     }
@@ -184,7 +184,7 @@ pub fn add_secret(name: &str, secret_type: &str, config_json: &str) -> Result<St
         ));
     }
 
-    let mut store = SECRETS.lock().unwrap();
+    let mut store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     let map = store.as_mut().ok_or("Secrets store not initialized")?;
 
     // Check limit (unless updating existing)
@@ -213,7 +213,7 @@ pub fn add_secret(name: &str, secret_type: &str, config_json: &str) -> Result<St
 /// Remove a secret from the store.
 /// Zeroizes the secret values in memory before dropping (CWE-316).
 pub fn clear_secret(name: &str) -> Result<String, String> {
-    let mut store = SECRETS.lock().unwrap();
+    let mut store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     let map = store.as_mut().ok_or("Secrets store not initialized")?;
 
     if let Some(mut secret) = map.remove(name) {
@@ -227,7 +227,7 @@ pub fn clear_secret(name: &str) -> Result<String, String> {
 /// Remove all secrets from the store.
 /// Zeroizes all secret values in memory before dropping (CWE-316).
 pub fn clear_all_secrets() -> String {
-    let mut store = SECRETS.lock().unwrap();
+    let mut store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(map) = store.as_mut() {
         let count = map.len();
         for (_, secret) in map.iter_mut() {
@@ -252,7 +252,7 @@ fn zeroize_secret(secret: &mut StoredSecret) {
 
 /// List secret names and types (never exposes values).
 pub fn list_secrets() -> Vec<(String, String, usize)> {
-    let store = SECRETS.lock().unwrap();
+    let store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     match store.as_ref() {
         Some(map) => map
             .iter()
@@ -271,7 +271,7 @@ pub fn list_secrets() -> Vec<(String, String, usize)> {
 /// Get a specific value from a named secret.
 /// Returns None if the secret or key doesn't exist.
 pub(crate) fn get_value(secret_name: &str, key: &str) -> Option<String> {
-    let store = SECRETS.lock().unwrap();
+    let store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     store.as_ref()?.get(secret_name)?.values.get(key).cloned()
 }
 
@@ -280,13 +280,13 @@ pub(crate) fn get_value(secret_name: &str, key: &str) -> Option<String> {
 pub(crate) fn get_value_map_internal(
     secret_name: &str,
 ) -> Option<std::collections::HashMap<String, String>> {
-    let store = SECRETS.lock().unwrap();
+    let store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     store.as_ref()?.get(secret_name).map(|s| s.values.clone())
 }
 
 /// Get the type of a named secret.
 pub fn get_type(secret_name: &str) -> Option<String> {
-    let store = SECRETS.lock().unwrap();
+    let store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     store
         .as_ref()?
         .get(secret_name)
@@ -296,7 +296,7 @@ pub fn get_type(secret_name: &str) -> Option<String> {
 /// Get all non-sensitive values from a secret (for display/debugging).
 /// Sensitive values (passwords, tokens, keys) are redacted.
 pub fn get_redacted(secret_name: &str) -> Option<HashMap<String, String>> {
-    let store = SECRETS.lock().unwrap();
+    let store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     let secret = store.as_ref()?.get(secret_name)?;
     let mut redacted = HashMap::new();
     for (k, v) in &secret.values {

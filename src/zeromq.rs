@@ -420,6 +420,9 @@ fn request_inner(endpoint: &str, message: &str) -> Result<(String, String), Stri
     )
     .map_err(|e| format!("ZMQ connection failed: {e}"))?;
 
+    // Post-connect SSRF check: validate actual peer IP to prevent DNS rebinding (CWE-918)
+    crate::security::validate_tcp_peer(&stream)?;
+
     stream
         .set_read_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;

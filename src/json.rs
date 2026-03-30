@@ -5,12 +5,26 @@
 /// Handles: `"key": "value"` and `"key":"value"` (with/without spaces).
 /// Returns the unescaped string value, or None if not found.
 /// Does NOT handle nested objects or arrays - only top-level string fields.
+///
+/// # False-match prevention
+/// This function checks that the `"key"` match is preceded by a JSON structural
+/// character (`{`, `,`, `[`) or only whitespace/newline after one, ensuring the
+/// key is not matched inside a string value (CWE-116 / false-positive injection).
 pub fn extract_string<'a>(json: &'a str, key: &str) -> Option<&'a str> {
     let needle = format!("\"{key}\"");
     let mut search_from = 0;
 
     while let Some(key_start) = json[search_from..].find(&needle) {
-        let after_key = search_from + key_start + needle.len();
+        let abs_key_start = search_from + key_start;
+        let after_key = abs_key_start + needle.len();
+
+        // Verify that this occurrence is actually a JSON key (not inside a string value).
+        // A key's opening quote must be preceded (ignoring whitespace) by `{` or `,`.
+        if !is_json_key_position(json, abs_key_start) {
+            search_from = after_key;
+            continue;
+        }
+
         let rest = json[after_key..].trim_start();
 
         if !rest.starts_with(':') {
@@ -47,6 +61,20 @@ pub fn extract_string<'a>(json: &'a str, key: &str) -> Option<&'a str> {
         return None;
     }
     None
+}
+
+/// Check whether the `"` at `pos` in `json` is in key position.
+///
+/// A JSON key's opening quote must be preceded (ignoring whitespace/newlines)
+/// by `{` or `,`. This prevents matching keys that appear inside string values.
+fn is_json_key_position(json: &str, pos: usize) -> bool {
+    if pos == 0 {
+        return false; // Cannot be a key at the very start with no preceding char
+    }
+    // Scan backwards through whitespace/newlines
+    let prefix = &json[..pos];
+    let prev_non_ws = prefix.chars().rev().find(|c| !c.is_ascii_whitespace());
+    matches!(prev_non_ws, Some('{') | Some(','))
 }
 
 /// Extract a string value using a simple dot-path like "$.field" or "$.field.subfield".
@@ -98,7 +126,15 @@ pub fn extract_number<'a>(json: &'a str, key: &str) -> Option<&'a str> {
     let mut search_from = 0;
 
     while let Some(key_start) = json[search_from..].find(&needle) {
-        let after_key = search_from + key_start + needle.len();
+        let abs_key_start = search_from + key_start;
+        let after_key = abs_key_start + needle.len();
+
+        // Same key-position guard as extract_string: prevent matching inside values
+        if !is_json_key_position(json, abs_key_start) {
+            search_from = after_key;
+            continue;
+        }
+
         let rest = json[after_key..].trim_start();
 
         if !rest.starts_with(':') {

@@ -81,9 +81,12 @@ pub(crate) fn parse_url(url: &str) -> Result<(String, u16, bool), String> {
 /// Encode a gRPC message with the standard 5-byte frame header.
 /// Format: [compressed(1 byte)] [length(4 bytes big-endian)] [message]
 pub(crate) fn encode_grpc_message(data: &[u8]) -> Vec<u8> {
+    // gRPC length field is a u32 (max ~4 GiB). Use try_from to avoid silent
+    // truncation if data.len() somehow exceeds u32::MAX (CWE-190).
+    let length: u32 = u32::try_from(data.len()).unwrap_or(u32::MAX);
     let mut frame = Vec::with_capacity(5 + data.len());
     frame.push(0u8); // Not compressed
-    frame.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&length.to_be_bytes());
     frame.extend_from_slice(data);
     frame
 }
@@ -98,6 +101,9 @@ pub(crate) fn decode_grpc_message(data: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     let _compressed = data[0];
+    // Safe: u32 always fits in usize on any 32- or 64-bit platform.
+    // The size check below further bounds this to MAX_RESPONSE_BYTES (16 MiB),
+    // preventing any overflow in the subsequent `5 + length` arithmetic.
     let length = u32::from_be_bytes([data[1], data[2], data[3], data[4]]) as usize;
 
     if length > MAX_RESPONSE_BYTES {
@@ -106,15 +112,17 @@ pub(crate) fn decode_grpc_message(data: &[u8]) -> Result<Vec<u8>, String> {
         ));
     }
 
-    if data.len() < 5 + length {
+    // Use checked addition to defend against pathological inputs (CWE-190).
+    let frame_end = 5usize.checked_add(length).ok_or("gRPC frame length overflow")?;
+    if data.len() < frame_end {
         return Err(format!(
             "gRPC response truncated: expected {} bytes, got {}",
-            5 + length,
+            frame_end,
             data.len()
         ));
     }
 
-    Ok(data[5..5 + length].to_vec())
+    Ok(data[5..frame_end].to_vec())
 }
 
 /// Make a unary gRPC call over HTTP/2.
@@ -179,6 +187,11 @@ async fn call_inner(
     .map_err(|_| "gRPC TCP connect timed out".to_string())?
     .map_err(|e| format!("gRPC TCP connect failed: {e}"))?;
 
+    // Post-connect SSRF check: validate actual peer IP to prevent DNS rebinding (CWE-918)
+    if let Ok(peer) = tcp.peer_addr() {
+        crate::security::validate_peer_socket_addr(peer)?;
+    }
+
     // Encode the payload with gRPC framing
     let payload = encode_grpc_message(json_payload.as_bytes());
 
@@ -214,9 +227,12 @@ async fn call_tls(
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-    let tls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
+    let tls_config = rustls::ClientConfig::builder_with_protocol_versions(&[
+        &rustls::version::TLS12,
+        &rustls::version::TLS13,
+    ])
+    .with_root_certificates(root_store)
+    .with_no_client_auth();
 
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     let domain = rustls::pki_types::ServerName::try_from(host.to_string())

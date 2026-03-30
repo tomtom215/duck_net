@@ -320,7 +320,7 @@ pub fn ptp_probe(server: &str, count: u8) -> Result<PtpProbeResult, String> {
     };
     let stddev_ns = variance.sqrt();
 
-    let best = best_result.expect("at least one successful probe");
+    let best = best_result.ok_or("No successful SNTP probes (internal error)")?;
 
     Ok(PtpProbeResult {
         best_offset_ns: offsets[best_index],

@@ -240,6 +240,20 @@ quack_rs::scalar_callback!(cb_ldap_delete, |_info, input, output| {
     }
 });
 
+// ldap_escape_filter(value VARCHAR) -> VARCHAR
+quack_rs::scalar_callback!(cb_ldap_escape_filter, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let val_reader = unsafe { chunk.reader(0) };
+    let mut out_w = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let value = unsafe { val_reader.read_str(row) };
+        let escaped = crate::security::ldap_escape_filter_value(value);
+        unsafe { out_w.write_varchar(row, &escaped) };
+    }
+});
+
 pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
@@ -296,6 +310,16 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(v)
         .returns_logical(ldap_bind_result_type())
         .function(cb_ldap_delete)
+        .null_handling(NullHandling::SpecialNullHandling)
+        .register(con)?;
+
+    // ldap_escape_filter(value VARCHAR) -> VARCHAR
+    // Escapes LDAP filter special characters per RFC 4515 (CWE-90).
+    // Use this when interpolating user-controlled values into LDAP filter strings.
+    ScalarFunctionBuilder::new("ldap_escape_filter")
+        .param(v)
+        .returns(v)
+        .function(cb_ldap_escape_filter)
         .null_handling(NullHandling::SpecialNullHandling)
         .register(con)?;
 
