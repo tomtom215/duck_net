@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::ldap;
 use crate::ldap_write;
 
-
 // ===== ldap_search table function =====
 
 struct LdapSearchBindData {
@@ -158,13 +157,13 @@ quack_rs::scalar_callback!(cb_ldap_bind, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let dn = unsafe { dn_reader.read_str(row as usize) };
-        let pass = unsafe { pass_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let dn = unsafe { dn_reader.read_str(row) };
+        let pass = unsafe { pass_reader.read_str(row) };
         let result = ldap::bind(url, dn, pass);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 
@@ -181,15 +180,15 @@ quack_rs::scalar_callback!(cb_ldap_add, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let dn = unsafe { dn_reader.read_str(row as usize) };
-        let pass = unsafe { pass_reader.read_str(row as usize) };
-        let entry_dn = unsafe { entry_dn_reader.read_str(row as usize) };
-        let attrs = unsafe { attrs_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let dn = unsafe { dn_reader.read_str(row) };
+        let pass = unsafe { pass_reader.read_str(row) };
+        let entry_dn = unsafe { entry_dn_reader.read_str(row) };
+        let attrs = unsafe { attrs_reader.read_str(row) };
         let result = ldap_write::add(url, dn, pass, entry_dn, attrs);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 
@@ -206,15 +205,15 @@ quack_rs::scalar_callback!(cb_ldap_modify, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let dn = unsafe { dn_reader.read_str(row as usize) };
-        let pass = unsafe { pass_reader.read_str(row as usize) };
-        let entry_dn = unsafe { entry_dn_reader.read_str(row as usize) };
-        let mods = unsafe { mods_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let dn = unsafe { dn_reader.read_str(row) };
+        let pass = unsafe { pass_reader.read_str(row) };
+        let entry_dn = unsafe { entry_dn_reader.read_str(row) };
+        let mods = unsafe { mods_reader.read_str(row) };
         let result = ldap_write::modify(url, dn, pass, entry_dn, mods);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 
@@ -230,14 +229,14 @@ quack_rs::scalar_callback!(cb_ldap_delete, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let dn = unsafe { dn_reader.read_str(row as usize) };
-        let pass = unsafe { pass_reader.read_str(row as usize) };
-        let entry_dn = unsafe { entry_dn_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let dn = unsafe { dn_reader.read_str(row) };
+        let pass = unsafe { pass_reader.read_str(row) };
+        let entry_dn = unsafe { entry_dn_reader.read_str(row) };
         let result = ldap_write::delete(url, dn, pass, entry_dn);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 

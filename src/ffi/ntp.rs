@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::ntp;
 
-
 fn ntp_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("offset_ms", LogicalType::new(TypeId::Double)),
@@ -26,21 +25,21 @@ quack_rs::scalar_callback!(cb_ntp_query, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 5) };
 
     for row in 0..row_count {
-        let server = unsafe { server_reader.read_str(row as usize) };
+        let server = unsafe { server_reader.read_str(row) };
         match ntp::query(server) {
             Ok(result) => {
-                unsafe { sw.write_f64(row as usize, 0, result.offset_ms) };
-                unsafe { sw.write_f64(row as usize, 1, result.delay_ms) };
-                unsafe { sw.write_i32(row as usize, 2, result.stratum as i32) };
-                unsafe { sw.write_varchar(row as usize, 3, &result.reference_id) };
-                unsafe { sw.write_f64(row as usize, 4, result.server_time_unix) };
+                unsafe { sw.write_f64(row, 0, result.offset_ms) };
+                unsafe { sw.write_f64(row, 1, result.delay_ms) };
+                unsafe { sw.write_i32(row, 2, result.stratum as i32) };
+                unsafe { sw.write_varchar(row, 3, &result.reference_id) };
+                unsafe { sw.write_f64(row, 4, result.server_time_unix) };
             }
             Err(e) => {
-                unsafe { sw.write_f64(row as usize, 0, 0.0) };
-                unsafe { sw.write_f64(row as usize, 1, 0.0) };
-                unsafe { sw.write_i32(row as usize, 2, -1) };
-                unsafe { sw.write_varchar(row as usize, 3, &format!("Error: {e}")) };
-                unsafe { sw.write_f64(row as usize, 4, 0.0) };
+                unsafe { sw.write_f64(row, 0, 0.0) };
+                unsafe { sw.write_f64(row, 1, 0.0) };
+                unsafe { sw.write_i32(row, 2, -1) };
+                unsafe { sw.write_varchar(row, 3, &format!("Error: {e}")) };
+                unsafe { sw.write_f64(row, 4, 0.0) };
             }
         }
     }

@@ -36,13 +36,13 @@ quack_rs::scalar_callback!(cb_redis_get, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
 
         let result = redis_client::get(url, key);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
     }
 });
 
@@ -57,14 +57,14 @@ quack_rs::scalar_callback!(cb_redis_set, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let value = unsafe { value_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let value = unsafe { value_reader.read_str(row) };
 
         let result = redis_client::set(url, key, value);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
     }
 });
 
@@ -80,15 +80,15 @@ quack_rs::scalar_callback!(cb_redis_set_ex, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let value = unsafe { value_reader.read_str(row as usize) };
-        let ttl = unsafe { ttl_reader.read_i64(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let value = unsafe { value_reader.read_str(row) };
+        let ttl = unsafe { ttl_reader.read_i64(row) };
 
         let result = redis_client::set_ex(url, key, value, ttl);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
     }
 });
 
@@ -105,14 +105,14 @@ quack_rs::scalar_callback!(cb_redis_keys, |_info, input, output| {
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let pattern = unsafe { pattern_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let pattern = unsafe { pattern_reader.read_str(row) };
 
         let result = redis_client::keys(url, pattern);
 
-        unsafe { success_w.write_bool(row as usize, result.success) };
-        unsafe { write_string_list(keys_vec, row as usize, &result.keys, &mut list_offset) };
-        unsafe { message_w.write_varchar(row as usize, &result.message) };
+        unsafe { success_w.write_bool(row, result.success) };
+        unsafe { write_string_list(keys_vec, row, &result.keys, &mut list_offset) };
+        unsafe { message_w.write_varchar(row, &result.message) };
     }
 });
 
@@ -126,13 +126,13 @@ quack_rs::scalar_callback!(cb_redis_del, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
 
         let result = redis_client::del(url, key);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
     }
 });
 
@@ -147,14 +147,14 @@ quack_rs::scalar_callback!(cb_redis_expire, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let ttl = unsafe { ttl_reader.read_i64(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let ttl = unsafe { ttl_reader.read_i64(row) };
 
         let result = redis_client::expire(url, key, ttl);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
     }
 });
 
@@ -169,14 +169,14 @@ quack_rs::scalar_callback!(cb_redis_hget, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let field = unsafe { field_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let field = unsafe { field_reader.read_str(row) };
 
         let result = redis_client::hget(url, key, field);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
     }
 });
 
@@ -192,15 +192,15 @@ quack_rs::scalar_callback!(cb_redis_hset, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let field = unsafe { field_reader.read_str(row as usize) };
-        let value = unsafe { value_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let field = unsafe { field_reader.read_str(row) };
+        let value = unsafe { value_reader.read_str(row) };
 
         let result = redis_client::hset(url, key, field, value);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
     }
 });
 

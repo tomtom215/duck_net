@@ -55,18 +55,18 @@ quack_rs::scalar_callback!(cb_ipmi_device_id, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 9) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
         let r = ipmi::get_device_id(host);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_i32(row as usize, 1, r.device_id as i32) };
-        unsafe { sw.write_i32(row as usize, 2, r.device_revision as i32) };
-        unsafe { sw.write_i32(row as usize, 3, r.firmware_major as i32) };
-        unsafe { sw.write_i32(row as usize, 4, r.firmware_minor as i32) };
-        unsafe { sw.write_varchar(row as usize, 5, &r.ipmi_version) };
-        unsafe { sw.write_i32(row as usize, 6, r.manufacturer_id as i32) };
-        unsafe { sw.write_i32(row as usize, 7, r.product_id as i32) };
-        unsafe { sw.write_varchar(row as usize, 8, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_i32(row, 1, r.device_id as i32) };
+        unsafe { sw.write_i32(row, 2, r.device_revision as i32) };
+        unsafe { sw.write_i32(row, 3, r.firmware_major as i32) };
+        unsafe { sw.write_i32(row, 4, r.firmware_minor as i32) };
+        unsafe { sw.write_varchar(row, 5, &r.ipmi_version) };
+        unsafe { sw.write_i32(row, 6, r.manufacturer_id as i32) };
+        unsafe { sw.write_i32(row, 7, r.product_id as i32) };
+        unsafe { sw.write_varchar(row, 8, &r.message) };
     }
 });
 
@@ -79,18 +79,18 @@ quack_rs::scalar_callback!(cb_ipmi_chassis_status, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 9) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
         let r = ipmi::get_chassis_status(host);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_bool(row as usize, 1, r.power_on) };
-        unsafe { sw.write_bool(row as usize, 2, r.power_overload) };
-        unsafe { sw.write_bool(row as usize, 3, r.interlock) };
-        unsafe { sw.write_bool(row as usize, 4, r.power_fault) };
-        unsafe { sw.write_bool(row as usize, 5, r.power_control_fault) };
-        unsafe { sw.write_varchar(row as usize, 6, &r.power_restore_policy) };
-        unsafe { sw.write_varchar(row as usize, 7, &r.last_power_event) };
-        unsafe { sw.write_varchar(row as usize, 8, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_bool(row, 1, r.power_on) };
+        unsafe { sw.write_bool(row, 2, r.power_overload) };
+        unsafe { sw.write_bool(row, 3, r.interlock) };
+        unsafe { sw.write_bool(row, 4, r.power_fault) };
+        unsafe { sw.write_bool(row, 5, r.power_control_fault) };
+        unsafe { sw.write_varchar(row, 6, &r.power_restore_policy) };
+        unsafe { sw.write_varchar(row, 7, &r.last_power_event) };
+        unsafe { sw.write_varchar(row, 8, &r.message) };
     }
 });
 
@@ -104,14 +104,14 @@ quack_rs::scalar_callback!(cb_ipmi_chassis_control, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let host = unsafe { host_reader.read_str(row as usize) };
-        let action = unsafe { action_reader.read_str(row as usize) };
+        let host = unsafe { host_reader.read_str(row) };
+        let action = unsafe { action_reader.read_str(row) };
         let r = ipmi::chassis_control(host, action);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &r.data) };
-        unsafe { sw.write_i32(row as usize, 2, r.completion_code as i32) };
-        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_varchar(row, 1, &r.data) };
+        unsafe { sw.write_i32(row, 2, r.completion_code as i32) };
+        unsafe { sw.write_varchar(row, 3, &r.message) };
     }
 });
 

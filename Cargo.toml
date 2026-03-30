@@ -63,6 +63,9 @@ md5 = "0.7"
 # Cryptographic random number generation
 getrandom = "0.3"
 
+# Secure memory zeroization (CWE-316)
+zeroize = "1"
+
 [profile.release]
 opt-level = 3
 lto = true

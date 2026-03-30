@@ -68,6 +68,17 @@ pub fn search(url: &str, index: &str, query_json: &str) -> EsResult {
         };
     }
 
+    // Validate query payload size (CWE-400)
+    if !query_json.is_empty() {
+        if let Err(e) = crate::security_validate::validate_query_size(query_json, "Elasticsearch") {
+            return EsResult {
+                success: false,
+                body: String::new(),
+                message: e,
+            };
+        }
+    }
+
     let api_url = format!("{}/{}/_search", url.trim_end_matches('/'), index);
 
     let headers = vec![("Content-Type".to_string(), "application/json".to_string())];

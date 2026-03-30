@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::nats;
 
-
 fn nats_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),
@@ -33,14 +32,14 @@ quack_rs::scalar_callback!(cb_nats_publish, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let subject = unsafe { subject_reader.read_str(row as usize) };
-        let payload = unsafe { payload_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let subject = unsafe { subject_reader.read_str(row) };
+        let payload = unsafe { payload_reader.read_str(row) };
 
         let result = nats::publish(url, subject, payload);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 
@@ -56,16 +55,16 @@ quack_rs::scalar_callback!(cb_nats_request, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let subject = unsafe { subject_reader.read_str(row as usize) };
-        let payload = unsafe { payload_reader.read_str(row as usize) };
-        let timeout_ms = unsafe { timeout_reader.read_i32(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let subject = unsafe { subject_reader.read_str(row) };
+        let payload = unsafe { payload_reader.read_str(row) };
+        let timeout_ms = unsafe { timeout_reader.read_i32(row) };
 
         let result = nats::request(url, subject, payload, timeout_ms as u32);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.response) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.response) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -80,15 +79,15 @@ quack_rs::scalar_callback!(cb_nats_request_default, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let subject = unsafe { subject_reader.read_str(row as usize) };
-        let payload = unsafe { payload_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let subject = unsafe { subject_reader.read_str(row) };
+        let payload = unsafe { payload_reader.read_str(row) };
 
         let result = nats::request(url, subject, payload, 5000);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.response) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.response) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 

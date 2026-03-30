@@ -26,10 +26,18 @@ unsafe extern "C" fn caldav_events_bind(info: duckdb_bind_info) {
     let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
 
     let time_start_val = bind.get_named_parameter_value("time_start");
-    let time_start = if time_start_val.is_null() { None } else { time_start_val.as_str().ok() };
+    let time_start = if time_start_val.is_null() {
+        None
+    } else {
+        time_start_val.as_str().ok()
+    };
 
     let time_end_val = bind.get_named_parameter_value("time_end");
-    let time_end = if time_end_val.is_null() { None } else { time_end_val.as_str().ok() };
+    let time_end = if time_end_val.is_null() {
+        None
+    } else {
+        time_end_val.as_str().ok()
+    };
 
     bind.add_result_column("href", TypeId::Varchar);
     bind.add_result_column("etag", TypeId::Varchar);
@@ -155,7 +163,8 @@ unsafe extern "C" fn carddav_contacts_init(info: duckdb_init_info) {
 
 // carddav_contacts_scan table scan callback
 quack_rs::table_scan_callback!(carddav_contacts_scan, |info, output| {
-    let bind_data = match unsafe { FfiBindData::<CardDavContactsBindData>::get_from_function(info) } {
+    let bind_data = match unsafe { FfiBindData::<CardDavContactsBindData>::get_from_function(info) }
+    {
         Some(d) => d,
         None => {
             unsafe { duckdb_data_chunk_set_size(output, 0) };

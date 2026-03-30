@@ -24,10 +24,7 @@ unsafe extern "C" fn paginate_bind(info: duckdb_bind_info) {
     let bind = BindInfo::new(info);
 
     // Read positional parameter: url (VARCHAR)
-    let url = bind
-        .get_parameter_value(0)
-        .as_str()
-        .unwrap_or_default();
+    let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
 
     // Read named parameters
     let page_param = read_named_varchar(info, "page_param");

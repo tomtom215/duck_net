@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::kafka;
 
-
 fn kafka_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),
@@ -28,18 +27,18 @@ quack_rs::scalar_callback!(cb_kafka_produce, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let brokers = unsafe { brokers_reader.read_str(row as usize) };
-        let topic = unsafe { topic_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let value = unsafe { value_reader.read_str(row as usize) };
+        let brokers = unsafe { brokers_reader.read_str(row) };
+        let topic = unsafe { topic_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let value = unsafe { value_reader.read_str(row) };
 
         let key_opt = if key.is_empty() { None } else { Some(key) };
         let result = kafka::produce(brokers, topic, key_opt, value);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i32(row as usize, 1, result.partition) };
-        unsafe { sw.write_i64(row as usize, 2, result.offset) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i32(row, 1, result.partition) };
+        unsafe { sw.write_i64(row, 2, result.offset) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 
@@ -54,16 +53,16 @@ quack_rs::scalar_callback!(cb_kafka_produce_no_key, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let brokers = unsafe { brokers_reader.read_str(row as usize) };
-        let topic = unsafe { topic_reader.read_str(row as usize) };
-        let value = unsafe { value_reader.read_str(row as usize) };
+        let brokers = unsafe { brokers_reader.read_str(row) };
+        let topic = unsafe { topic_reader.read_str(row) };
+        let value = unsafe { value_reader.read_str(row) };
 
         let result = kafka::produce(brokers, topic, None, value);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_i32(row as usize, 1, result.partition) };
-        unsafe { sw.write_i64(row as usize, 2, result.offset) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_i32(row, 1, result.partition) };
+        unsafe { sw.write_i64(row, 2, result.offset) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 

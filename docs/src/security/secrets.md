@@ -32,26 +32,26 @@ SELECT duck_net_clear_all_secrets();
 | Type | Protocol | Required Keys | Optional Keys |
 |------|----------|--------------|---------------|
 | `smtp` | Email sending | `host` | `port`, `username`, `password`, `use_tls` |
-| `imap` | Email reading | `username`, `password` | — |
+| `imap` | Email reading | `username`, `password` | -- |
 | `ssh` | Remote execution | `key_file` or `password` | `username` |
-| `ftp` | File transfer | — | `username`, `password` |
+| `ftp` | File transfer | -- | `username`, `password` |
 | `sftp` | Secure file transfer | `key_file` or `password` | `username` |
-| `ldap` | Directory services | `username`, `password` | — |
+| `ldap` | Directory services | `username`, `password` | -- |
 | `redis` | Cache/KV store | `host` | `port`, `password`, `db` |
 | `s3` | Object storage | `key_id`, `secret` | `region`, `endpoint`, `session_token` |
-| `http` | HTTP APIs | `bearer_token` or `username`+`password` | — |
-| `vault` | HashiCorp Vault | `token` | — |
-| `consul` | Service discovery | `token` | — |
-| `influxdb` | Time series | `token` | — |
-| `elasticsearch` | Search | `token` or `username`+`password` | — |
-| `snmp` | Network management | `community` | — |
-| `radius` | Authentication | `shared_secret` | — |
-| `kafka` | Messaging | — | `username`, `password` |
-| `nats` | Messaging | — | `token`, `username`, `password` |
-| `mqtt` | IoT messaging | — | `username`, `password` |
-| `grpc` | RPC | — | `token` |
-| `websocket` | Real-time | — | `token` |
-| `memcached` | Caching | — | `host`, `port` |
+| `http` | HTTP APIs | `bearer_token` or `username`+`password` | -- |
+| `vault` | HashiCorp Vault | `token` | -- |
+| `consul` | Service discovery | `token` | -- |
+| `influxdb` | Time series | `token` | -- |
+| `elasticsearch` | Search | `token` or `username`+`password` | -- |
+| `snmp` | Network management | `community` | -- |
+| `radius` | Authentication | `shared_secret` | -- |
+| `kafka` | Messaging | -- | `username`, `password` |
+| `nats` | Messaging | -- | `token`, `username`, `password` |
+| `mqtt` | IoT messaging | -- | `username`, `password` |
+| `grpc` | RPC | -- | `token` |
+| `websocket` | Real-time | -- | `token` |
+| `memcached` | Caching | -- | `host`, `port` |
 
 ## Secret-Aware Functions
 
@@ -81,7 +81,30 @@ SELECT ldap_search_secret('my_ldap', 'ldaps://ldap.example.com', 'dc=example,dc=
 ## Security Properties
 
 - **In-memory only**: Secrets are never written to disk
-- **Zeroization**: Secret values are overwritten with zeros before deallocation (CWE-316)
+- **Zeroization**: Secret values are scrubbed using the `zeroize` crate, which guarantees the zeroing writes are not optimized away by the compiler (CWE-316)
+- **ZeroizeOnDrop**: Secrets are automatically zeroized when dropped, even on unexpected exits
 - **Bounded storage**: Maximum 1,024 secrets, 64 KiB per secret
-- **Redacted display**: Sensitive keys (`password`, `secret`, `token`, etc.) are always redacted
-- **Name validation**: Secret names must be alphanumeric with underscores, hyphens, and dots
+- **Redacted display**: Sensitive keys (`password`, `secret`, `token`, `api_key`, `private_key`, `client_secret`, etc.) are always redacted
+- **Name validation**: Secret names must be 1-128 characters, alphanumeric with underscores, hyphens, and dots
+- **Error scrubbing**: Credential values are scrubbed from all error messages, including Authorization headers and AUTH PLAIN payloads
+
+## DuckDB Native Secrets
+
+For S3, HTTP, GCS, and R2 protocols, prefer DuckDB's native secrets manager. See [DuckDB Native Secrets](./duckdb-secrets.md) for details.
+
+## Security Utilities
+
+duck_net exposes utility functions for credential handling:
+
+```sql
+-- Scrub credentials from a URL
+SELECT duck_net_scrub_url('redis://password@host:6379');
+-- Returns: redis://***@host:6379
+
+-- Scrub credentials from an error message
+SELECT duck_net_scrub_error('Connection failed: password=secret123 at host');
+-- Returns: Connection failed: password=******** at host
+
+-- View complete security configuration
+SELECT duck_net_security_status();
+```

@@ -42,19 +42,19 @@ quack_rs::scalar_callback!(cb_s3_get, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let endpoint = unsafe { endpoint_reader.read_str(row as usize) };
-        let bucket = unsafe { bucket_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let access_key = unsafe { access_key_reader.read_str(row as usize) };
-        let secret_key = unsafe { secret_key_reader.read_str(row as usize) };
-        let region = unsafe { region_reader.read_str(row as usize) };
+        let endpoint = unsafe { endpoint_reader.read_str(row) };
+        let bucket = unsafe { bucket_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let access_key = unsafe { access_key_reader.read_str(row) };
+        let secret_key = unsafe { secret_key_reader.read_str(row) };
+        let region = unsafe { region_reader.read_str(row) };
 
         let result = s3::s3_get(endpoint, bucket, key, access_key, secret_key, region);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
-        unsafe { sw.write_i32(row as usize, 2, result.status) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_i32(row, 2, result.status) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 
@@ -73,20 +73,20 @@ quack_rs::scalar_callback!(cb_s3_put, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let endpoint = unsafe { endpoint_reader.read_str(row as usize) };
-        let bucket = unsafe { bucket_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let body = unsafe { body_reader.read_str(row as usize) };
-        let access_key = unsafe { access_key_reader.read_str(row as usize) };
-        let secret_key = unsafe { secret_key_reader.read_str(row as usize) };
-        let region = unsafe { region_reader.read_str(row as usize) };
+        let endpoint = unsafe { endpoint_reader.read_str(row) };
+        let bucket = unsafe { bucket_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let body = unsafe { body_reader.read_str(row) };
+        let access_key = unsafe { access_key_reader.read_str(row) };
+        let secret_key = unsafe { secret_key_reader.read_str(row) };
+        let region = unsafe { region_reader.read_str(row) };
 
         let result = s3::s3_put(endpoint, bucket, key, body, access_key, secret_key, region);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
-        unsafe { sw.write_i32(row as usize, 2, result.status) };
-        unsafe { sw.write_varchar(row as usize, 3, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_i32(row, 2, result.status) };
+        unsafe { sw.write_varchar(row, 3, &result.message) };
     }
 });
 

@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::elasticsearch;
 
-
 fn es_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),
@@ -26,15 +25,15 @@ quack_rs::scalar_callback!(cb_es_search, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let index = unsafe { index_reader.read_str(row as usize) };
-        let query = unsafe { query_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let index = unsafe { index_reader.read_str(row) };
+        let query = unsafe { query_reader.read_str(row) };
 
         let result = elasticsearch::search(url, index, query);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -49,15 +48,15 @@ quack_rs::scalar_callback!(cb_es_count, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let index = unsafe { index_reader.read_str(row as usize) };
-        let query = unsafe { query_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let index = unsafe { index_reader.read_str(row) };
+        let query = unsafe { query_reader.read_str(row) };
 
         let result = elasticsearch::count(url, index, query);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -71,14 +70,14 @@ quack_rs::scalar_callback!(cb_es_cat, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let endpoint = unsafe { endpoint_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let endpoint = unsafe { endpoint_reader.read_str(row) };
 
         let result = elasticsearch::cat(url, endpoint);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 

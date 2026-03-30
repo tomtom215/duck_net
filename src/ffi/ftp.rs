@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::ftp;
 use crate::sftp;
 
-
 // ===== Return Type Helpers =====
 
 fn read_result_type() -> LogicalType {
@@ -45,13 +44,13 @@ quack_rs::scalar_callback!(cb_ftp_read, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
         let r = ftp::read(url);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &r.content) };
-        unsafe { sw.write_i64(row as usize, 2, r.size) };
-        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_varchar(row, 1, &r.content) };
+        unsafe { sw.write_i64(row, 2, r.size) };
+        unsafe { sw.write_varchar(row, 3, &r.message) };
     }
 });
 
@@ -65,13 +64,13 @@ quack_rs::scalar_callback!(cb_ftp_write, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let content = unsafe { content_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let content = unsafe { content_reader.read_str(row) };
         let r = ftp::write(url, content);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_i64(row as usize, 1, r.bytes_written) };
-        unsafe { sw.write_varchar(row as usize, 2, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_i64(row, 1, r.bytes_written) };
+        unsafe { sw.write_varchar(row, 2, &r.message) };
     }
 });
 
@@ -84,11 +83,11 @@ quack_rs::scalar_callback!(cb_ftp_delete, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
         let r = ftp::delete(url);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_varchar(row, 1, &r.message) };
     }
 });
 
@@ -103,13 +102,13 @@ quack_rs::scalar_callback!(cb_sftp_read, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
         let r = sftp::read(url, None);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &r.content) };
-        unsafe { sw.write_i64(row as usize, 2, r.size) };
-        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_varchar(row, 1, &r.content) };
+        unsafe { sw.write_i64(row, 2, r.size) };
+        unsafe { sw.write_varchar(row, 3, &r.message) };
     }
 });
 
@@ -123,14 +122,14 @@ quack_rs::scalar_callback!(cb_sftp_read_key, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 4) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key_file = unsafe { key_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key_file = unsafe { key_reader.read_str(row) };
         let r = sftp::read(url, Some(key_file));
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &r.content) };
-        unsafe { sw.write_i64(row as usize, 2, r.size) };
-        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_varchar(row, 1, &r.content) };
+        unsafe { sw.write_i64(row, 2, r.size) };
+        unsafe { sw.write_varchar(row, 3, &r.message) };
     }
 });
 
@@ -144,13 +143,13 @@ quack_rs::scalar_callback!(cb_sftp_write, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let content = unsafe { content_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let content = unsafe { content_reader.read_str(row) };
         let r = sftp::write(url, content, None);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_i64(row as usize, 1, r.bytes_written) };
-        unsafe { sw.write_varchar(row as usize, 2, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_i64(row, 1, r.bytes_written) };
+        unsafe { sw.write_varchar(row, 2, &r.message) };
     }
 });
 
@@ -163,11 +162,11 @@ quack_rs::scalar_callback!(cb_sftp_delete, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
         let r = sftp::delete(url, None);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &r.message) };
+        unsafe { sw.write_bool(row, 0, r.success) };
+        unsafe { sw.write_varchar(row, 1, &r.message) };
     }
 });
 
@@ -192,10 +191,10 @@ quack_rs::scalar_callback!(cb_ftp_read_blob, |_info, input, output| {
     let data_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
         let r = ftp::read_blob(url);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_bool(row, 0, r.success) };
         // Write blob data directly
         unsafe {
             duckdb_vector_assign_string_element_len(
@@ -205,8 +204,8 @@ quack_rs::scalar_callback!(cb_ftp_read_blob, |_info, input, output| {
                 r.data.len() as idx_t,
             );
         }
-        unsafe { sw.write_i64(row as usize, 2, r.size) };
-        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
+        unsafe { sw.write_i64(row, 2, r.size) };
+        unsafe { sw.write_varchar(row, 3, &r.message) };
     }
 });
 
@@ -220,10 +219,10 @@ quack_rs::scalar_callback!(cb_sftp_read_blob, |_info, input, output| {
     let data_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
         let r = sftp::read_blob(url, None);
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_bool(row, 0, r.success) };
         unsafe {
             duckdb_vector_assign_string_element_len(
                 data_vec,
@@ -232,8 +231,8 @@ quack_rs::scalar_callback!(cb_sftp_read_blob, |_info, input, output| {
                 r.data.len() as idx_t,
             );
         }
-        unsafe { sw.write_i64(row as usize, 2, r.size) };
-        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
+        unsafe { sw.write_i64(row, 2, r.size) };
+        unsafe { sw.write_varchar(row, 3, &r.message) };
     }
 });
 
@@ -248,11 +247,11 @@ quack_rs::scalar_callback!(cb_sftp_read_blob_key, |_info, input, output| {
     let data_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key_file = unsafe { key_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key_file = unsafe { key_reader.read_str(row) };
         let r = sftp::read_blob(url, Some(key_file));
 
-        unsafe { sw.write_bool(row as usize, 0, r.success) };
+        unsafe { sw.write_bool(row, 0, r.success) };
         unsafe {
             duckdb_vector_assign_string_element_len(
                 data_vec,
@@ -261,8 +260,8 @@ quack_rs::scalar_callback!(cb_sftp_read_blob_key, |_info, input, output| {
                 r.data.len() as idx_t,
             );
         }
-        unsafe { sw.write_i64(row as usize, 2, r.size) };
-        unsafe { sw.write_varchar(row as usize, 3, &r.message) };
+        unsafe { sw.write_i64(row, 2, r.size) };
+        unsafe { sw.write_varchar(row, 3, &r.message) };
     }
 });
 

@@ -7,7 +7,6 @@ use quack_rs::prelude::*;
 use crate::imap;
 use crate::imap_write;
 
-
 // ===== imap_list table function =====
 
 struct ImapListBindData {
@@ -168,15 +167,15 @@ quack_rs::scalar_callback!(cb_imap_fetch, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let pass = unsafe { pass_reader.read_str(row as usize) };
-        let uid = unsafe { uid_reader.read_i64(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let pass = unsafe { pass_reader.read_str(row) };
+        let uid = unsafe { uid_reader.read_i64(row) };
 
         let result = imap::fetch_message(url, user, pass, "INBOX", uid);
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.body) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.body) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -201,17 +200,17 @@ quack_rs::scalar_callback!(cb_imap_move, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let pass = unsafe { pass_reader.read_str(row as usize) };
-        let mailbox = unsafe { mailbox_reader.read_str(row as usize) };
-        let uid = unsafe { uid_reader.read_i64(row as usize) };
-        let dest = unsafe { dest_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let pass = unsafe { pass_reader.read_str(row) };
+        let mailbox = unsafe { mailbox_reader.read_str(row) };
+        let uid = unsafe { uid_reader.read_i64(row) };
+        let dest = unsafe { dest_reader.read_str(row) };
 
         let result = imap_write::move_message(url, user, pass, mailbox, uid, dest);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 
@@ -228,16 +227,16 @@ quack_rs::scalar_callback!(cb_imap_delete, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let pass = unsafe { pass_reader.read_str(row as usize) };
-        let mailbox = unsafe { mailbox_reader.read_str(row as usize) };
-        let uid = unsafe { uid_reader.read_i64(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let pass = unsafe { pass_reader.read_str(row) };
+        let mailbox = unsafe { mailbox_reader.read_str(row) };
+        let uid = unsafe { uid_reader.read_i64(row) };
 
         let result = imap_write::delete_message(url, user, pass, mailbox, uid);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 
@@ -255,17 +254,17 @@ quack_rs::scalar_callback!(cb_imap_flag, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 2) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let user = unsafe { user_reader.read_str(row as usize) };
-        let pass = unsafe { pass_reader.read_str(row as usize) };
-        let mailbox = unsafe { mailbox_reader.read_str(row as usize) };
-        let uid = unsafe { uid_reader.read_i64(row as usize) };
-        let flags = unsafe { flags_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let user = unsafe { user_reader.read_str(row) };
+        let pass = unsafe { pass_reader.read_str(row) };
+        let mailbox = unsafe { mailbox_reader.read_str(row) };
+        let uid = unsafe { uid_reader.read_i64(row) };
+        let flags = unsafe { flags_reader.read_str(row) };
 
         let result = imap_write::flag_message(url, user, pass, mailbox, uid, flags);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.message) };
     }
 });
 

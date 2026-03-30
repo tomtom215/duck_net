@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::ptp;
 
-
 fn sntp_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("offset_ns", LogicalType::new(TypeId::Double)),
@@ -52,39 +51,39 @@ quack_rs::scalar_callback!(cb_sntp_query, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 14) };
 
     for row in 0..row_count {
-        let server = unsafe { server_reader.read_str(row as usize) };
+        let server = unsafe { server_reader.read_str(row) };
         match ptp::sntp_query(server) {
             Ok(result) => {
-                unsafe { sw.write_f64(row as usize, 0, result.offset_ns) };
-                unsafe { sw.write_f64(row as usize, 1, result.delay_ns) };
-                unsafe { sw.write_i32(row as usize, 2, result.stratum as i32) };
-                unsafe { sw.write_i32(row as usize, 3, result.leap_indicator as i32) };
-                unsafe { sw.write_i32(row as usize, 4, result.version as i32) };
-                unsafe { sw.write_i32(row as usize, 5, result.poll_interval as i32) };
-                unsafe { sw.write_i32(row as usize, 6, result.precision as i32) };
-                unsafe { sw.write_f64(row as usize, 7, result.root_delay_us) };
-                unsafe { sw.write_f64(row as usize, 8, result.root_dispersion_us) };
-                unsafe { sw.write_varchar(row as usize, 9, &result.reference_id) };
-                unsafe { sw.write_f64(row as usize, 10, result.reference_time_unix) };
-                unsafe { sw.write_f64(row as usize, 11, result.receive_time_unix) };
-                unsafe { sw.write_f64(row as usize, 12, result.transmit_time_unix) };
-                unsafe { sw.write_f64(row as usize, 13, result.server_time_unix) };
+                unsafe { sw.write_f64(row, 0, result.offset_ns) };
+                unsafe { sw.write_f64(row, 1, result.delay_ns) };
+                unsafe { sw.write_i32(row, 2, result.stratum as i32) };
+                unsafe { sw.write_i32(row, 3, result.leap_indicator as i32) };
+                unsafe { sw.write_i32(row, 4, result.version as i32) };
+                unsafe { sw.write_i32(row, 5, result.poll_interval as i32) };
+                unsafe { sw.write_i32(row, 6, result.precision as i32) };
+                unsafe { sw.write_f64(row, 7, result.root_delay_us) };
+                unsafe { sw.write_f64(row, 8, result.root_dispersion_us) };
+                unsafe { sw.write_varchar(row, 9, &result.reference_id) };
+                unsafe { sw.write_f64(row, 10, result.reference_time_unix) };
+                unsafe { sw.write_f64(row, 11, result.receive_time_unix) };
+                unsafe { sw.write_f64(row, 12, result.transmit_time_unix) };
+                unsafe { sw.write_f64(row, 13, result.server_time_unix) };
             }
             Err(e) => {
-                unsafe { sw.write_f64(row as usize, 0, 0.0) };
-                unsafe { sw.write_f64(row as usize, 1, 0.0) };
-                unsafe { sw.write_i32(row as usize, 2, -1) };
-                unsafe { sw.write_i32(row as usize, 3, 0) };
-                unsafe { sw.write_i32(row as usize, 4, 0) };
-                unsafe { sw.write_i32(row as usize, 5, 0) };
-                unsafe { sw.write_i32(row as usize, 6, 0) };
-                unsafe { sw.write_f64(row as usize, 7, 0.0) };
-                unsafe { sw.write_f64(row as usize, 8, 0.0) };
-                unsafe { sw.write_varchar(row as usize, 9, &format!("Error: {e}")) };
-                unsafe { sw.write_f64(row as usize, 10, 0.0) };
-                unsafe { sw.write_f64(row as usize, 11, 0.0) };
-                unsafe { sw.write_f64(row as usize, 12, 0.0) };
-                unsafe { sw.write_f64(row as usize, 13, 0.0) };
+                unsafe { sw.write_f64(row, 0, 0.0) };
+                unsafe { sw.write_f64(row, 1, 0.0) };
+                unsafe { sw.write_i32(row, 2, -1) };
+                unsafe { sw.write_i32(row, 3, 0) };
+                unsafe { sw.write_i32(row, 4, 0) };
+                unsafe { sw.write_i32(row, 5, 0) };
+                unsafe { sw.write_i32(row, 6, 0) };
+                unsafe { sw.write_f64(row, 7, 0.0) };
+                unsafe { sw.write_f64(row, 8, 0.0) };
+                unsafe { sw.write_varchar(row, 9, &format!("Error: {e}")) };
+                unsafe { sw.write_f64(row, 10, 0.0) };
+                unsafe { sw.write_f64(row, 11, 0.0) };
+                unsafe { sw.write_f64(row, 12, 0.0) };
+                unsafe { sw.write_f64(row, 13, 0.0) };
             }
         }
     }
@@ -129,8 +128,8 @@ quack_rs::scalar_callback!(cb_ptp_probe, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 10) };
 
     for row in 0..row_count {
-        let server = unsafe { server_reader.read_str(row as usize) };
-        let count = unsafe { count_reader.read_i32(row as usize) } as u8;
+        let server = unsafe { server_reader.read_str(row) };
+        let count = unsafe { count_reader.read_i32(row) } as u8;
         match ptp::ptp_probe(server, count) {
             Ok(result) => {
                 unsafe {
@@ -181,7 +180,7 @@ quack_rs::scalar_callback!(cb_ptp_probe_default, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 10) };
 
     for row in 0..row_count {
-        let server = unsafe { server_reader.read_str(row as usize) };
+        let server = unsafe { server_reader.read_str(row) };
         match ptp::ptp_probe(server, 4) {
             Ok(result) => {
                 unsafe {

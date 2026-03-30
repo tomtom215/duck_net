@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::stun;
 
-
 fn stun_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),

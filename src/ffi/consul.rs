@@ -6,7 +6,6 @@ use quack_rs::prelude::*;
 
 use crate::consul;
 
-
 fn kv_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),
@@ -26,15 +25,15 @@ quack_rs::scalar_callback!(cb_consul_get, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let token = unsafe { token_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let token = unsafe { token_reader.read_str(row) };
 
         let result = consul::consul_get(url, key, token);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -50,16 +49,16 @@ quack_rs::scalar_callback!(cb_consul_set, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let value = unsafe { value_reader.read_str(row as usize) };
-        let token = unsafe { token_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let value = unsafe { value_reader.read_str(row) };
+        let token = unsafe { token_reader.read_str(row) };
 
         let result = consul::consul_set(url, key, value, token);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -74,15 +73,15 @@ quack_rs::scalar_callback!(cb_consul_delete, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let token = unsafe { token_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let token = unsafe { token_reader.read_str(row) };
 
         let result = consul::consul_delete(url, key, token);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -96,14 +95,14 @@ quack_rs::scalar_callback!(cb_etcd_get, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
 
         let result = consul::etcd_get(url, key);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -118,15 +117,15 @@ quack_rs::scalar_callback!(cb_etcd_put, |_info, input, output| {
     let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
-        let url = unsafe { url_reader.read_str(row as usize) };
-        let key = unsafe { key_reader.read_str(row as usize) };
-        let value = unsafe { value_reader.read_str(row as usize) };
+        let url = unsafe { url_reader.read_str(row) };
+        let key = unsafe { key_reader.read_str(row) };
+        let value = unsafe { value_reader.read_str(row) };
 
         let result = consul::etcd_put(url, key, value);
 
-        unsafe { sw.write_bool(row as usize, 0, result.success) };
-        unsafe { sw.write_varchar(row as usize, 1, &result.value) };
-        unsafe { sw.write_varchar(row as usize, 2, &result.message) };
+        unsafe { sw.write_bool(row, 0, result.success) };
+        unsafe { sw.write_varchar(row, 1, &result.value) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 

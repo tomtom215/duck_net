@@ -198,6 +198,8 @@ quack_rs::scalar_callback!(cb_set_ssh_strict, |_info, input, output| {
 quack_rs::scalar_callback!(cb_security_status, |_info, _input, output| {
     let ssrf = security::ssrf_protection_enabled();
     let ssh_strict = security::ssh_strict_commands();
+    let warnings_enabled = crate::security_warnings::warnings_enabled();
+    let warnings_count = crate::security_warnings::list_warnings().len();
     let secrets_count = secrets::list_secrets().len();
     let rate_limit = crate::rate_limit::get_global_rps();
     let timeout = crate::http::get_timeout_secs();
@@ -208,15 +210,20 @@ quack_rs::scalar_callback!(cb_security_status, |_info, _input, output| {
             "{{",
             "\"ssrf_protection\":{},",
             "\"ssh_strict_commands\":{},",
+            "\"security_warnings_enabled\":{},",
+            "\"active_warnings\":{},",
             "\"secrets_stored\":{},",
             "\"global_rate_limit_rps\":{},",
             "\"http_timeout_secs\":{},",
             "\"http_max_retries\":{},",
-            "\"duckdb_native_secrets\":\"Use CREATE SECRET (TYPE s3/http) for S3 and HTTP protocols\",",
-            "\"duck_net_secrets\":\"Use duck_net_add_secret() for SMTP, SSH, LDAP, Redis, MQTT, etc.\"",
+            "\"zeroize_on_drop\":true,",
+            "\"duckdb_native_secrets\":\"Use CREATE SECRET (TYPE s3/http/gcs/r2) for cloud protocols\",",
+            "\"duck_net_secrets\":\"Use duck_net_add_secret() for SMTP, SSH, LDAP, Redis, MQTT, etc.\",",
+            "\"persistent_secret_warning\":\"DuckDB PERSISTENT secrets are stored UNENCRYPTED on disk\"",
             "}}"
         ),
-        ssrf, ssh_strict, secrets_count, rate_limit, timeout, retries,
+        ssrf, ssh_strict, warnings_enabled, warnings_count,
+        secrets_count, rate_limit, timeout, retries,
     );
     let mut writer = unsafe { VectorWriter::from_vector(output) };
     unsafe { writer.write_varchar(0, &status) };
