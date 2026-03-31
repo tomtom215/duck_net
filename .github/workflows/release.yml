@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build release artifact (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_suffix: linux-amd64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_suffix: linux-arm64
+            use_cross: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_suffix: macos-amd64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_suffix: macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cross (if needed)
+        if: matrix.use_cross == true
+        run: cargo install cross --locked
+
+      - name: Build release (native)
+        if: matrix.use_cross != true
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build release (cross)
+        if: matrix.use_cross == true
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Determine library filename
+        id: libname
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            echo "filename=duck_net.dylib" >> "$GITHUB_OUTPUT"
+            echo "src=target/${{ matrix.target }}/release/libduck_net.dylib" >> "$GITHUB_OUTPUT"
+          else
+            echo "filename=duck_net.so" >> "$GITHUB_OUTPUT"
+            echo "src=target/${{ matrix.target }}/release/libduck_net.so" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          ARTIFACT="duck_net-${{ github.ref_name }}-${{ matrix.artifact_suffix }}"
+          mkdir -p dist
+          cp "${{ steps.libname.outputs.src }}" "dist/${{ steps.libname.outputs.filename }}"
+          tar -czf "dist/${ARTIFACT}.tar.gz" -C dist "${{ steps.libname.outputs.filename }}"
+          echo "ARTIFACT_PATH=dist/${ARTIFACT}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: duck_net-${{ matrix.artifact_suffix }}
+          path: ${{ env.ARTIFACT_PATH }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: duck_net-*
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*.tar.gz

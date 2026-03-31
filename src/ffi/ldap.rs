@@ -254,7 +254,7 @@ quack_rs::scalar_callback!(cb_ldap_escape_filter, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // ldap_search(url, base_dn, filter, attributes) -> table(dn, attribute, value)
@@ -266,7 +266,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(ldap_search_bind)
         .init(ldap_search_init)
         .scan(ldap_search_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // ldap_bind(url, bind_dn, password) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("ldap_bind")
@@ -276,7 +276,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(ldap_bind_result_type())
         .function(cb_ldap_bind)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // ldap_add(url, bind_dn, password, entry_dn, attributes) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("ldap_add")
@@ -288,7 +288,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(ldap_bind_result_type())
         .function(cb_ldap_add)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // ldap_modify(url, bind_dn, password, entry_dn, modifications) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("ldap_modify")
@@ -300,7 +300,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(ldap_bind_result_type())
         .function(cb_ldap_modify)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // ldap_delete(url, bind_dn, password, entry_dn) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("ldap_delete")
@@ -311,7 +311,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(ldap_bind_result_type())
         .function(cb_ldap_delete)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // ldap_escape_filter(value VARCHAR) -> VARCHAR
     // Escapes LDAP filter special characters per RFC 4515 (CWE-90).
@@ -321,7 +321,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns(v)
         .function(cb_ldap_escape_filter)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

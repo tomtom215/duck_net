@@ -212,7 +212,7 @@ quack_rs::table_scan_callback!(carddav_contacts_scan, |info, output| {
     unsafe { out_chunk.set_size(count as usize) };
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     TableFunctionBuilder::new("caldav_events")
@@ -222,14 +222,14 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(caldav_events_bind)
         .init(caldav_events_init)
         .scan(caldav_events_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     TableFunctionBuilder::new("carddav_contacts")
         .param(v)
         .bind(carddav_contacts_bind)
         .init(carddav_contacts_init)
         .scan(carddav_contacts_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

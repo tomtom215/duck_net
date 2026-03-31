@@ -84,7 +84,7 @@ quack_rs::scalar_callback!(cb_influx_health, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // influx_query(url, org, token, flux_query)
@@ -96,7 +96,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
         .returns_logical(influx_result_type())
         .function(cb_influx_query)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // influx_write(url, org, bucket, token, line_protocol)
     ScalarFunctionBuilder::new("influx_write")
@@ -108,7 +108,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
         .returns_logical(influx_result_type())
         .function(cb_influx_write)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // influx_health(url)
     ScalarFunctionBuilder::new("influx_health")
@@ -116,7 +116,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
         .returns_logical(influx_result_type())
         .function(cb_influx_health)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

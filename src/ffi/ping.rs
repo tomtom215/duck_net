@@ -150,7 +150,7 @@ quack_rs::table_scan_callback!(traceroute_scan, |info, output| {
     unsafe { out_chunk.set_size(count as usize) };
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionSetBuilder::new("ping")
@@ -169,7 +169,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_ping_timeout)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     TableFunctionBuilder::new("traceroute")
         .param(v)
@@ -177,7 +177,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(traceroute_bind)
         .init(traceroute_init)
         .scan(traceroute_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

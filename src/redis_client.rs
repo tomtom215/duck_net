@@ -464,6 +464,110 @@ pub fn hget(url: &str, key: &str, field: &str) -> RedisResult {
 }
 
 /// HSET a field in a Redis hash. Returns "1" if field was created, "0" if updated.
+/// Maximum messages to collect from a pub/sub subscription (CWE-400).
+const MAX_SUBSCRIBE_MESSAGES: i64 = 10_000;
+
+/// A single message received from a Redis pub/sub subscription.
+pub struct RedisSubMessage {
+    pub channel: String,
+    pub payload: String,
+}
+
+/// Result of a Redis pub/sub subscribe call.
+pub struct RedisPubSubResult {
+    pub success: bool,
+    pub messages: Vec<RedisSubMessage>,
+    pub message: String,
+}
+
+/// Subscribe to a Redis channel and collect messages until timeout or max_messages.
+///
+/// `timeout_secs` sets how long to wait for messages (1–300 seconds).
+pub fn subscribe(
+    url: &str,
+    channel: &str,
+    max_messages: i64,
+    timeout_secs: i64,
+) -> RedisPubSubResult {
+    let max = max_messages.clamp(1, MAX_SUBSCRIBE_MESSAGES) as usize;
+    let timeout = timeout_secs.clamp(1, 300) as u64;
+
+    match subscribe_inner(url, channel, max, timeout) {
+        Ok((msgs, msg)) => RedisPubSubResult {
+            success: true,
+            messages: msgs,
+            message: msg,
+        },
+        Err(e) => RedisPubSubResult {
+            success: false,
+            messages: vec![],
+            message: e,
+        },
+    }
+}
+
+fn subscribe_inner(
+    url: &str,
+    channel: &str,
+    max_messages: usize,
+    timeout_secs: u64,
+) -> Result<(Vec<RedisSubMessage>, String), String> {
+    let mut reader = connect(url)?;
+
+    // Override the default IO timeout with the subscribe timeout
+    reader
+        .get_ref()
+        .set_read_timeout(Some(Duration::from_secs(timeout_secs)))
+        .map_err(|e| format!("Failed to set subscribe timeout: {e}"))?;
+
+    // Send SUBSCRIBE command
+    send_command(reader.get_mut(), &["SUBSCRIBE", channel])?;
+
+    // Read subscription confirmation: array ["subscribe", channel, 1]
+    let confirm = read_response(&mut reader)?;
+    if !confirm.to_ascii_lowercase().contains("subscribe") {
+        return Err(format!("Unexpected SUBSCRIBE response: {confirm}"));
+    }
+
+    let mut messages = Vec::new();
+
+    loop {
+        if messages.len() >= max_messages {
+            break;
+        }
+
+        match read_response(&mut reader) {
+            Ok(resp) => {
+                // Array elements are newline-joined: "message\n<channel>\n<payload>"
+                let mut parts = resp.splitn(3, '\n');
+                let kind = parts.next().unwrap_or("").to_ascii_lowercase();
+                let ch = parts.next().unwrap_or("").to_string();
+                let payload = parts.next().unwrap_or("").to_string();
+                if kind == "message" {
+                    messages.push(RedisSubMessage {
+                        channel: ch,
+                        payload,
+                    });
+                }
+            }
+            Err(e) => {
+                // Read timeout means no more messages in the window
+                if e.contains("timed out") || e.contains("WouldBlock") || e.contains("os error 11")
+                {
+                    break;
+                }
+                return Err(e);
+            }
+        }
+    }
+
+    let count = messages.len();
+    Ok((
+        messages,
+        format!("Received {count} message(s) from channel '{channel}'"),
+    ))
+}
+
 pub fn hset(url: &str, key: &str, field: &str, value: &str) -> RedisResult {
     if key.is_empty() {
         return RedisResult {

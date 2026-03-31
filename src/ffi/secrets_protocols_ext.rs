@@ -186,7 +186,7 @@ quack_rs::scalar_callback!(cb_s3_list_secret, |_info, input, output| {
     let prefix_reader = unsafe { chunk.reader(2) };
 
     let mut sw = unsafe { StructWriter::new(output, 3) };
-    let keys_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
+    let keys_vec = sw.child_vector(1);
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
@@ -428,7 +428,7 @@ fn vault_result_type() -> LogicalType {
     ])
 }
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // duck_net_secrets() table function
@@ -436,7 +436,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(secrets_list_bind)
         .init(secrets_list_init)
         .scan(secrets_list_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     let redis_kv_type = || {
         LogicalType::struct_type_from_logical(&[
@@ -453,7 +453,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(s3_result_type())
         .function(cb_s3_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     ScalarFunctionBuilder::new("s3_put_secret")
         .param(v)
         .param(v)
@@ -462,7 +462,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(s3_result_type())
         .function(cb_s3_put_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     ScalarFunctionBuilder::new("s3_list_secret")
         .param(v)
         .param(v)
@@ -470,7 +470,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(s3_list_result_type())
         .function(cb_s3_list_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // SMTP
     ScalarFunctionBuilder::new("smtp_send_secret")
@@ -482,7 +482,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(smtp_secret_result_type())
         .function(cb_smtp_send_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Vault
     ScalarFunctionBuilder::new("vault_read_secret")
@@ -492,7 +492,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(vault_result_type())
         .function(cb_vault_read_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Redis
     ScalarFunctionBuilder::new("redis_get_secret")
@@ -501,7 +501,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(redis_kv_type())
         .function(cb_redis_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     ScalarFunctionBuilder::new("redis_set_secret")
         .param(v)
         .param(v)
@@ -509,7 +509,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(redis_kv_type())
         .function(cb_redis_set_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

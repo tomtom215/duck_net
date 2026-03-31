@@ -98,7 +98,7 @@ quack_rs::scalar_callback!(cb_syslog_send_7, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionSetBuilder::new("syslog_send")
@@ -125,7 +125,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
                 .function(cb_syslog_send_7)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

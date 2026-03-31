@@ -85,7 +85,7 @@ pub fn parse_metadata(xml: &str) -> Result<Vec<MetadataRow>, String> {
         .map(|(set, type_ref)| {
             let unqualified = type_ref
                 .split('.')
-                .last()
+                .next_back()
                 .unwrap_or(type_ref.as_str())
                 .to_string();
             (unqualified, set.clone())
@@ -199,12 +199,11 @@ fn parse_csdl(
                             if name.is_empty() {
                                 continue;
                             }
-                            let prop_type = attr(e, b"Type")
-                                .unwrap_or_else(|| "Edm.String".to_string());
+                            let prop_type =
+                                attr(e, b"Type").unwrap_or_else(|| "Edm.String".to_string());
                             // OData spec default: Nullable="true"
-                            let nullable = attr(e, b"Nullable")
-                                .map(|v| v != "false")
-                                .unwrap_or(true);
+                            let nullable =
+                                attr(e, b"Nullable").map(|v| v != "false").unwrap_or(true);
                             entity_types
                                 .entry(type_name.clone())
                                 .or_default()
@@ -272,7 +271,12 @@ fn parse_csdl(
 
             Ok(Event::Eof) => break,
 
-            Err(e) => return Err(format!("CSDL XML parse error at position {}: {e}", reader.buffer_position())),
+            Err(e) => {
+                return Err(format!(
+                    "CSDL XML parse error at position {}: {e}",
+                    reader.buffer_position()
+                ))
+            }
 
             _ => {} // Text, CData, Comment, PI, Decl — ignore
         }
@@ -292,11 +296,9 @@ fn local_name(bytes: &[u8]) -> String {
 
 /// Return the unescaped value of the named attribute, or `None` if absent.
 fn attr(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> {
-    for result in e.attributes() {
-        if let Ok(a) = result {
-            if a.key.local_name().as_ref() == name {
-                return a.unescape_value().ok().map(|v| v.into_owned());
-            }
+    for a in e.attributes().flatten() {
+        if a.key.local_name().as_ref() == name {
+            return a.unescape_value().ok().map(|v| v.into_owned());
         }
     }
     None

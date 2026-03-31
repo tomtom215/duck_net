@@ -6,7 +6,6 @@
 //! Exposes SQL functions that help users integrate duck_net with DuckDB's
 //! native secrets manager.
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::duckdb_secrets_bridge;
@@ -96,7 +95,7 @@ quack_rs::scalar_callback!(cb_to_duckdb_secret_sql, |_info, input, output| {
 // Registration
 // ---------------------------------------------------------------------------
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // duck_net_import_aws_env(secret_name) -> VARCHAR
@@ -104,7 +103,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(v) // secret_name to create in duck_net's store
         .returns(TypeId::Varchar)
         .function(cb_import_aws_env)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_import_bearer_env(secret_name, env_var) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_import_bearer_env")
@@ -112,13 +111,13 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(v) // environment variable name holding the token
         .returns(TypeId::Varchar)
         .function(cb_import_bearer_env)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_duckdb_secrets_info() -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_duckdb_secrets_info")
         .returns(TypeId::Varchar)
         .function(cb_duckdb_secrets_info)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_to_duckdb_secret_sql(secret_name) -> VARCHAR
     // WARNING: generates SQL containing plaintext credentials
@@ -126,7 +125,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(v) // secret_name
         .returns(TypeId::Varchar)
         .function(cb_to_duckdb_secret_sql)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

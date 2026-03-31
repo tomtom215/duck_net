@@ -268,7 +268,7 @@ quack_rs::scalar_callback!(cb_imap_flag, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // imap_list(url, username, password) table function
@@ -282,7 +282,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .bind(imap_list_bind)
         .init(imap_list_init)
         .scan(imap_list_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // imap_fetch(url, username, password, uid) -> STRUCT(success, body, message)
     ScalarFunctionBuilder::new("imap_fetch")
@@ -293,7 +293,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(imap_fetch_result_type())
         .function(cb_imap_fetch)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // imap_move(url, username, password, mailbox, uid, dest_mailbox) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("imap_move")
@@ -306,7 +306,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(imap_write_result_type())
         .function(cb_imap_move)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // imap_delete(url, username, password, mailbox, uid) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("imap_delete")
@@ -318,7 +318,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(imap_write_result_type())
         .function(cb_imap_delete)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // imap_flag(url, username, password, mailbox, uid, flags) -> STRUCT(success, message)
     ScalarFunctionBuilder::new("imap_flag")
@@ -331,7 +331,143 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(imap_write_result_type())
         .function(cb_imap_flag)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
+
+    // imap_idle(url, username, password, mailbox, [timeout_secs=30], [max_notifications=100])
+    // -> TABLE(notification_type VARCHAR, count BIGINT, data VARCHAR)
+    TableFunctionBuilder::new("imap_idle")
+        .param(v) // url
+        .param(v) // username
+        .param(v) // password
+        .param(v) // mailbox
+        .named_param("timeout_secs", TypeId::BigInt)
+        .named_param("max_notifications", TypeId::BigInt)
+        .bind(imap_idle_bind)
+        .init(imap_idle_init)
+        .scan(imap_idle_scan)
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }
+
+// ===== imap_idle table function =====
+
+struct ImapIdleBindData {
+    url: String,
+    username: String,
+    password: String,
+    mailbox: String,
+    timeout_secs: u64,
+    max_notifications: usize,
+}
+
+struct ImapIdleInitData {
+    notifications: Vec<imap::ImapIdleNotification>,
+    idx: usize,
+    fetched: bool,
+}
+
+unsafe extern "C" fn imap_idle_bind(info: duckdb_bind_info) {
+    let bind = BindInfo::new(info);
+    let url = bind.get_parameter_value(0).as_str().unwrap_or_default();
+    let username = bind.get_parameter_value(1).as_str().unwrap_or_default();
+    let password = bind.get_parameter_value(2).as_str().unwrap_or_default();
+    let mailbox = bind.get_parameter_value(3).as_str().unwrap_or_default();
+
+    let timeout_val = bind.get_named_parameter_value("timeout_secs");
+    let timeout_secs = if timeout_val.is_null() {
+        30
+    } else {
+        timeout_val.as_i64() as u64
+    };
+
+    let max_val = bind.get_named_parameter_value("max_notifications");
+    let max_notifications = if max_val.is_null() {
+        100
+    } else {
+        max_val.as_i64() as usize
+    };
+
+    bind.add_result_column("notification_type", TypeId::Varchar);
+    bind.add_result_column("count", TypeId::BigInt);
+    bind.add_result_column("data", TypeId::Varchar);
+
+    FfiBindData::<ImapIdleBindData>::set(
+        info,
+        ImapIdleBindData {
+            url,
+            username,
+            password,
+            mailbox,
+            timeout_secs,
+            max_notifications,
+        },
+    );
+}
+
+unsafe extern "C" fn imap_idle_init(info: duckdb_init_info) {
+    FfiInitData::<ImapIdleInitData>::set(
+        info,
+        ImapIdleInitData {
+            notifications: vec![],
+            idx: 0,
+            fetched: false,
+        },
+    );
+}
+
+quack_rs::table_scan_callback!(imap_idle_scan, |info, output| {
+    let bind_data = match unsafe { FfiBindData::<ImapIdleBindData>::get_from_function(info) } {
+        Some(d) => d,
+        None => {
+            unsafe { DataChunk::from_raw(output).set_size(0) };
+            return;
+        }
+    };
+    let init_data = match unsafe { FfiInitData::<ImapIdleInitData>::get_mut(info) } {
+        Some(d) => d,
+        None => {
+            unsafe { DataChunk::from_raw(output).set_size(0) };
+            return;
+        }
+    };
+
+    if !init_data.fetched {
+        init_data.fetched = true;
+        let result = imap::idle(
+            &bind_data.url,
+            &bind_data.username,
+            &bind_data.password,
+            &bind_data.mailbox,
+            bind_data.timeout_secs,
+            bind_data.max_notifications,
+        );
+        if !result.success {
+            let fi = FunctionInfo::new(info);
+            fi.set_error(&result.message);
+            unsafe { DataChunk::from_raw(output).set_size(0) };
+            return;
+        }
+        init_data.notifications = result.notifications;
+    }
+
+    let out_chunk = unsafe { DataChunk::from_raw(output) };
+    let mut type_w = unsafe { out_chunk.writer(0) };
+    let mut count_w = unsafe { out_chunk.writer(1) };
+    let mut data_w = unsafe { out_chunk.writer(2) };
+
+    let mut count: idx_t = 0;
+    let max_chunk = 2048;
+
+    while init_data.idx < init_data.notifications.len() && count < max_chunk {
+        let n = &init_data.notifications[init_data.idx];
+        let row = count as usize;
+        unsafe { type_w.write_varchar(row, &n.notification_type) };
+        unsafe { count_w.write_i64(row, n.count) };
+        unsafe { data_w.write_varchar(row, &n.data) };
+        init_data.idx += 1;
+        count += 1;
+    }
+
+    unsafe { out_chunk.set_size(count as usize) };
+});

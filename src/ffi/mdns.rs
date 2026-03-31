@@ -98,8 +98,8 @@ quack_rs::table_scan_callback!(mdns_scan, |info, output| {
     let mut name_w = unsafe { out_chunk.writer(0) };
     let mut host_w = unsafe { out_chunk.writer(1) };
     let mut port_w = unsafe { out_chunk.writer(2) };
-    let ips_vec = unsafe { duckdb_data_chunk_get_vector(output, 3) };
-    let txt_vec = unsafe { duckdb_data_chunk_get_vector(output, 4) };
+    let ips_vec = unsafe { out_chunk.vector(3) };
+    let txt_vec = unsafe { out_chunk.vector(4) };
 
     let mut count: usize = 0;
     let max_chunk = 2048;
@@ -123,14 +123,14 @@ quack_rs::table_scan_callback!(mdns_scan, |info, output| {
     unsafe { out_chunk.set_size(count) };
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     TableFunctionBuilder::new("mdns_discover")
         .param(TypeId::Varchar) // service_type
         .named_param("timeout", TypeId::BigInt)
         .bind(mdns_bind)
         .init(mdns_init)
         .scan(mdns_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

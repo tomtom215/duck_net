@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::tls_inspect;
@@ -34,7 +33,7 @@ quack_rs::scalar_callback!(cb_tls_inspect, |_info, input, output| {
     let host_reader = unsafe { chunk.reader(0) };
 
     let mut sw = unsafe { StructWriter::new(output, 11) };
-    let san_names_vec = unsafe { duckdb_struct_vector_get_child(output, 5) };
+    let san_names_vec = sw.child_vector(5);
 
     let mut san_list_offset: usize = 0;
 
@@ -81,7 +80,7 @@ quack_rs::scalar_callback!(cb_tls_inspect_port, |_info, input, output| {
     let port_reader = unsafe { chunk.reader(1) };
 
     let mut sw = unsafe { StructWriter::new(output, 11) };
-    let san_names_vec = unsafe { duckdb_struct_vector_get_child(output, 5) };
+    let san_names_vec = sw.child_vector(5);
 
     let mut san_list_offset: usize = 0;
 
@@ -121,7 +120,7 @@ quack_rs::scalar_callback!(cb_tls_inspect_port, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     ScalarFunctionSetBuilder::new("tls_inspect")
         .overload(
             ScalarOverloadBuilder::new()
@@ -138,7 +137,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_tls_inspect_port)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

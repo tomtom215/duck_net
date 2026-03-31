@@ -124,7 +124,7 @@ quack_rs::scalar_callback!(cb_vault_health, |_info, input, output| {
 
 // ===== Registration =====
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     // vault_read(url, token, path) -> STRUCT
     ScalarFunctionBuilder::new("vault_read")
         .param(TypeId::Varchar)
@@ -133,7 +133,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(vault_result_type())
         .function(cb_vault_read)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // vault_write(url, token, path, data_json) -> STRUCT
     ScalarFunctionBuilder::new("vault_write")
@@ -144,7 +144,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(vault_result_type())
         .function(cb_vault_write)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // vault_list(url, token, path) -> STRUCT
     ScalarFunctionBuilder::new("vault_list")
@@ -154,7 +154,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(vault_result_type())
         .function(cb_vault_list)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // vault_health(url) -> STRUCT
     ScalarFunctionBuilder::new("vault_health")
@@ -162,7 +162,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(vault_health_type())
         .function(cb_vault_health)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

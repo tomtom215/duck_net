@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use super::*;
@@ -9,7 +8,7 @@ use crate::http::Method;
 
 /// Register a no-body HTTP method (GET, DELETE, HEAD, OPTIONS) with two overloads.
 unsafe fn register_no_body_method(
-    con: duckdb_connection,
+    con: &Connection,
     name: &str,
     method: Method,
 ) -> Result<(), ExtensionError> {
@@ -31,12 +30,12 @@ unsafe fn register_no_body_method(
     ScalarFunctionSetBuilder::new(name)
         .overload(url_only)
         .overload(url_hdrs)
-        .register(con)
+        .register(con.as_raw_connection())
 }
 
 /// Register a body HTTP method (POST, PUT, PATCH) with two overloads.
 unsafe fn register_body_method(
-    con: duckdb_connection,
+    con: &Connection,
     name: &str,
     method: Method,
 ) -> Result<(), ExtensionError> {
@@ -60,10 +59,10 @@ unsafe fn register_body_method(
     ScalarFunctionSetBuilder::new(name)
         .overload(url_body)
         .overload(url_hdrs_body)
-        .register(con)
+        .register(con.as_raw_connection())
 }
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     // No-body methods: GET, DELETE, HEAD, OPTIONS
     register_no_body_method(con, "http_get", Method::Get)?;
     register_no_body_method(con, "http_delete", Method::Delete)?;
@@ -96,7 +95,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_multipart_hdrs)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Generic: http_request(method, url, headers, body)
     ScalarFunctionBuilder::new("http_request")
@@ -107,7 +106,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(response_type())
         .function(cb_generic)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Auth helpers: http_basic_auth(username, password) -> VARCHAR
     ScalarFunctionBuilder::new("http_basic_auth")
@@ -115,14 +114,14 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(TypeId::Varchar)
         .returns(TypeId::Varchar)
         .function(cb_basic_auth)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Auth helpers: http_bearer_auth(token) -> VARCHAR
     ScalarFunctionBuilder::new("http_bearer_auth")
         .param(TypeId::Varchar)
         .returns(TypeId::Varchar)
         .function(cb_bearer_auth)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Auth helpers: http_oauth2_token (3-param and 4-param with scopes)
     ScalarFunctionSetBuilder::new("http_oauth2_token")
@@ -143,7 +142,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .returns(TypeId::Varchar)
                 .function(cb_oauth2_token_scoped),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Config functions (rate limiting, retries, timeout)
     super::super::scalars_config::register_all(con)?;

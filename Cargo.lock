@@ -1036,6 +1036,7 @@ dependencies = [
  "lapin",
  "ldap3",
  "libduckdb-sys",
+ "md-5",
  "md5",
  "quack-rs",
  "quick-xml",
@@ -1043,6 +1044,7 @@ dependencies = [
  "russh",
  "russh-sftp",
  "rustls",
+ "sha1 0.10.6",
  "sha2 0.10.9",
  "suppaftp",
  "tokio",
@@ -2298,6 +2300,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest 0.10.7",
+]
+
+[[package]]
 name = "md5"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2957,9 +2969,9 @@ dependencies = [
 
 [[package]]
 name = "quack-rs"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc6fcf98bcec3c6fbe391ccdba41b4514447e60a95ae6a9dadace000fb5723a5"
+checksum = "c5e4ef01ae4c9dd31d534eb3dc931486237d54a28ab5bff4942caee14d4059cd"
 dependencies = [
  "cc",
  "libduckdb-sys",

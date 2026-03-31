@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::aws_sigv4;
@@ -26,9 +25,7 @@ quack_rs::scalar_callback!(cb_aws_sigv4_sign, |_info, input, output| {
     let region_reader = unsafe { chunk.reader(5) };
     let service_reader = unsafe { chunk.reader(6) };
 
-    let mut auth_w = unsafe { StructVector::field_writer(output, 0) };
-    let mut date_w = unsafe { StructVector::field_writer(output, 1) };
-    let mut sha_w = unsafe { StructVector::field_writer(output, 2) };
+    let mut sw = unsafe { StructWriter::new(output, 3) };
 
     for row in 0..row_count {
         let method = unsafe { method_reader.read_str(row) };
@@ -50,20 +47,20 @@ quack_rs::scalar_callback!(cb_aws_sigv4_sign, |_info, input, output| {
             service,
         ) {
             Ok(signed) => {
-                unsafe { auth_w.write_varchar(row, &signed.authorization) };
-                unsafe { date_w.write_varchar(row, &signed.x_amz_date) };
-                unsafe { sha_w.write_varchar(row, &signed.x_amz_content_sha256) };
+                unsafe { sw.write_varchar(row, 0, &signed.authorization) };
+                unsafe { sw.write_varchar(row, 1, &signed.x_amz_date) };
+                unsafe { sw.write_varchar(row, 2, &signed.x_amz_content_sha256) };
             }
             Err(e) => {
-                unsafe { auth_w.write_varchar(row, &format!("Error: {e}")) };
-                unsafe { date_w.write_varchar(row, "") };
-                unsafe { sha_w.write_varchar(row, "") };
+                unsafe { sw.write_varchar(row, 0, &format!("Error: {e}")) };
+                unsafe { sw.write_varchar(row, 1, "") };
+                unsafe { sw.write_varchar(row, 2, "") };
             }
         }
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionBuilder::new("aws_sigv4_sign")
@@ -77,7 +74,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(sigv4_result_type())
         .function(cb_aws_sigv4_sign)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

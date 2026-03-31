@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::s3;
@@ -104,7 +103,7 @@ quack_rs::scalar_callback!(cb_s3_list, |_info, input, output| {
     let region_reader = unsafe { chunk.reader(5) };
 
     let mut sw = unsafe { StructWriter::new(output, 3) };
-    let keys_vec = unsafe { duckdb_struct_vector_get_child(output, 1) };
+    let keys_vec = sw.child_vector(1);
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
@@ -125,7 +124,7 @@ quack_rs::scalar_callback!(cb_s3_list, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // s3_get(endpoint, bucket, key, access_key, secret_key, region) -> STRUCT
@@ -139,7 +138,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(s3_result_type())
         .function(cb_s3_get)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // s3_put(endpoint, bucket, key, body, access_key, secret_key, region) -> STRUCT
     ScalarFunctionBuilder::new("s3_put")
@@ -153,7 +152,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(s3_result_type())
         .function(cb_s3_put)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // s3_list(endpoint, bucket, prefix, access_key, secret_key, region) -> STRUCT
     ScalarFunctionBuilder::new("s3_list")
@@ -166,7 +165,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(s3_list_result_type())
         .function(cb_s3_list)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

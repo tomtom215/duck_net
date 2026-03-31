@@ -123,7 +123,7 @@ quack_rs::scalar_callback!(cb_dns_mx, |_info, input, output| {
 
 // ===== Registration =====
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     // dns_lookup(hostname) -> VARCHAR[]
     ScalarFunctionBuilder::new("dns_lookup")
         .param(TypeId::Varchar)
@@ -131,7 +131,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
             TypeId::Varchar,
         )))
         .function(cb_dns_lookup)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // dns_lookup_a(hostname) -> VARCHAR[]
     ScalarFunctionBuilder::new("dns_lookup_a")
@@ -140,7 +140,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
             TypeId::Varchar,
         )))
         .function(cb_dns_lookup_a)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // dns_lookup_aaaa(hostname) -> VARCHAR[]
     ScalarFunctionBuilder::new("dns_lookup_aaaa")
@@ -149,7 +149,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
             TypeId::Varchar,
         )))
         .function(cb_dns_lookup_aaaa)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // dns_reverse(ip) -> VARCHAR
     ScalarFunctionBuilder::new("dns_reverse")
@@ -157,7 +157,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns(TypeId::Varchar)
         .function(cb_dns_reverse)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // dns_txt(hostname) -> VARCHAR[]
     ScalarFunctionBuilder::new("dns_txt")
@@ -166,7 +166,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
             TypeId::Varchar,
         )))
         .function(cb_dns_txt)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // dns_mx(hostname) -> VARCHAR[] (each entry: "priority\thost")
     ScalarFunctionBuilder::new("dns_mx")
@@ -175,7 +175,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
             TypeId::Varchar,
         )))
         .function(cb_dns_mx)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

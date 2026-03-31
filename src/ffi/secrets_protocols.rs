@@ -5,7 +5,6 @@
 //! SNMP, RADIUS, IMAP, LDAP). See also `secrets_protocols_ext` for the
 //! remaining overloads (Redis, S3, SMTP, Vault) and the secrets list table.
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::security;
@@ -393,7 +392,7 @@ fn success_message_result_type() -> LogicalType {
     ])
 }
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // SSH
@@ -404,7 +403,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(ssh_result_type())
         .function(cb_ssh_exec_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     // Consul
     ScalarFunctionBuilder::new("consul_get_secret")
         .param(v)
@@ -413,7 +412,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(kv_result_type())
         .function(cb_consul_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     // InfluxDB
     ScalarFunctionBuilder::new("influxdb_query_secret")
         .param(v)
@@ -423,7 +422,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(influx_result_type())
         .function(cb_influxdb_query_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     // HTTP (bearer/basic auth from secret store)
     ScalarFunctionBuilder::new("http_get_secret")
         .param(v)
@@ -431,7 +430,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(super::scalars::response_type())
         .function(cb_http_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     ScalarFunctionBuilder::new("http_post_secret")
         .param(v)
         .param(v)
@@ -439,7 +438,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(super::scalars::response_type())
         .function(cb_http_post_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     // SNMP (community string from secret store)
     ScalarFunctionBuilder::new("snmp_get_secret")
         .param(v)
@@ -451,7 +450,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         ]))
         .function(cb_snmp_get_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     // RADIUS (shared secret from secret store)
     ScalarFunctionBuilder::new("radius_auth_secret")
         .param(v)
@@ -461,7 +460,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(success_message_result_type())
         .function(cb_radius_auth_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     // IMAP (username/password from secret store)
     ScalarFunctionBuilder::new("imap_fetch_secret")
         .param(v)
@@ -475,7 +474,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         ]))
         .function(cb_imap_fetch_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
     // LDAP (bind credentials from secret store)
     ScalarFunctionBuilder::new("ldap_search_secret")
         .param(v)
@@ -486,7 +485,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns(TypeId::Varchar)
         .function(cb_ldap_search_secret)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Delegate Redis, S3, SMTP, Vault, and secrets-list to the ext module
     super::secrets_protocols_ext::register_all(con)?;

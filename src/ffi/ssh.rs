@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::scp;
@@ -247,7 +246,7 @@ quack_rs::scalar_callback!(cb_scp_write_password, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // ssh_exec: key-based auth (4 or 5 params)
@@ -273,7 +272,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_ssh_exec_port)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // ssh_exec_password: password auth
     ScalarFunctionBuilder::new("ssh_exec_password")
@@ -284,7 +283,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(ssh_result_type())
         .function(cb_ssh_exec_password)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // scp_read: key-based auth (4 or 5 params)
     ScalarFunctionSetBuilder::new("scp_read")
@@ -309,7 +308,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_scp_read_port)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // scp_read_password: password auth
     ScalarFunctionBuilder::new("scp_read_password")
@@ -320,7 +319,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(scp_read_result_type())
         .function(cb_scp_read_password)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // scp_write: key-based auth
     ScalarFunctionBuilder::new("scp_write")
@@ -332,7 +331,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(scp_write_result_type())
         .function(cb_scp_write)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // scp_write_password: password auth
     ScalarFunctionBuilder::new("scp_write_password")
@@ -344,7 +343,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(scp_write_result_type())
         .function(cb_scp_write_password)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

@@ -64,7 +64,7 @@ quack_rs::scalar_callback!(cb_prometheus_query_range, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // prometheus_query(url, promql)
@@ -74,7 +74,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
         .returns_logical(prometheus_result_type())
         .function(cb_prometheus_query)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // prometheus_query_range(url, promql, start, end, step)
     ScalarFunctionBuilder::new("prometheus_query_range")
@@ -86,7 +86,7 @@ pub unsafe fn register_all(con: libduckdb_sys::duckdb_connection) -> Result<(), 
         .returns_logical(prometheus_result_type())
         .function(cb_prometheus_query_range)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

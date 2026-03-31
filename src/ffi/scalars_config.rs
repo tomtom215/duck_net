@@ -1,11 +1,48 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::http;
 use crate::rate_limit;
+
+// Callback: duck_net_set_ca_bundle(ca_pem VARCHAR) -> VARCHAR
+// Installs a custom CA bundle (PEM text) for HTTPS and gRPC connections.
+quack_rs::scalar_callback!(cb_set_ca_bundle, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let pem_reader = unsafe { chunk.reader(0) };
+    let mut out_w = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let ca_pem = unsafe { pem_reader.read_str(row) };
+        let msg = match http::set_ca_bundle(ca_pem) {
+            Ok(m) => m,
+            Err(e) => format!("Error: {e}"),
+        };
+        unsafe { out_w.write_varchar(row, &msg) };
+    }
+});
+
+// Callback: duck_net_set_client_cert(cert_pem VARCHAR, key_pem VARCHAR) -> VARCHAR
+// Installs a client certificate + private key for mTLS on HTTPS and gRPC.
+quack_rs::scalar_callback!(cb_set_client_cert, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let cert_reader = unsafe { chunk.reader(0) };
+    let key_reader = unsafe { chunk.reader(1) };
+    let mut out_w = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let cert_pem = unsafe { cert_reader.read_str(row) };
+        let key_pem = unsafe { key_reader.read_str(row) };
+        let msg = match http::set_client_cert(cert_pem, key_pem) {
+            Ok(m) => m,
+            Err(e) => format!("Error: {e}"),
+        };
+        unsafe { out_w.write_varchar(row, &msg) };
+    }
+});
 
 // Callback: duck_net_set_retry_statuses(statuses VARCHAR) -> VARCHAR
 // Accepts comma-separated status codes, e.g. "429,500,502,503,504"
@@ -124,13 +161,13 @@ quack_rs::scalar_callback!(cb_set_timeout, |_info, input, output| {
 
 // ===== Registration =====
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     // Rate limiting: duck_net_set_rate_limit(requests_per_second INTEGER) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_rate_limit")
         .param(TypeId::Integer)
         .returns(TypeId::Varchar)
         .function(cb_set_rate_limit)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Retry config: duck_net_set_retries(max_retries INTEGER, backoff_ms INTEGER) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_retries")
@@ -138,28 +175,43 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(TypeId::Integer)
         .returns(TypeId::Varchar)
         .function(cb_set_retries)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Timeout config: duck_net_set_timeout(seconds INTEGER) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_timeout")
         .param(TypeId::Integer)
         .returns(TypeId::Varchar)
         .function(cb_set_timeout)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Retry status codes: duck_net_set_retry_statuses(statuses VARCHAR) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_retry_statuses")
         .param(TypeId::Varchar)
         .returns(TypeId::Varchar)
         .function(cb_set_retry_statuses)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // Per-domain rate limiting: duck_net_set_domain_rate_limits(config VARCHAR) -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_set_domain_rate_limits")
         .param(TypeId::Varchar)
         .returns(TypeId::Varchar)
         .function(cb_set_domain_rate_limits)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
+
+    // TLS: duck_net_set_ca_bundle(ca_pem VARCHAR) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_ca_bundle")
+        .param(TypeId::Varchar)
+        .returns(TypeId::Varchar)
+        .function(cb_set_ca_bundle)
+        .register(con.as_raw_connection())?;
+
+    // TLS: duck_net_set_client_cert(cert_pem VARCHAR, key_pem VARCHAR) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_client_cert")
+        .param(TypeId::Varchar)
+        .param(TypeId::Varchar)
+        .returns(TypeId::Varchar)
+        .function(cb_set_client_cert)
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

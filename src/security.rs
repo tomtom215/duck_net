@@ -195,8 +195,8 @@ impl ureq::unversioned::resolver::Resolver for SsrfSafeResolver {
         let authority = uri.authority().ok_or(ureq::Error::HostNotFound)?;
 
         // Build "host:port" string (DefaultResolver helper knows default ports).
-        let host_port = DefaultResolver::host_and_port(scheme, authority)
-            .ok_or(ureq::Error::HostNotFound)?;
+        let host_port =
+            DefaultResolver::host_and_port(scheme, authority).ok_or(ureq::Error::HostNotFound)?;
 
         // Resolve via the OS resolver — identical to DefaultResolver's sync path.
         let socket_addrs: Vec<std::net::SocketAddr> = host_port
@@ -399,10 +399,7 @@ fn scrub_query_params(url: &str) -> String {
     // query_and_fragment starts with '?'
     let fragment_start = query_and_fragment.find('#');
     let (query_part, fragment_part) = match fragment_start {
-        Some(pos) => (
-            &query_and_fragment[1..pos],
-            &query_and_fragment[pos..],
-        ),
+        Some(pos) => (&query_and_fragment[1..pos], &query_and_fragment[pos..]),
         None => (&query_and_fragment[1..], ""),
     };
 

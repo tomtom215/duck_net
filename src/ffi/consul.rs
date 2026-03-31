@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::consul;
@@ -129,7 +128,7 @@ quack_rs::scalar_callback!(cb_etcd_put, |_info, input, output| {
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     // consul_get(url, key, token) -> STRUCT(success, value, message)
@@ -140,7 +139,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(kv_result_type())
         .function(cb_consul_get)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // consul_set(url, key, value, token) -> STRUCT(success, value, message)
     ScalarFunctionBuilder::new("consul_set")
@@ -151,7 +150,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(kv_result_type())
         .function(cb_consul_set)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // consul_delete(url, key, token) -> STRUCT(success, value, message)
     ScalarFunctionBuilder::new("consul_delete")
@@ -161,7 +160,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(kv_result_type())
         .function(cb_consul_delete)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // etcd_get(url, key) -> STRUCT(success, value, message)
     ScalarFunctionBuilder::new("etcd_get")
@@ -170,7 +169,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(kv_result_type())
         .function(cb_etcd_get)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // etcd_put(url, key, value) -> STRUCT(success, value, message)
     ScalarFunctionBuilder::new("etcd_put")
@@ -180,7 +179,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .returns_logical(kv_result_type())
         .function(cb_etcd_put)
         .null_handling(NullHandling::SpecialNullHandling)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

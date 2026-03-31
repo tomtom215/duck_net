@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
 use crate::doh;
@@ -27,9 +26,8 @@ quack_rs::scalar_callback!(cb_doh_lookup, |_info, input, output| {
     let domain_reader = unsafe { chunk.reader(1) };
     let type_reader = unsafe { chunk.reader(2) };
 
-    let mut success_w = unsafe { StructVector::field_writer(output, 0) };
-    let records_vec = unsafe { StructVector::get_child(output, 1) };
-    let mut message_w = unsafe { StructVector::field_writer(output, 2) };
+    let mut sw = unsafe { StructWriter::new(output, 3) };
+    let records_vec = sw.child_vector(1);
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
@@ -39,9 +37,9 @@ quack_rs::scalar_callback!(cb_doh_lookup, |_info, input, output| {
 
         let result = doh::lookup(url, domain, rtype);
 
-        unsafe { success_w.write_bool(row, result.success) };
+        unsafe { sw.write_bool(row, 0, result.success) };
         unsafe { write_string_list(records_vec, row, &result.records, &mut list_offset) };
-        unsafe { message_w.write_varchar(row, &result.message) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
@@ -52,9 +50,8 @@ quack_rs::scalar_callback!(cb_doh_lookup_default, |_info, input, output| {
     let domain_reader = unsafe { chunk.reader(0) };
     let type_reader = unsafe { chunk.reader(1) };
 
-    let mut success_w = unsafe { StructVector::field_writer(output, 0) };
-    let records_vec = unsafe { StructVector::get_child(output, 1) };
-    let mut message_w = unsafe { StructVector::field_writer(output, 2) };
+    let mut sw = unsafe { StructWriter::new(output, 3) };
+    let records_vec = sw.child_vector(1);
     let mut list_offset: usize = 0;
 
     for row in 0..row_count {
@@ -63,13 +60,13 @@ quack_rs::scalar_callback!(cb_doh_lookup_default, |_info, input, output| {
 
         let result = doh::lookup_default(domain, rtype);
 
-        unsafe { success_w.write_bool(row, result.success) };
+        unsafe { sw.write_bool(row, 0, result.success) };
         unsafe { write_string_list(records_vec, row, &result.records, &mut list_offset) };
-        unsafe { message_w.write_varchar(row, &result.message) };
+        unsafe { sw.write_varchar(row, 2, &result.message) };
     }
 });
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
     ScalarFunctionSetBuilder::new("doh_lookup")
@@ -90,7 +87,7 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
                 .function(cb_doh_lookup)
                 .null_handling(NullHandling::SpecialNullHandling),
         )
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }

@@ -170,6 +170,152 @@ fn request_inner(url: &str, message: &str, timeout: Duration) -> Result<String, 
     }
 }
 
+/// Maximum messages to collect in a single subscribe call (CWE-400).
+const MAX_SUBSCRIBE_MESSAGES: usize = 100_000;
+
+/// A single message collected during a WebSocket subscription.
+pub struct WsSubscribeMessage {
+    pub index: i64,
+    pub data: String,
+}
+
+/// Result of a WebSocket subscribe call.
+pub struct WsSubscribeResult {
+    pub success: bool,
+    pub messages: Vec<WsSubscribeMessage>,
+    pub message: String,
+}
+
+/// Connect to a WebSocket URL, optionally send a subscription message, and
+/// collect incoming messages until `max_messages` are received or `timeout_secs`
+/// elapses.
+///
+/// `subscribe_msg` is sent immediately after connect if non-empty (e.g. a JSON
+/// subscription payload for STOMP / Socket.IO / custom protocols).
+pub fn subscribe(
+    url: &str,
+    subscribe_msg: &str,
+    max_messages: i64,
+    timeout_secs: u32,
+) -> WsSubscribeResult {
+    if let Err(e) = validate_url(url) {
+        return WsSubscribeResult {
+            success: false,
+            messages: vec![],
+            message: e,
+        };
+    }
+    if url.starts_with("ws://") {
+        crate::security_warnings::warn_plaintext(
+            "WebSocket",
+            "PLAINTEXT_WEBSOCKET",
+            "wss:// (WebSocket over TLS)",
+        );
+    }
+    let max = (max_messages.clamp(1, MAX_SUBSCRIBE_MESSAGES as i64)) as usize;
+    let timeout = Duration::from_secs(timeout_secs.clamp(1, 300) as u64);
+
+    match subscribe_inner(url, subscribe_msg, max, timeout) {
+        Ok((msgs, msg)) => WsSubscribeResult {
+            success: true,
+            messages: msgs,
+            message: msg,
+        },
+        Err(e) => WsSubscribeResult {
+            success: false,
+            messages: vec![],
+            message: e,
+        },
+    }
+}
+
+fn subscribe_inner(
+    url: &str,
+    subscribe_msg: &str,
+    max_messages: usize,
+    timeout: Duration,
+) -> Result<(Vec<WsSubscribeMessage>, String), String> {
+    use tungstenite::{connect, Message};
+
+    let (mut socket, _) = connect(url).map_err(|e| format!("WebSocket connect failed: {e}"))?;
+
+    // Set read timeout so we stop waiting once the window expires
+    {
+        use tungstenite::stream::MaybeTlsStream;
+        match socket.get_ref() {
+            MaybeTlsStream::Plain(tcp) => {
+                let _ = tcp.set_read_timeout(Some(timeout));
+                let _ = tcp.set_write_timeout(Some(Duration::from_secs(10)));
+            }
+            MaybeTlsStream::Rustls(tls) => {
+                let tcp = tls.get_ref();
+                let _ = tcp.set_read_timeout(Some(timeout));
+                let _ = tcp.set_write_timeout(Some(Duration::from_secs(10)));
+            }
+            _ => {}
+        }
+    }
+
+    // Optionally send a subscription initiation message
+    if !subscribe_msg.is_empty() {
+        socket
+            .send(Message::Text(subscribe_msg.into()))
+            .map_err(|e| format!("WebSocket send failed: {e}"))?;
+    }
+
+    let mut messages = Vec::new();
+
+    loop {
+        if messages.len() >= max_messages {
+            break;
+        }
+
+        match socket.read() {
+            Ok(Message::Text(text)) => {
+                if text.len() <= MAX_RESPONSE_BYTES {
+                    let idx = messages.len() as i64;
+                    messages.push(WsSubscribeMessage {
+                        index: idx,
+                        data: text.to_string(),
+                    });
+                }
+            }
+            Ok(Message::Binary(data)) => {
+                if data.len() <= MAX_RESPONSE_BYTES {
+                    let idx = messages.len() as i64;
+                    messages.push(WsSubscribeMessage {
+                        index: idx,
+                        data: String::from_utf8_lossy(&data).to_string(),
+                    });
+                }
+            }
+            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) | Ok(Message::Frame(_)) => continue,
+            Ok(Message::Close(_)) => break,
+            Err(e) => {
+                let estr = e.to_string();
+                if estr.contains("timed out")
+                    || estr.contains("WouldBlock")
+                    || estr.contains("os error 11")
+                {
+                    break;
+                }
+                // Connection closed cleanly by peer
+                if estr.contains("Connection reset")
+                    || estr.contains("ConnectionAborted")
+                    || estr.contains("broken pipe")
+                {
+                    break;
+                }
+                return Err(format!("WebSocket read failed: {e}"));
+            }
+        }
+    }
+
+    let _ = socket.close(None);
+    let count = messages.len();
+    Ok((messages, format!("Received {count} message(s)")))
+}
+
 /// Maximum number of messages allowed in a single multi-request call.
 const MAX_MULTI_MESSAGES: usize = 100;
 

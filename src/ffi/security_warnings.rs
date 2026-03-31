@@ -127,7 +127,7 @@ quack_rs::table_scan_callback!(warnings_scan, |info, output| {
 // Registration
 // ---------------------------------------------------------------------------
 
-pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError> {
+pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     // Initialize warnings store
     security_warnings::init();
 
@@ -136,32 +136,32 @@ pub unsafe fn register_all(con: duckdb_connection) -> Result<(), ExtensionError>
         .param(TypeId::Boolean)
         .returns(TypeId::Varchar)
         .function(cb_set_security_warnings)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_clear_security_warnings() -> VARCHAR
     ScalarFunctionBuilder::new("duck_net_clear_security_warnings")
         .returns(TypeId::Varchar)
         .function(cb_clear_security_warnings)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_security_warnings() table function
     TableFunctionBuilder::new("duck_net_security_warnings")
         .bind(warnings_bind)
         .init(warnings_init)
         .scan(warnings_scan)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_warnings_enabled() -> BOOLEAN
     ScalarFunctionBuilder::new("duck_net_warnings_enabled")
         .returns(TypeId::Boolean)
         .function(cb_warnings_enabled)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     // duck_net_warnings_count() -> BIGINT
     ScalarFunctionBuilder::new("duck_net_warnings_count")
         .returns(TypeId::BigInt)
         .function(cb_warnings_count)
-        .register(con)?;
+        .register(con.as_raw_connection())?;
 
     Ok(())
 }
