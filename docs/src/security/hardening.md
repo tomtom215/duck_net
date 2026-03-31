@@ -30,8 +30,10 @@ This guide covers best practices for deploying duck_net securely in production e
 
 - [ ] DNS resolution controlled (prevents DNS rebinding)
 - [ ] Monitoring tracks unusual protocol usage patterns
-- [ ] Secret rotation procedures documented
-- [ ] Audit logging enabled for credential access
+- [ ] Secret rotation procedures documented and using `duck_net_rotate_secret()`
+- [ ] Audit logging enabled: `SELECT duck_net_set_audit_logging(true);`
+- [ ] Audit log reviewed periodically: `SELECT * FROM duck_net_audit_log();`
+- [ ] Only required protocols enabled in `~/.config/duck_net/protocols` (reduce attack surface)
 
 ## Protocol-Specific Hardening
 
@@ -153,4 +155,42 @@ FROM duckdb_secrets();
 
 -- List all duck_net secrets (values redacted)
 FROM duck_net_secrets();
+```
+
+## Audit Logging
+
+duck_net can record every network operation made during a session. Credentials are automatically scrubbed from log entries before storage (CWE-532). The ring buffer holds up to 10,000 entries; oldest entries are evicted when full.
+
+```sql
+-- Enable audit logging for this session
+SELECT duck_net_set_audit_logging(true);
+
+-- ... run your queries ...
+
+-- Review all network operations (credentials scrubbed)
+SELECT * FROM duck_net_audit_log();
+
+-- Columns: timestamp_iso, timestamp_secs, protocol, operation, host,
+--          success (BOOLEAN), status_code (INTEGER), message
+
+-- JSON summary: enabled status, entry count, max capacity
+SELECT duck_net_audit_log_status();
+
+-- Clear entries (e.g. after exporting)
+SELECT duck_net_clear_audit_log();
+```
+
+## Protocol Surface Reduction
+
+Limiting which protocols are registered reduces the SQL attack surface available to any query running against this DuckDB instance. Only list protocols your workload genuinely needs.
+
+```sql
+-- See what is currently enabled
+SELECT protocol, enabled, description
+FROM duck_net_protocols()
+WHERE "group" = 'optional'
+ORDER BY protocol;
+
+-- Generate a config template to save to ~/.config/duck_net/protocols
+SELECT duck_net_generate_config();
 ```

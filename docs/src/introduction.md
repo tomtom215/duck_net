@@ -32,7 +32,7 @@ FROM duck_net_security_warnings();
 
 ## Architecture
 
-duck_net is built as a DuckDB loadable extension in Rust using the [quack-rs](https://github.com/Maxxen/quack-rs) SDK. Each protocol is implemented as a self-contained module with its own FFI bindings, input validation, and security controls.
+duck_net is built as a DuckDB loadable extension in Rust using the [quack-rs](https://github.com/tomtom215/quack-rs) SDK. Each protocol is implemented as a self-contained module with its own FFI bindings, input validation, and security controls.
 
 Key design decisions:
 - **Centralized security**: All validation flows through `security.rs`

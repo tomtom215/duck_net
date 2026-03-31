@@ -9,7 +9,7 @@ duck_net provides functions for sending email via SMTP and reading/managing emai
 | Function | Parameters | Returns |
 |----------|-----------|---------|
 | `smtp_send` | `(host, from, to, subject, body)` | STRUCT(success BOOLEAN, message VARCHAR) |
-| `smtp_send` | `(host, port, username, password, from, to, subject)` | STRUCT(success BOOLEAN, message VARCHAR) |
+| `smtp_send` | `(host, from, to, subject, body, username, password)` | STRUCT(success BOOLEAN, message VARCHAR) |
 | `smtp_send_secret` | `(secret_name, from, to, subject, body)` | STRUCT(success BOOLEAN, message VARCHAR) |
 
 ### IMAP (Reading)
@@ -34,12 +34,12 @@ SELECT (smtp_send(
     'This email was sent from a SQL query!'
 )).success;
 
--- With explicit credentials and port
+-- With explicit credentials (username + password appended after body)
 SELECT (smtp_send(
-    'smtp.gmail.com', '587',
-    'me@gmail.com', 'app-password',
+    'smtp.gmail.com',
     'me@gmail.com', 'team@example.com',
-    'Daily Report'
+    'Daily Report', 'See the attached summary.',
+    'me@gmail.com', 'app-password'
 )).message;
 
 -- Using secrets (recommended)

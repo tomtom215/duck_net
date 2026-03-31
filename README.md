@@ -31,7 +31,7 @@ Query HTTP APIs, send emails, execute SSH commands, read from Redis, publish to 
 
 ```sql
 -- Load the extension
-LOAD 'path/to/duck_net.duckdb_extension';
+LOAD 'target/release/libduck_net.so';
 
 -- Query a JSON API
 SELECT (http_get('https://api.github.com/repos/duckdb/duckdb')).body;
@@ -128,6 +128,9 @@ SELECT smtp_send_secret('mail', 'me@gmail.com', 'team@co.com', 'Alert', 'Error r
 -- List (values redacted)
 FROM duck_net_secrets();
 
+-- Rotate credentials atomically (old values zeroized before replacement)
+SELECT duck_net_rotate_secret('mail', '{"host":"smtp.gmail.com","password":"new-pass"}');
+
 -- Clear (zeroized in memory)
 SELECT duck_net_clear_secret('mail');
 ```
@@ -148,17 +151,52 @@ cd duck_net
 cargo build --release
 ```
 
-Requires Rust 1.85+ (MSRV). The extension is built to `target/release/libduck_net.so`.
+Requires Rust 1.88+ (MSRV). The extension is built to `target/release/libduck_net.so`.
 
 ```sql
 -- Load (unsigned)
 LOAD 'target/release/libduck_net.so';
 ```
 
+## Protocol Opt-In
+
+Only core web protocols are enabled by default (HTTP, DNS, TLS, GraphQL, OAuth2, WHOIS, secrets, audit log). Everything else must be explicitly enabled in a config file to reduce attack surface.
+
+```bash
+# Create ~/.config/duck_net/protocols and list what you need:
+echo "ssh" >> ~/.config/duck_net/protocols
+echo "smtp" >> ~/.config/duck_net/protocols
+echo "redis" >> ~/.config/duck_net/protocols
+```
+
+```sql
+-- From DuckDB: see all protocols and their enabled status
+SELECT * FROM duck_net_protocols();
+
+-- Generate a fully-commented config template
+SELECT duck_net_generate_config();
+```
+
+See [docs/src/installation.md](docs/src/installation.md) for full details.
+
+## Audit Logging
+
+```sql
+-- Enable session audit log
+SELECT duck_net_set_audit_logging(true);
+
+-- Review all network operations made this session (credentials scrubbed)
+SELECT * FROM duck_net_audit_log();
+
+-- JSON summary
+SELECT duck_net_audit_log_status();
+```
+
 ## Architecture
 
 - **Pure Rust** — No C dependencies. Built on `rustls` for TLS, `quack-rs` for DuckDB FFI.
 - **Modular** — Each protocol is a self-contained module with its own FFI bindings.
+- **Secure by default** — Core web only; all other protocols opt-in via config file.
 - **Security-first** — Centralized validation in `security.rs`, all credentials in `secrets.rs`.
 - **Bounded** — Every buffer, cache, and response has enforced limits.
 

@@ -21,6 +21,7 @@ FROM duck_net_security_warnings();
 | `TOKEN_OVER_HTTP_VAULT` | Vault | Auth token sent over plaintext HTTP |
 | `TOKEN_OVER_HTTP_INFLUXDB` | InfluxDB | Auth token sent over plaintext HTTP |
 | `TOKEN_OVER_HTTP_ES` | Elasticsearch | Auth token sent over plaintext HTTP |
+| `REVOKED_CERTIFICATE` | TLS | OCSP check confirmed the certificate has been revoked (CWE-295) |
 
 ### HIGH Severity
 
@@ -63,6 +64,12 @@ SELECT duck_net_set_security_warnings(false);
 
 -- Re-enable (recommended for production)
 SELECT duck_net_set_security_warnings(true);
+
+-- Check whether warnings are currently enabled
+SELECT duck_net_warnings_enabled();
+
+-- Count how many warnings have been emitted this session
+SELECT duck_net_warnings_count();
 
 -- Clear accumulated warnings
 SELECT duck_net_clear_security_warnings();

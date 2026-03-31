@@ -17,13 +17,19 @@ FROM duck_net_secrets();
 -- View a specific secret (sensitive values redacted)
 SELECT duck_net_secret_redacted('name');
 
--- Get a specific value from a secret
+-- Get the type of a stored secret
+SELECT duck_net_secret_type('name');
+
+-- Get a specific value from a secret (emits SECRET_VALUE_EXPOSED warning)
 SELECT duck_net_secret('name', 'key');
+
+-- Atomically replace all values in an existing secret (old values zeroized first)
+SELECT duck_net_rotate_secret('name', '{"key": "new_value", ...}');
 
 -- Remove a secret (zeroized in memory)
 SELECT duck_net_clear_secret('name');
 
--- Remove all secrets
+-- Remove all secrets (all zeroized)
 SELECT duck_net_clear_all_secrets();
 ```
 
