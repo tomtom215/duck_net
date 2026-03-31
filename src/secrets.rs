@@ -224,6 +224,57 @@ pub fn clear_secret(name: &str) -> Result<String, String> {
     }
 }
 
+/// Rotate a secret's configuration atomically.
+///
+/// Parses `new_config_json` into a new key-value map, then:
+/// 1. Validates the new config before touching the existing secret.
+/// 2. Zeroizes all old values in-place (CWE-316).
+/// 3. Replaces the values with the new ones.
+///
+/// The secret type is preserved.  To change the type, clear and re-add.
+///
+/// Returns an error if the secret does not exist or the new config is invalid.
+/// The existing secret is untouched if parsing fails, ensuring atomicity.
+pub fn rotate_secret(name: &str, new_config_json: &str) -> Result<String, String> {
+    // Parse and validate the new config BEFORE acquiring the lock,
+    // so a parse failure never leaves the store in a partial state.
+    let new_values = parse_json_object(new_config_json)?;
+
+    let total_bytes: usize = new_values.iter().map(|(k, v)| k.len() + v.len()).sum();
+    if total_bytes > MAX_SECRET_BYTES {
+        return Err(format!(
+            "New secret configuration too large: {} bytes (max {})",
+            total_bytes, MAX_SECRET_BYTES
+        ));
+    }
+
+    let mut store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
+    let map = store.as_mut().ok_or("Secrets store not initialized")?;
+
+    let entry = map
+        .get_mut(name)
+        .ok_or_else(|| format!("Secret '{}' not found", name))?;
+
+    let key_count = new_values.len();
+
+    // Zeroize every old value before overwriting (CWE-316).
+    for value in entry.values.values_mut() {
+        value.zeroize();
+    }
+    let old_keys: Vec<String> = entry.values.keys().cloned().collect();
+    entry.values.clear();
+    for mut k in old_keys {
+        k.zeroize();
+    }
+
+    entry.values = new_values;
+
+    Ok(format!(
+        "Secret '{}' rotated successfully ({} keys, type={})",
+        name, key_count, entry.secret_type
+    ))
+}
+
 /// Remove all secrets from the store.
 /// Zeroizes all secret values in memory before dropping (CWE-316).
 pub fn clear_all_secrets() -> String {

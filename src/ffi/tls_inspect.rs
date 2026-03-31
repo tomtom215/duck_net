@@ -23,6 +23,8 @@ fn tls_cert_type() -> LogicalType {
         ("is_expired", LogicalType::new(TypeId::Boolean)),
         ("days_until_expiry", LogicalType::new(TypeId::BigInt)),
         ("version", LogicalType::new(TypeId::Varchar)),
+        // OCSP revocation status: "good", "revoked", "unknown", or "error: <detail>"
+        ("ocsp_status", LogicalType::new(TypeId::Varchar)),
     ])
 }
 
@@ -32,7 +34,7 @@ quack_rs::scalar_callback!(cb_tls_inspect, |_info, input, output| {
     let row_count = chunk.size();
     let host_reader = unsafe { chunk.reader(0) };
 
-    let mut sw = unsafe { StructWriter::new(output, 11) };
+    let mut sw = unsafe { StructWriter::new(output, 12) };
     let san_names_vec = sw.child_vector(5);
 
     let mut san_list_offset: usize = 0;
@@ -54,6 +56,7 @@ quack_rs::scalar_callback!(cb_tls_inspect, |_info, input, output| {
                 unsafe { sw.write_bool(row, 8, info.is_expired) };
                 unsafe { sw.write_i64(row, 9, info.days_until_expiry) };
                 unsafe { sw.write_varchar(row, 10, &info.version) };
+                unsafe { sw.write_varchar(row, 11, &info.ocsp_status) };
             }
             Err(e) => {
                 unsafe { sw.write_varchar(row, 0, &format!("Error: {e}")) };
@@ -67,6 +70,7 @@ quack_rs::scalar_callback!(cb_tls_inspect, |_info, input, output| {
                 unsafe { sw.write_bool(row, 8, false) };
                 unsafe { sw.write_i64(row, 9, -1) };
                 unsafe { sw.write_varchar(row, 10, "") };
+                unsafe { sw.write_varchar(row, 11, "") };
             }
         }
     }
@@ -79,7 +83,7 @@ quack_rs::scalar_callback!(cb_tls_inspect_port, |_info, input, output| {
     let host_reader = unsafe { chunk.reader(0) };
     let port_reader = unsafe { chunk.reader(1) };
 
-    let mut sw = unsafe { StructWriter::new(output, 11) };
+    let mut sw = unsafe { StructWriter::new(output, 12) };
     let san_names_vec = sw.child_vector(5);
 
     let mut san_list_offset: usize = 0;
@@ -102,6 +106,7 @@ quack_rs::scalar_callback!(cb_tls_inspect_port, |_info, input, output| {
                 unsafe { sw.write_bool(row, 8, info.is_expired) };
                 unsafe { sw.write_i64(row, 9, info.days_until_expiry) };
                 unsafe { sw.write_varchar(row, 10, &info.version) };
+                unsafe { sw.write_varchar(row, 11, &info.ocsp_status) };
             }
             Err(e) => {
                 unsafe { sw.write_varchar(row, 0, &format!("Error: {e}")) };
@@ -115,6 +120,7 @@ quack_rs::scalar_callback!(cb_tls_inspect_port, |_info, input, output| {
                 unsafe { sw.write_bool(row, 8, false) };
                 unsafe { sw.write_i64(row, 9, -1) };
                 unsafe { sw.write_varchar(row, 10, "") };
+                unsafe { sw.write_varchar(row, 11, "") };
             }
         }
     }

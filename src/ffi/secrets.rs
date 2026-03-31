@@ -100,6 +100,29 @@ quack_rs::scalar_callback!(cb_get_secret_redacted, |_info, input, output| {
     }
 });
 
+// duck_net_rotate_secret(name, new_config_json) -> VARCHAR
+// Atomically rotates a secret's configuration: zeroizes old values, replaces
+// with new ones.  Secret type is preserved.  The existing secret is unchanged
+// if parsing the new config fails.
+quack_rs::scalar_callback!(cb_rotate_secret, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let name_reader = unsafe { chunk.reader(0) };
+    let config_reader = unsafe { chunk.reader(1) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let name = unsafe { name_reader.read_str(row) };
+        let new_config_json = unsafe { config_reader.read_str(row) };
+
+        let msg = match secrets::rotate_secret(name, new_config_json) {
+            Ok(m) => m,
+            Err(e) => format!("Error: {}", e),
+        };
+        unsafe { writer.write_varchar(row, &msg) };
+    }
+});
+
 // duck_net_scrub_url(url) -> VARCHAR
 // Scrub credentials from a URL for safe logging.
 quack_rs::scalar_callback!(cb_scrub_url, |_info, input, output| {
@@ -259,6 +282,14 @@ pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
         .param(v) // name
         .returns(TypeId::Varchar)
         .function(cb_clear_secret)
+        .register(con.as_raw_connection())?;
+
+    // duck_net_rotate_secret(name, new_config_json) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_rotate_secret")
+        .param(v) // name
+        .param(v) // new_config_json
+        .returns(TypeId::Varchar)
+        .function(cb_rotate_secret)
         .register(con.as_raw_connection())?;
 
     // duck_net_clear_all_secrets() -> VARCHAR (no params, returns message)

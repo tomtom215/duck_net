@@ -1,6 +1,27 @@
+> [!CAUTION]
+> ## Here Be Dragons
+>
+> **This extension is highly experimental and has not been reviewed or validated by security researchers.**
+>
+> Neither the author nor any AI assistant is a credentialed security professional. The hardening features in this codebase (SSRF protection, credential zeroization, audit logging, etc.) represent good-faith engineering effort — they are **not** a substitute for a professional security audit.
+>
+> Beyond that, there are deep architectural reasons why a database engine should never talk directly to the network: exfiltration of sensitive data, SSRF attacks pivoting through your database host, credential leakage into query logs, denial-of-service via unbounded connections, and more.
+>
+> **If you use this extension in a production environment and end up on the front page of a security blog, that's on you — and honestly, kind of on you for reading this warning and continuing anyway.**
+>
+> **Why does this exist?** This project grew out of a specific frustration: while evaluating other network-capable DuckDB extensions, analytics and telemetry were discovered built into them — quietly phoning home as a side effect of loading a SQL extension. That felt wrong. So this was built from scratch, with full visibility into every network call it makes. What started as a minimal HTTP client gradually grew to support more and more protocols, because once you have the plumbing in place, the next one is always "just one more." Here we are.
+>
+> **An unexpected side effect: improving [quack-rs](https://github.com/tomtom215/quack-rs).** duck_net is built on quack-rs, a safe Rust wrapper for the DuckDB extension FFI. quack-rs itself was originally motivated by [duckdb-behavioral](https://github.com/tomtom215/duckdb-behavioral) — a much more narrowly scoped project that, while useful, never pushed the FFI wrapper hard enough to expose its rough edges. duck_net changed that. Implementing 50+ protocols across table functions, scalar callbacks, streaming results, and complex type mappings surfaced real gaps — missing APIs, ergonomic friction, unsafe patterns that needed proper abstractions — and drove meaningful improvements back into quack-rs that benefit anyone building DuckDB extensions in Rust. If quack-rs is useful to you, some of the credit belongs to this project's willingness to stress-test it.
+>
+> This project exists for research, internal tooling, and the joy of absurdly powerful SQL. Use it in isolated environments, behind strict network controls, and never against data you cannot afford to lose or expose.
+>
+> *["Here be dragons"](https://en.wikipedia.org/wiki/Here_be_dragons) — the old cartographer's warning for uncharted, dangerous territory. Consider this README the edge of the known map.*
+
+---
+
 # duck_net
 
-**49+ network protocols as DuckDB SQL functions**, written in pure Rust.
+**50+ network protocols as DuckDB SQL functions**, written in pure Rust.
 
 Query HTTP APIs, send emails, execute SSH commands, read from Redis, publish to Kafka, search LDAP directories — all from SQL.
 
@@ -10,7 +31,7 @@ Query HTTP APIs, send emails, execute SSH commands, read from Redis, publish to 
 
 ```sql
 -- Load the extension
-LOAD 'path/to/duck_net.duckdb_extension';
+LOAD 'target/release/libduck_net.so';
 
 -- Query a JSON API
 SELECT (http_get('https://api.github.com/repos/duckdb/duckdb')).body;
@@ -56,7 +77,7 @@ FROM duck_net_security_warnings();
 Full documentation is available in the [docs/](docs/) directory:
 
 - **[Getting Started](docs/src/quickstart.md)** — Installation and first queries
-- **[Protocol Reference](docs/src/reference.md)** — All 49+ functions with signatures
+- **[Protocol Reference](docs/src/reference.md)** — All 50+ functions with signatures
 - **[Security Architecture](docs/src/security/architecture.md)** — Threat model and defense layers
 - **[Secrets Management](docs/src/security/secrets.md)** — In-memory credential store
 - **[DuckDB Secrets Integration](docs/src/security/duckdb-secrets.md)** — Native CREATE SECRET support
@@ -107,6 +128,9 @@ SELECT smtp_send_secret('mail', 'me@gmail.com', 'team@co.com', 'Alert', 'Error r
 -- List (values redacted)
 FROM duck_net_secrets();
 
+-- Rotate credentials atomically (old values zeroized before replacement)
+SELECT duck_net_rotate_secret('mail', '{"host":"smtp.gmail.com","password":"new-pass"}');
+
 -- Clear (zeroized in memory)
 SELECT duck_net_clear_secret('mail');
 ```
@@ -127,17 +151,52 @@ cd duck_net
 cargo build --release
 ```
 
-Requires Rust 1.85+ (MSRV). The extension is built to `target/release/libduck_net.so`.
+Requires Rust 1.88+ (MSRV). The extension is built to `target/release/libduck_net.so`.
 
 ```sql
 -- Load (unsigned)
 LOAD 'target/release/libduck_net.so';
 ```
 
+## Protocol Opt-In
+
+Only core web protocols are enabled by default (HTTP, DNS, TLS, GraphQL, OAuth2, WHOIS, secrets, audit log). Everything else must be explicitly enabled in a config file to reduce attack surface.
+
+```bash
+# Create ~/.config/duck_net/protocols and list what you need:
+echo "ssh" >> ~/.config/duck_net/protocols
+echo "smtp" >> ~/.config/duck_net/protocols
+echo "redis" >> ~/.config/duck_net/protocols
+```
+
+```sql
+-- From DuckDB: see all protocols and their enabled status
+SELECT * FROM duck_net_protocols();
+
+-- Generate a fully-commented config template
+SELECT duck_net_generate_config();
+```
+
+See [docs/src/installation.md](docs/src/installation.md) for full details.
+
+## Audit Logging
+
+```sql
+-- Enable session audit log
+SELECT duck_net_set_audit_logging(true);
+
+-- Review all network operations made this session (credentials scrubbed)
+SELECT * FROM duck_net_audit_log();
+
+-- JSON summary
+SELECT duck_net_audit_log_status();
+```
+
 ## Architecture
 
 - **Pure Rust** — No C dependencies. Built on `rustls` for TLS, `quack-rs` for DuckDB FFI.
 - **Modular** — Each protocol is a self-contained module with its own FFI bindings.
+- **Secure by default** — Core web only; all other protocols opt-in via config file.
 - **Security-first** — Centralized validation in `security.rs`, all credentials in `secrets.rs`.
 - **Bounded** — Every buffer, cache, and response has enforced limits.
 

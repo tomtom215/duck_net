@@ -147,8 +147,6 @@ A complete list of all duck_net functions organized by protocol. Each function l
 | [`consul_get`](./protocols/service-discovery.md) | Consul KV get |
 | [`consul_set`](./protocols/service-discovery.md) | Consul KV set |
 | [`consul_delete`](./protocols/service-discovery.md) | Consul KV delete |
-| [`etcd_get`](./protocols/service-discovery.md) | etcd KV get |
-| [`etcd_put`](./protocols/service-discovery.md) | etcd KV put |
 | [`vault_read`](./protocols/service-discovery.md) | Vault read secret |
 | [`vault_write`](./protocols/service-discovery.md) | Vault write secret |
 | [`vault_list`](./protocols/service-discovery.md) | Vault list secrets |
@@ -187,8 +185,28 @@ A complete list of all duck_net functions organized by protocol. Each function l
 | Function | Description |
 |----------|-------------|
 | [`duck_net_add_secret`](../security/secrets.md) | Store a secret |
-| [`duck_net_secret`](../security/secrets.md) | Get a secret value |
-| [`duck_net_secret_redacted`](../security/secrets.md) | Get redacted secret |
-| [`duck_net_clear_secret`](../security/secrets.md) | Remove a secret |
-| [`duck_net_clear_all_secrets`](../security/secrets.md) | Remove all secrets |
-| [`duck_net_secrets`](../security/secrets.md) | List all secrets (table) |
+| [`duck_net_secret`](../security/secrets.md) | Get a raw secret value (emits security warning) |
+| [`duck_net_secret_redacted`](../security/secrets.md) | Get secret with sensitive values redacted |
+| [`duck_net_secret_type`](../security/secrets.md) | Get the type of a stored secret |
+| [`duck_net_rotate_secret`](../security/secrets.md) | Atomically replace secret values (old values zeroized) |
+| [`duck_net_clear_secret`](../security/secrets.md) | Remove and zeroize a secret |
+| [`duck_net_clear_all_secrets`](../security/secrets.md) | Remove and zeroize all secrets |
+| [`duck_net_secrets`](../security/secrets.md) | List all secrets (table, values redacted) |
+
+## Audit Logging
+
+| Function | Description |
+|----------|-------------|
+| [`duck_net_set_audit_logging`](../security/hardening.md) | Enable or disable audit logging |
+| [`duck_net_audit_log`](../security/hardening.md) | Query all logged network operations (table) |
+| [`duck_net_audit_log_status`](../security/hardening.md) | JSON status: enabled, entry count |
+| [`duck_net_clear_audit_log`](../security/hardening.md) | Clear all audit log entries |
+
+## Protocol Feature Gate
+
+| Function | Description |
+|----------|-------------|
+| [`duck_net_protocols`](../installation.md) | List all protocols with group and enabled status (table) |
+| [`duck_net_feature_status`](../installation.md) | JSON summary: config file path, enabled/disabled counts |
+| [`duck_net_generate_config`](../installation.md) | Generate a ready-to-use config file template |
+| [`duck_net_allow_zeromq_plaintext`](./protocols/messaging.md) | Opt in to ZeroMQ NULL-security plaintext |

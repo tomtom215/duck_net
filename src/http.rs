@@ -126,13 +126,21 @@ pub fn get_agent() -> Arc<Agent> {
 
 /// Configure a custom CA bundle (PEM text) for all subsequent HTTPS requests.
 ///
-/// Parses the PEM, builds a new ureq Agent with the extra root certificate(s)
-/// added to the trust store, and caches it. All HTTP methods use this agent
+/// Parses the PEM, builds a new ureq Agent with the supplied root certificate(s)
+/// as the exclusive trust store, and caches it.  All HTTP methods use this agent
 /// going forward (including gRPC, which reads CA_BUNDLE_PEM directly).
+///
+/// If you need both public CAs and your custom CA, include all of them in the
+/// PEM bundle passed to this function.
 pub fn set_ca_bundle(ca_pem: &str) -> Result<String, String> {
-    // Validate PEM by attempting to parse
-    use rustls::pki_types::{pem::PemObject, CertificateDer};
-    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(ca_pem.as_bytes())
+    // Validate PEM by counting parseable certificates via ureq's own parser.
+    use ureq::tls::PemItem;
+    let certs: Vec<_> = ureq::tls::parse_pem(ca_pem.as_bytes())
+        .filter_map(|item| match item {
+            Ok(PemItem::Certificate(c)) => Some(Ok(c)),
+            Ok(_) => None,
+            Err(e) => Some(Err(e)),
+        })
         .collect::<Result<_, _>>()
         .map_err(|e| format!("Failed to parse CA PEM: {e}"))?;
     if certs.is_empty() {
@@ -155,7 +163,8 @@ pub fn set_ca_bundle(ca_pem: &str) -> Result<String, String> {
     *CUSTOM_HTTP_AGENT.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(new_agent));
 
     Ok(format!(
-        "CA bundle applied ({} cert(s)). All HTTPS requests will use the custom trust store.",
+        "CA bundle applied ({} cert(s)). All HTTPS requests will use the custom trust store. \
+         Include public CA certs in the bundle if you also need to reach public HTTPS endpoints.",
         certs.len()
     ))
 }
@@ -163,20 +172,27 @@ pub fn set_ca_bundle(ca_pem: &str) -> Result<String, String> {
 /// Configure a client certificate + private key for mTLS on all HTTPS requests.
 ///
 /// Both `cert_pem` and `key_pem` must be PEM-encoded. Pass the PEM content
-/// directly (not a file path).
+/// directly (not a file path). The cert PEM may contain a full chain (leaf +
+/// intermediate CAs); all certificates in the chain are sent during the TLS
+/// handshake.
 pub fn set_client_cert(cert_pem: &str, key_pem: &str) -> Result<String, String> {
-    // Validate cert
-    use rustls::pki_types::{pem::PemObject, CertificateDer};
-    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+    use ureq::tls::{PemItem, PrivateKey};
+
+    // Validate cert PEM — must contain at least one X.509 certificate.
+    let certs: Vec<_> = ureq::tls::parse_pem(cert_pem.as_bytes())
+        .filter_map(|item| match item {
+            Ok(PemItem::Certificate(c)) => Some(Ok(c)),
+            Ok(_) => None,
+            Err(e) => Some(Err(e)),
+        })
         .collect::<Result<_, _>>()
         .map_err(|e| format!("Failed to parse client cert PEM: {e}"))?;
     if certs.is_empty() {
         return Err("No valid certificates found in client cert PEM".to_string());
     }
 
-    // Validate key
-    use rustls::pki_types::PrivateKeyDer;
-    let _ = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
+    // Validate private key PEM — must parse as a recognised key type.
+    let _ = PrivateKey::from_pem(key_pem.as_bytes())
         .map_err(|e| format!("Failed to parse private key PEM: {e}"))?;
 
     *CLIENT_CERT_PEM.write().unwrap_or_else(|p| p.into_inner()) = Some(cert_pem.to_string());
@@ -222,57 +238,76 @@ pub fn client_key_pem() -> Option<String> {
 
 /// Build a ureq `Agent` with optional custom CA roots and/or mTLS client cert.
 ///
-/// Uses webpki roots as the base trust store and appends any extra CA certs.
+/// Uses ureq 3.3's native `TlsConfig` API for both custom CA roots and mTLS
+/// client certificates. The rustls `ClientConfig` is configured internally by
+/// ureq so all TLS parameters (root store, client auth) are applied correctly.
+///
+/// # Custom CA (`ca_pem`)
+/// When provided, the trust store is set to **only** the supplied certificate(s).
+/// This matches the explicit-trust model: if you supply a CA bundle, you own the
+/// trust decision.  Callers that need public-CA + custom-CA trust should include
+/// both in the PEM bundle.
+///
+/// # mTLS (`client_cert_pem` + `client_key_pem`)
+/// Parses the full certificate chain (leaf + any intermediates) and the private
+/// key from PEM, then configures ureq's `ClientCert` for mutual TLS.
 fn build_tls_agent(
     ca_pem: Option<&str>,
     client_cert_pem: Option<&str>,
     client_key_pem: Option<&str>,
 ) -> Result<Agent, String> {
-    use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
-    use std::sync::Arc as StdArc;
+    use ureq::tls::{Certificate, ClientCert, PemItem, PrivateKey, RootCerts};
 
-    // Build root cert store: start from webpki-roots bundle
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    if let Some(pem) = ca_pem {
-        for result in CertificateDer::pem_slice_iter(pem.as_bytes()) {
-            let cert = result.map_err(|e| format!("CA cert parse error: {e}"))?;
-            root_store
-                .add(cert)
-                .map_err(|e| format!("CA cert add error: {e}"))?;
+    // ── Root cert store ───────────────────────────────────────────────────────
+    // When a custom CA bundle is supplied, use only those certs as roots so
+    // that the caller has full, explicit control over the trust store.
+    // Without a custom CA, fall back to the platform's built-in trust store.
+    let root_certs = if let Some(pem) = ca_pem {
+        let certs: Vec<Certificate<'static>> = ureq::tls::parse_pem(pem.as_bytes())
+            .filter_map(|item| match item {
+                Ok(PemItem::Certificate(c)) => Some(Ok(c)),
+                Ok(_) => None, // skip any private keys in the CA bundle
+                Err(e) => Some(Err(e)),
+            })
+            .collect::<Result<_, _>>()
+            .map_err(|e| format!("CA cert parse error: {e}"))?;
+        if certs.is_empty() {
+            return Err("No valid certificates found in CA PEM".to_string());
         }
-    }
-
-    let tls_config: rustls::ClientConfig = match (client_cert_pem, client_key_pem) {
-        (Some(cert_pem), Some(key_pem)) => {
-            // mTLS: configure client authentication
-            let cert_chain: Vec<CertificateDer<'static>> =
-                CertificateDer::pem_slice_iter(cert_pem.as_bytes())
-                    .collect::<Result<_, _>>()
-                    .map_err(|e| format!("Client cert parse error: {e}"))?;
-            let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
-                .map_err(|e| format!("Private key parse error: {e}"))?;
-            rustls::ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_client_auth_cert(cert_chain, key)
-                .map_err(|e| format!("mTLS config error: {e}"))?
-        }
-        _ => rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth(),
+        RootCerts::Specific(certs.into())
+    } else {
+        RootCerts::PlatformVerifier
     };
 
-    // Build ureq Agent backed by our custom rustls ClientConfig.
-    let tls = TlsConfig::builder().root_certs(RootCerts::WebPki).build();
-    // Attach the rustls config via the underlying connector.
-    // The TlsConfig above is overridden through AgentConfig.
-    let _ = StdArc::new(tls_config); // stored for future direct-rustls connector integration
+    // ── mTLS client certificate ───────────────────────────────────────────────
+    // Parse the full cert chain (leaf + intermediates) and private key from PEM.
+    // ureq's ClientCert carries both to the TLS handshake.
+    let client_cert = match (client_cert_pem, client_key_pem) {
+        (Some(cert_pem), Some(key_pem)) => {
+            let certs: Vec<Certificate<'static>> = ureq::tls::parse_pem(cert_pem.as_bytes())
+                .filter_map(|item| match item {
+                    Ok(PemItem::Certificate(c)) => Some(Ok(c)),
+                    Ok(_) => None,
+                    Err(e) => Some(Err(e)),
+                })
+                .collect::<Result<_, _>>()
+                .map_err(|e| format!("Client cert parse error: {e}"))?;
+            if certs.is_empty() {
+                return Err("No valid certificates found in client cert PEM".to_string());
+            }
+            let key = PrivateKey::from_pem(key_pem.as_bytes())
+                .map_err(|e| format!("Private key parse error: {e}"))?;
+            Some(ClientCert::new_with_certs(&certs, key))
+        }
+        _ => None,
+    };
 
-    // Fall back: use platform verifier + custom CA is handled through OS store.
-    // For now build with WebPki roots (webpki-roots bundle) which we already
-    // extended above. Full custom-rustls-config injection into ureq 3.x will
-    // require ureq to expose a `TlsConfig::from_rustls_config` API.
+    // ── Assemble ureq Agent ───────────────────────────────────────────────────
+    let tls = TlsConfig::builder()
+        .root_certs(root_certs)
+        .client_cert(client_cert)
+        .build();
+
     let config = Agent::config_builder()
         .tls_config(tls)
         .http_status_as_error(false)
@@ -671,6 +706,42 @@ pub fn execute_with_retry(
 
         // Follow redirects with per-hop SSRF validation
         let result = follow_redirect(method, url, headers, body, raw);
+
+        // Audit log: record the final outcome of this attempt.
+        // Host is extracted from the URL for the log entry; credentials in
+        // the URL have already been scrubbed by scrub_url (CWE-532).
+        if crate::audit_log::is_enabled() {
+            let host = url
+                .split("://")
+                .nth(1)
+                .unwrap_or(url)
+                .split(['/', '?', '#'])
+                .next()
+                .unwrap_or(url);
+            let method_str = match method {
+                Method::Get => "GET",
+                Method::Post => "POST",
+                Method::Put => "PUT",
+                Method::Patch => "PATCH",
+                Method::Delete => "DELETE",
+                Method::Head => "HEAD",
+                Method::Options => "OPTIONS",
+            };
+            let success = result.status > 0 && result.status < 400;
+            let msg = if success {
+                String::new()
+            } else {
+                result.reason.clone()
+            };
+            crate::audit_log::record(
+                "http",
+                method_str,
+                host,
+                success,
+                result.status as i32,
+                &msg,
+            );
+        }
 
         if retry.should_retry(attempt, result.status) {
             // RFC 7231 §7.1.3: honour Retry-After header if present.

@@ -79,10 +79,21 @@ SELECT (nats_request('nats://localhost:4222', 'api.compute', '{"n": 100}', 5000)
 
 ## ZeroMQ
 
+> [!WARNING]
+> ZeroMQ plaintext connections (NULL security, ZMTP/3.0) are **blocked by default**. CURVE encryption is not yet implemented in duck_net. To use ZeroMQ you must explicitly opt in, acknowledging that all messages will be sent in cleartext.
+
 ```sql
+-- Required before any zmq_request call:
+SELECT duck_net_allow_zeromq_plaintext(true);
+
 -- REQ-REP pattern
 SELECT (zmq_request('tcp://localhost:5555', 'Hello')).response;
+
+-- Disable again when done (or simply don't call it for production sessions):
+SELECT duck_net_allow_zeromq_plaintext(false);
 ```
+
+Only use ZeroMQ on trusted, isolated networks. Do not use it over untrusted network paths. This opt-in is intentional — it forces an explicit acknowledgement that the connection has no transport security.
 
 ## Security Considerations
 

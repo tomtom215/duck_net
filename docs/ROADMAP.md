@@ -136,7 +136,7 @@ Fire-and-forget email sending from SQL. Useful for alerting on query results.
 
 ## v0.3.1 — Security Audit & Hardening
 
-Comprehensive security audit and hardening pass across all 49+ protocol implementations.
+Comprehensive security audit and hardening pass across all 50+ protocol implementations.
 
 ### Security Fixes
 
@@ -194,23 +194,41 @@ For S3/HTTP/GCS, users should prefer DuckDB's native secrets. duck_net covers pr
 | QUIC / HTTP/3 | Transport-layer protocol. DuckDB doesn't control socket-level details; ureq handles connections. No user-facing benefit. |
 | Raw TCP/UDP | Too low-level for SQL. Specific protocols (WHOIS, NTP, SIP, SNMP, RADIUS, STUN, mDNS) already use raw sockets internally. |
 
-## v0.4.0 — In Progress
+## v0.4.0 — Shipped
 
 ### Security Hardening & DuckDB Secrets Integration
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| Security warnings subsystem | Done | Runtime alerts for plaintext protocols, missing auth, weak crypto |
-| DuckDB secrets manager integration | Done | Bridge to native `CREATE SECRET` for S3/HTTP/GCS/R2 |
-| Plaintext protocol warnings | Done | Warnings for MQTT, Redis, FTP, LDAP, AMQP, Kafka, NATS, WebSocket, ZeroMQ, Syslog |
-| No-auth protocol warnings | Done | Warnings for Memcached (no built-in auth) |
-| Token-over-HTTP warnings | Done | Critical warnings for Consul/Vault tokens over plaintext |
-| Weak auth warnings | Done | Warnings for SNMPv2c and IPMI v1.5 |
-| SSH TOFU warnings | Done | Warning on first-time host key acceptance |
-| Module refactoring | Done | All files under 600 lines for modularity |
-| mdBook documentation | Done | Professional, searchable documentation with per-protocol guides |
-| `duck_net_security_warnings()` | Done | Table function to query all session warnings |
-| `duck_net_set_security_warnings()` | Done | Suppress warnings for CI/airgapped systems |
+| Feature | Description |
+|---------|-------------|
+| Security warnings subsystem | Runtime alerts for plaintext protocols, missing auth, weak crypto |
+| DuckDB secrets manager integration | Bridge to native `CREATE SECRET` for S3/HTTP/GCS/R2 |
+| Plaintext protocol warnings | Warnings for MQTT, Redis, FTP, LDAP, AMQP, Kafka, NATS, WebSocket, ZeroMQ, Syslog |
+| No-auth protocol warnings | Warnings for Memcached (no built-in auth) |
+| Token-over-HTTP warnings | Critical warnings for Consul/Vault tokens over plaintext |
+| Weak auth warnings | Warnings for SNMPv2c and IPMI v1.5 |
+| SSH TOFU warnings | Warning on first-time host key acceptance |
+| Module refactoring | All files under 600 lines for modularity |
+| mdBook documentation | Professional, searchable documentation with per-protocol guides |
+| `duck_net_security_warnings()` | Table function to query all session warnings |
+| `duck_net_set_security_warnings()` | Suppress warnings for CI/airgapped systems |
+
+## v0.5.0 — Shipped
+
+### Production Readiness Hardening & Protocol Opt-In
+
+| Feature | Description | CWE |
+|---------|-------------|-----|
+| **mTLS fix** | `build_tls_agent` rewrote to use ureq 3.3 native `TlsConfig + ClientCert` API; client certificates now actually sent during the TLS handshake (were silently discarded before) | CWE-295 |
+| **SSH key file permissions** | Private key files validated for `600` mode before loading on Unix; rejects with `chmod 600` hint | CWE-732 |
+| **OAuth2 JSON parsing** | Replaced hand-rolled string search parser with `serde_json`; handles all RFC 6749 edge cases including quoted `expires_in` | CWE-116 |
+| **ZeroMQ plaintext block** | NULL-security ZMTP connections blocked by default; require explicit `duck_net_allow_zeromq_plaintext(true)` opt-in with audit warning | CWE-319 |
+| **OCSP auto-integration** | `tls_inspect` now automatically checks certificate revocation via OCSP after cert parse; emits `REVOKED_CERTIFICATE` CRITICAL warning | CWE-295 |
+| **Audit logging** | `duck_net_audit_log` ring buffer (10,000 entries), credential scrubbing, ISO 8601 timestamps, `duck_net_audit_log()` table function | CWE-532 |
+| **Credential rotation** | `duck_net_rotate_secret()` atomically zeroizes old values before replacing; validates new config before lock acquisition | CWE-316 |
+| **Initialization error handling** | Replaced `LazyLock` (panics on failure) with `OnceLock` + explicit `init() -> Result` for tokio runtime and DNS resolver; errors surface as DuckDB load errors | — |
+| **Protocol opt-in gating** | Only core web protocols (HTTP, DNS, TLS, GraphQL, OAuth2, secrets, audit) registered by default; all 37 other protocols opt-in via `~/.config/duck_net/protocols` | — |
+| **`duck_net_protocols()`** | Table function listing all 54 protocols with group (core/optional), enabled status, and description | — |
+| **`duck_net_generate_config()`** | Generates a fully-commented config file template with all opt-in protocols | — |
 
 ## Implementation Guides
 

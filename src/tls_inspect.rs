@@ -22,6 +22,11 @@ pub struct TlsCertInfo {
     pub is_expired: bool,
     pub days_until_expiry: i64,
     pub version: String,
+    /// OCSP revocation status: "good", "revoked", "unknown", or "error: <detail>".
+    /// Populated automatically by querying the OCSP responder listed in the
+    /// certificate's AIA extension.  A "good" status means the CA has confirmed
+    /// the certificate has not been revoked at the time of the check.
+    pub ocsp_status: String,
 }
 
 /// Inspect the TLS certificate of a host.
@@ -88,7 +93,35 @@ pub fn inspect(host: &str, port: u16) -> Result<TlsCertInfo, String> {
     }
 
     let cert_der = &certs[0].as_ref();
-    parse_x509(cert_der)
+    let mut info = parse_x509(cert_der)?;
+
+    // Auto-check OCSP revocation status using the responder URL embedded in
+    // the certificate's Authority Information Access (AIA) extension.
+    // A revoked certificate is a security-critical finding (CWE-295) that must
+    // be surfaced automatically — not left as a manual follow-up step.
+    info.ocsp_status = match crate::ocsp::check(host, port) {
+        r if r.success => {
+            if r.status == "revoked" {
+                // Emit a critical security warning: revoked cert in active use.
+                crate::security_warnings::warn(crate::security_warnings::SecurityWarning {
+                    code: "REVOKED_CERTIFICATE",
+                    cwe: "CWE-295",
+                    severity: crate::security_warnings::Severity::Critical,
+                    protocol: "tls",
+                    message: format!(
+                        "Security warning: TLS certificate for '{host}' has been REVOKED \
+                         (revocation time: {}). The certificate should not be trusted. \
+                         Contact the site administrator immediately.",
+                        r.revocation_time
+                    ),
+                });
+            }
+            r.status
+        }
+        r => format!("error: {}", r.message),
+    };
+
+    Ok(info)
 }
 
 /// Parse a DER-encoded X.509 certificate.
@@ -165,5 +198,6 @@ fn parse_x509(der: &[u8]) -> Result<TlsCertInfo, String> {
         is_expired,
         days_until_expiry,
         version,
+        ocsp_status: String::new(), // filled in by inspect() after OCSP check
     })
 }

@@ -2,19 +2,46 @@
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
 use std::net::IpAddr;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use hickory_resolver::TokioResolver;
 
 use crate::runtime;
 
-static RESOLVER: LazyLock<TokioResolver> = LazyLock::new(|| {
-    runtime::block_on(async {
-        TokioResolver::builder_tokio()
-            .unwrap_or_else(|e| panic!("duck_net: failed to create DNS resolver: {e}"))
-            .build()
+/// Shared DNS resolver.  Initialised explicitly by [`init`] during extension
+/// load so that any failure is surfaced as a DuckDB error, not an abort.
+static RESOLVER: OnceLock<TokioResolver> = OnceLock::new();
+
+/// Initialise the shared DNS resolver.
+///
+/// Must be called during `register_all` before any DNS lookup.  Subsequent
+/// calls are no-ops.  Returns an error if the system resolver configuration
+/// cannot be read (e.g., malformed `/etc/resolv.conf`).
+pub fn init() -> Result<(), String> {
+    if RESOLVER.get().is_some() {
+        return Ok(());
+    }
+    let resolver = runtime::block_on(async {
+        let builder = TokioResolver::builder_tokio().map_err(|e| {
+            format!(
+                "duck_net: failed to read system DNS configuration: {e}. \
+                 Ensure /etc/resolv.conf (or the platform equivalent) is readable."
+            )
+        })?;
+        Ok::<TokioResolver, String>(builder.build())
+    })?;
+    let _ = RESOLVER.set(resolver);
+    Ok(())
+}
+
+/// Return a reference to the shared resolver, or an error if not initialised.
+fn resolver() -> Result<&'static TokioResolver, String> {
+    RESOLVER.get().ok_or_else(|| {
+        "duck_net: DNS resolver not initialised. \
+         This is a bug — please file an issue at https://github.com/tomtom215/duck_net"
+            .to_string()
     })
-});
+}
 
 /// Maximum hostname length for DNS queries.
 const MAX_HOSTNAME_LENGTH: usize = 253;
@@ -40,7 +67,7 @@ fn validate_hostname(hostname: &str) -> Result<(), String> {
 pub fn lookup(hostname: &str) -> Result<Vec<String>, String> {
     validate_hostname(hostname)?;
     runtime::block_on(async {
-        let response = RESOLVER
+        let response = resolver()?
             .lookup_ip(hostname)
             .await
             .map_err(|e| format!("DNS lookup failed for {hostname}: {e}"))?;
@@ -62,7 +89,7 @@ pub fn lookup(hostname: &str) -> Result<Vec<String>, String> {
 pub fn lookup_a(hostname: &str) -> Result<Vec<String>, String> {
     validate_hostname(hostname)?;
     runtime::block_on(async {
-        let response = RESOLVER
+        let response = resolver()?
             .lookup_ip(hostname)
             .await
             .map_err(|e| format!("DNS lookup failed for {hostname}: {e}"))?;
@@ -78,7 +105,7 @@ pub fn lookup_a(hostname: &str) -> Result<Vec<String>, String> {
 pub fn lookup_aaaa(hostname: &str) -> Result<Vec<String>, String> {
     validate_hostname(hostname)?;
     runtime::block_on(async {
-        let response = RESOLVER
+        let response = resolver()?
             .lookup_ip(hostname)
             .await
             .map_err(|e| format!("DNS lookup failed for {hostname}: {e}"))?;
@@ -96,7 +123,7 @@ pub fn reverse(ip_str: &str) -> Result<Option<String>, String> {
         .parse()
         .map_err(|e| format!("Invalid IP address {ip_str}: {e}"))?;
     runtime::block_on(async {
-        match RESOLVER.reverse_lookup(addr).await {
+        match resolver()?.reverse_lookup(addr).await {
             Ok(response) => Ok(response
                 .iter()
                 .next()
@@ -110,7 +137,7 @@ pub fn reverse(ip_str: &str) -> Result<Option<String>, String> {
 pub fn lookup_txt(hostname: &str) -> Result<Vec<String>, String> {
     validate_hostname(hostname)?;
     runtime::block_on(async {
-        let response = RESOLVER
+        let response = resolver()?
             .txt_lookup(hostname)
             .await
             .map_err(|e| format!("DNS TXT lookup failed for {hostname}: {e}"))?;
@@ -128,7 +155,7 @@ pub struct MxRecord {
 pub fn lookup_mx(hostname: &str) -> Result<Vec<MxRecord>, String> {
     validate_hostname(hostname)?;
     runtime::block_on(async {
-        let response = RESOLVER
+        let response = resolver()?
             .mx_lookup(hostname)
             .await
             .map_err(|e| format!("DNS MX lookup failed for {hostname}: {e}"))?;

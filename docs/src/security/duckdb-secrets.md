@@ -262,4 +262,4 @@ FROM duck_net_security_warnings();
 | Scope support | By name | By path prefix |
 | AWS credential chain | Via `duck_net_import_aws_env()` | Yes (AWS SDK) |
 | Session token (STS) | Yes (explicit `session_token` field) | Yes |
-| Protocol coverage | All 49+ protocols | S3, HTTP, GCS, R2, Azure |
+| Protocol coverage | All 50+ protocols | S3, HTTP, GCS, R2, Azure |

@@ -42,6 +42,7 @@
 
 # Configuration
 
+- [Protocol Opt-In](./installation.md)
 - [Rate Limiting](./configuration/rate-limiting.md)
 - [Retries & Timeouts](./configuration/retries.md)
 - [Authentication Helpers](./configuration/auth.md)
