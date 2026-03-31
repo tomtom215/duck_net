@@ -126,7 +126,10 @@ fn client_credentials_inner(
     // expires_in may be a JSON number or a quoted string depending on the AS.
     let expires_in = obj
         .get("expires_in")
-        .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or(-1);
 
     let resp_scope = obj

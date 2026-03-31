@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-mod audit_log;
 mod amqp;
+mod audit_log;
 mod aws_sigv4;
 mod bgp;
 mod caldav;
@@ -62,8 +62,8 @@ pub fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     // Initialise async runtime and DNS resolver before any protocol function
     // is registered.  Failures here surface as a DuckDB load error rather
     // than a panic or abort later.
-    crate::runtime::init().map_err(|e| ExtensionError::new(e))?;
-    crate::dns::init().map_err(|e| ExtensionError::new(e))?;
+    crate::runtime::init().map_err(ExtensionError::new)?;
+    crate::dns::init().map_err(ExtensionError::new)?;
 
     unsafe {
         // Core HTTP

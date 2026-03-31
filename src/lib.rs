@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
-mod audit_log;
 mod amqp;
+mod audit_log;
 mod aws_sigv4;
 mod bgp;
 mod caldav;

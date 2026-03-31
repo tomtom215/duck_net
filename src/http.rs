@@ -134,7 +134,7 @@ pub fn get_agent() -> Arc<Agent> {
 /// PEM bundle passed to this function.
 pub fn set_ca_bundle(ca_pem: &str) -> Result<String, String> {
     // Validate PEM by counting parseable certificates via ureq's own parser.
-    use ureq::tls::{PemItem};
+    use ureq::tls::PemItem;
     let certs: Vec<_> = ureq::tls::parse_pem(ca_pem.as_bytes())
         .filter_map(|item| match item {
             Ok(PemItem::Certificate(c)) => Some(Ok(c)),
@@ -263,15 +263,14 @@ fn build_tls_agent(
     // that the caller has full, explicit control over the trust store.
     // Without a custom CA, fall back to the platform's built-in trust store.
     let root_certs = if let Some(pem) = ca_pem {
-        let certs: Vec<Certificate<'static>> =
-            ureq::tls::parse_pem(pem.as_bytes())
-                .filter_map(|item| match item {
-                    Ok(PemItem::Certificate(c)) => Some(Ok(c)),
-                    Ok(_) => None, // skip any private keys in the CA bundle
-                    Err(e) => Some(Err(e)),
-                })
-                .collect::<Result<_, _>>()
-                .map_err(|e| format!("CA cert parse error: {e}"))?;
+        let certs: Vec<Certificate<'static>> = ureq::tls::parse_pem(pem.as_bytes())
+            .filter_map(|item| match item {
+                Ok(PemItem::Certificate(c)) => Some(Ok(c)),
+                Ok(_) => None, // skip any private keys in the CA bundle
+                Err(e) => Some(Err(e)),
+            })
+            .collect::<Result<_, _>>()
+            .map_err(|e| format!("CA cert parse error: {e}"))?;
         if certs.is_empty() {
             return Err("No valid certificates found in CA PEM".to_string());
         }
@@ -285,15 +284,14 @@ fn build_tls_agent(
     // ureq's ClientCert carries both to the TLS handshake.
     let client_cert = match (client_cert_pem, client_key_pem) {
         (Some(cert_pem), Some(key_pem)) => {
-            let certs: Vec<Certificate<'static>> =
-                ureq::tls::parse_pem(cert_pem.as_bytes())
-                    .filter_map(|item| match item {
-                        Ok(PemItem::Certificate(c)) => Some(Ok(c)),
-                        Ok(_) => None,
-                        Err(e) => Some(Err(e)),
-                    })
-                    .collect::<Result<_, _>>()
-                    .map_err(|e| format!("Client cert parse error: {e}"))?;
+            let certs: Vec<Certificate<'static>> = ureq::tls::parse_pem(cert_pem.as_bytes())
+                .filter_map(|item| match item {
+                    Ok(PemItem::Certificate(c)) => Some(Ok(c)),
+                    Ok(_) => None,
+                    Err(e) => Some(Err(e)),
+                })
+                .collect::<Result<_, _>>()
+                .map_err(|e| format!("Client cert parse error: {e}"))?;
             if certs.is_empty() {
                 return Err("No valid certificates found in client cert PEM".to_string());
             }
@@ -735,7 +733,14 @@ pub fn execute_with_retry(
             } else {
                 result.reason.clone()
             };
-            crate::audit_log::record("http", method_str, host, success, result.status as i32, &msg);
+            crate::audit_log::record(
+                "http",
+                method_str,
+                host,
+                success,
+                result.status as i32,
+                &msg,
+            );
         }
 
         if retry.should_retry(attempt, result.status) {

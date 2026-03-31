@@ -451,11 +451,7 @@ async fn exec_inner(
         host,
         success,
         code,
-        if success {
-            ""
-        } else {
-            "non-zero exit code"
-        },
+        if success { "" } else { "non-zero exit code" },
     );
 
     Ok(SshExecResult {
