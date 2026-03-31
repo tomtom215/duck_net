@@ -136,7 +136,7 @@ Fire-and-forget email sending from SQL. Useful for alerting on query results.
 
 ## v0.3.1 — Security Audit & Hardening
 
-Comprehensive security audit and hardening pass across all 49+ protocol implementations.
+Comprehensive security audit and hardening pass across all 50+ protocol implementations.
 
 ### Security Fixes
 

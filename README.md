@@ -11,7 +11,7 @@
 >
 > **Why does this exist?** This project grew out of a specific frustration: while evaluating other network-capable DuckDB extensions, analytics and telemetry were discovered built into them — quietly phoning home as a side effect of loading a SQL extension. That felt wrong. So this was built from scratch, with full visibility into every network call it makes. What started as a minimal HTTP client gradually grew to support more and more protocols, because once you have the plumbing in place, the next one is always "just one more." Here we are.
 >
-> **An unexpected side effect: improving [quack-rs](https://github.com/tomtom215/quack-rs).** duck_net is built on quack-rs, a safe Rust wrapper for the DuckDB extension FFI. quack-rs itself was originally motivated by [duckdb-behavioral](https://github.com/tomtom215/duckdb-behavioral) — a much more narrowly scoped project that, while useful, never pushed the FFI wrapper hard enough to expose its rough edges. duck_net changed that. Implementing 49+ protocols across table functions, scalar callbacks, streaming results, and complex type mappings surfaced real gaps — missing APIs, ergonomic friction, unsafe patterns that needed proper abstractions — and drove meaningful improvements back into quack-rs that benefit anyone building DuckDB extensions in Rust. If quack-rs is useful to you, some of the credit belongs to this project's willingness to stress-test it.
+> **An unexpected side effect: improving [quack-rs](https://github.com/tomtom215/quack-rs).** duck_net is built on quack-rs, a safe Rust wrapper for the DuckDB extension FFI. quack-rs itself was originally motivated by [duckdb-behavioral](https://github.com/tomtom215/duckdb-behavioral) — a much more narrowly scoped project that, while useful, never pushed the FFI wrapper hard enough to expose its rough edges. duck_net changed that. Implementing 50+ protocols across table functions, scalar callbacks, streaming results, and complex type mappings surfaced real gaps — missing APIs, ergonomic friction, unsafe patterns that needed proper abstractions — and drove meaningful improvements back into quack-rs that benefit anyone building DuckDB extensions in Rust. If quack-rs is useful to you, some of the credit belongs to this project's willingness to stress-test it.
 >
 > This project exists for research, internal tooling, and the joy of absurdly powerful SQL. Use it in isolated environments, behind strict network controls, and never against data you cannot afford to lose or expose.
 >
@@ -21,7 +21,7 @@
 
 # duck_net
 
-**49+ network protocols as DuckDB SQL functions**, written in pure Rust.
+**50+ network protocols as DuckDB SQL functions**, written in pure Rust.
 
 Query HTTP APIs, send emails, execute SSH commands, read from Redis, publish to Kafka, search LDAP directories — all from SQL.
 
@@ -77,7 +77,7 @@ FROM duck_net_security_warnings();
 Full documentation is available in the [docs/](docs/) directory:
 
 - **[Getting Started](docs/src/quickstart.md)** — Installation and first queries
-- **[Protocol Reference](docs/src/reference.md)** — All 49+ functions with signatures
+- **[Protocol Reference](docs/src/reference.md)** — All 50+ functions with signatures
 - **[Security Architecture](docs/src/security/architecture.md)** — Threat model and defense layers
 - **[Secrets Management](docs/src/security/secrets.md)** — In-memory credential store
 - **[DuckDB Secrets Integration](docs/src/security/duckdb-secrets.md)** — Native CREATE SECRET support

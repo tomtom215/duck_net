@@ -1,13 +1,13 @@
 # duck_net
 
-**49+ network protocols as DuckDB SQL functions.**
+**50+ network protocols as DuckDB SQL functions.**
 
 duck_net is a DuckDB extension that brings network protocol support directly into SQL queries. Query HTTP APIs, send emails, execute SSH commands, read from Redis, publish to Kafka — all from the comfort of SQL.
 
 ## Why duck_net?
 
 - **Pure SQL**: No external scripts, no ETL pipelines. Query APIs and services directly.
-- **49+ Protocols**: HTTP, gRPC, WebSocket, SMTP, IMAP, SSH, FTP, SFTP, Redis, MQTT, Kafka, NATS, LDAP, S3, and many more.
+- **50+ Protocols**: HTTP, gRPC, WebSocket, SMTP, IMAP, SSH, FTP, SFTP, Redis, MQTT, Kafka, NATS, LDAP, S3, and many more.
 - **Security First**: SSRF protection, credential scrubbing, input validation, TLS by default, and a comprehensive secrets manager.
 - **Pure Rust**: No C dependencies. Built on rustls for TLS, eliminating OpenSSL.
 - **DuckDB Native**: Integrates with DuckDB's secrets manager for S3/HTTP/GCS credentials.
