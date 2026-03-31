@@ -2,49 +2,82 @@
 // Copyright 2026 Tom F. <tomf@tomtomtech.net> (https://github.com/tomtom215)
 
 use std::future::Future;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use tokio::runtime::Runtime;
 
-/// Shared tokio runtime for all async operations (DNS, SFTP).
-/// Runs on a dedicated thread to avoid "cannot start a runtime from within a runtime" panics
-/// when DuckDB is hosted inside another async runtime (e.g., Python with asyncio).
+/// Shared tokio runtime for all async operations (DNS, SFTP, gRPC, etc.).
 ///
-/// Panics only if the OS refuses to allocate threads/timers — an unrecoverable condition
-/// that should never occur on any supported platform.
-static RT: LazyLock<Runtime> = LazyLock::new(|| {
-    std::thread::Builder::new()
-        .name("duck_net-async".into())
-        .spawn(|| {})
-        .ok();
-    tokio::runtime::Builder::new_current_thread()
+/// Stored in a `OnceLock` so that initialisation can be attempted explicitly
+/// during extension load (via [`init`]) and any OS-level failure is surfaced as
+/// a DuckDB error rather than an unrecoverable process abort.
+///
+/// The runtime is a `current_thread` runtime (single-threaded event loop) to
+/// avoid spawning background threads that persist past the extension lifetime
+/// and to stay compatible with DuckDB's single-threaded query execution model.
+static RT: OnceLock<Runtime> = OnceLock::new();
+
+/// Initialise the shared tokio runtime.
+///
+/// Must be called during `register_all` before any async operation is
+/// attempted.  Returns an error if the OS refuses to allocate threads or
+/// I/O resources.  Calling this more than once is safe — subsequent calls
+/// are no-ops.
+pub fn init() -> Result<(), String> {
+    if RT.get().is_some() {
+        return Ok(());
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .unwrap_or_else(|e| panic!("duck_net: failed to create tokio runtime: {e}"))
-});
+        .map_err(|e| {
+            format!(
+                "duck_net: failed to create tokio runtime: {e}. \
+                 This usually indicates the OS is out of resources (threads, file descriptors). \
+                 Check system limits (ulimit -n, /proc/sys/kernel/threads-max)."
+            )
+        })?;
+    // `set` only fails if another thread beat us to it; in that case the
+    // existing runtime is fine, so we discard the new one.
+    let _ = RT.set(rt);
+    Ok(())
+}
 
-/// Run an async future to completion, safely handling the case where
-/// we may already be inside a tokio runtime.
+/// Run an async future to completion on the shared runtime.
+///
+/// Falls back to a temporary per-call runtime when already executing inside
+/// an existing async context (e.g., Python asyncio, tests) to avoid the
+/// "nested runtime" panic.
+///
+/// # Panics
+/// Panics if `init()` was never called.  This is a programming error —
+/// `init()` is always called by `register_all` before any protocol function
+/// can be invoked, so this should never trigger in practice.
 pub fn block_on<F: Future + Send>(future: F) -> F::Output
 where
     F::Output: Send,
 {
-    // If we're already in a tokio runtime, use spawn_blocking + a new current-thread runtime
+    // If we're already inside a tokio runtime (e.g. integration test or
+    // a Python async host), create a throw-away current-thread runtime on a
+    // blocking thread to avoid the "start a runtime inside a runtime" error.
     if let Ok(_handle) = tokio::runtime::Handle::try_current() {
-        // We're inside an existing runtime - use a blocking thread
-        std::thread::scope(|s| {
+        return std::thread::scope(|s| {
             s.spawn(|| {
-                let rt = tokio::runtime::Builder::new_current_thread()
+                tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
-                    .expect("Failed to create nested runtime");
-                rt.block_on(future)
+                    .expect("Failed to create nested runtime")
+                    .block_on(future)
             })
             .join()
-            .expect("Async task panicked")
-        })
-    } else {
-        // No runtime, use our shared one
-        RT.block_on(future)
+            .expect("Async task thread panicked")
+        });
     }
+
+    RT.get()
+        .expect(
+            "duck_net: tokio runtime used before initialisation. \
+             This is a bug — please file an issue at https://github.com/tomtom215/duck_net",
+        )
+        .block_on(future)
 }

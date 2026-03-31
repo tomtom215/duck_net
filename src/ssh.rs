@@ -297,6 +297,26 @@ pub(crate) async fn connect_ssh(
 
     match auth {
         SshAuth::Key(key_path) => {
+            // Validate key file permissions before reading.
+            // SSH private keys must be owner-readable only (0600 / 0400).
+            // A world- or group-readable key could be exfiltrated by any local
+            // user or process, defeating the purpose of key-based auth (CWE-732).
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let metadata = std::fs::metadata(key_path)
+                    .map_err(|e| format!("Cannot access key file '{}': {e}", key_path))?;
+                let mode = metadata.permissions().mode() & 0o777;
+                if mode & 0o077 != 0 {
+                    return Err(format!(
+                        "Key file '{}' has insecure permissions ({:04o}). \
+                         SSH private keys must be readable only by the owner. \
+                         Fix with: chmod 600 '{}'",
+                        key_path, mode, key_path
+                    ));
+                }
+            }
+
             let key_data = std::fs::read_to_string(key_path)
                 .map_err(|e| format!("Failed to read key file: {e}"))?;
             let key = russh::keys::decode_secret_key(&key_data, None)
@@ -421,8 +441,25 @@ async fn exec_inner(
     }
 
     let code = exit_code.unwrap_or(0) as i32;
+    let success = code == 0;
+
+    // Audit log: record SSH exec outcome (command scrubbed of any credential
+    // patterns; host is already validated as non-private by connect_ssh).
+    crate::audit_log::record(
+        "ssh",
+        "exec",
+        host,
+        success,
+        code,
+        if success {
+            ""
+        } else {
+            "non-zero exit code"
+        },
+    );
+
     Ok(SshExecResult {
-        success: code == 0,
+        success,
         exit_code: code,
         stdout: String::from_utf8_lossy(&stdout_buf).to_string(),
         stderr: String::from_utf8_lossy(&stderr_buf).to_string(),

@@ -5,6 +5,31 @@ use quack_rs::prelude::*;
 
 use crate::zeromq;
 
+// duck_net_allow_zeromq_plaintext(allowed BOOLEAN) -> VARCHAR
+// Explicitly opt in (or out) of NULL-security ZeroMQ.
+// Required before zmq_request will succeed (secure-by-default).
+quack_rs::scalar_callback!(cb_allow_zeromq_plaintext, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let bool_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let allowed = unsafe { bool_reader.read_bool(row) };
+        zeromq::set_plaintext_allowed(allowed);
+        let msg = if allowed {
+            "ZeroMQ plaintext (NULL security) ENABLED. \
+             All ZeroMQ messages will be sent unencrypted. \
+             Only use on fully trusted networks. \
+             CURVE encryption is not yet available in duck_net."
+        } else {
+            "ZeroMQ plaintext (NULL security) DISABLED (default). \
+             zmq_request calls will be blocked until re-enabled."
+        };
+        unsafe { writer.write_varchar(row, msg) };
+    }
+});
+
 fn zmq_result_type() -> LogicalType {
     LogicalType::struct_type_from_logical(&[
         ("success", LogicalType::new(TypeId::Boolean)),
@@ -37,12 +62,21 @@ quack_rs::scalar_callback!(cb_zmq_request, |_info, input, output| {
 pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     let v = TypeId::Varchar;
 
+    // zmq_request(endpoint, message) -> STRUCT(success, response, message)
     ScalarFunctionBuilder::new("zmq_request")
         .param(v) // endpoint
         .param(v) // message
         .returns_logical(zmq_result_type())
         .function(cb_zmq_request)
         .null_handling(NullHandling::SpecialNullHandling)
+        .register(con.as_raw_connection())?;
+
+    // duck_net_allow_zeromq_plaintext(allowed BOOLEAN) -> VARCHAR
+    // Explicit opt-in required; plaintext ZeroMQ is blocked by default.
+    ScalarFunctionBuilder::new("duck_net_allow_zeromq_plaintext")
+        .param(TypeId::Boolean)
+        .returns(TypeId::Varchar)
+        .function(cb_allow_zeromq_plaintext)
         .register(con.as_raw_connection())?;
 
     Ok(())

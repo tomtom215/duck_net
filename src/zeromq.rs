@@ -3,7 +3,40 @@
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+/// Global flag: plaintext ZeroMQ (NULL security) is denied by default.
+///
+/// ZeroMQ CURVE encryption is not yet implemented in duck_net.  Rather than
+/// silently send all messages in cleartext — which exposes data and makes the
+/// security-warnings-only approach inadequate for production — we require the
+/// caller to make an explicit, informed opt-in decision.
+///
+/// Enable with: `SELECT duck_net_allow_zeromq_plaintext(true);`
+/// Disable with: `SELECT duck_net_allow_zeromq_plaintext(false);` (default)
+static ZEROMQ_PLAINTEXT_ALLOWED: AtomicBool = AtomicBool::new(false);
+
+/// Return whether plaintext ZeroMQ connections are currently allowed.
+pub fn plaintext_allowed() -> bool {
+    ZEROMQ_PLAINTEXT_ALLOWED.load(Ordering::Relaxed)
+}
+
+/// Allow or deny plaintext (NULL-security) ZeroMQ connections.
+///
+/// Must be called with `true` before `zmq_request` will succeed.
+/// Emits a security warning when enabled so the decision is always visible
+/// in the session's `duck_net_security_warnings()` log.
+pub fn set_plaintext_allowed(allowed: bool) {
+    ZEROMQ_PLAINTEXT_ALLOWED.store(allowed, Ordering::Relaxed);
+    if allowed {
+        crate::security_warnings::warn_plaintext(
+            "ZeroMQ",
+            "PLAINTEXT_ZEROMQ",
+            "CURVE encryption (call duck_net_allow_zeromq_plaintext(false) to re-enable the block)",
+        );
+    }
+}
 
 /// Connection timeout in seconds.
 const CONNECT_TIMEOUT_SECS: u64 = 10;
@@ -357,6 +390,13 @@ fn read_frames(stream: &mut TcpStream) -> Result<Vec<Vec<u8>>, String> {
 /// Send a ZeroMQ REQ request and receive the REP response using ZMTP/3.0
 /// with NULL security mechanism over TCP.
 ///
+/// **Plaintext is blocked by default.**  ZeroMQ CURVE encryption is not yet
+/// implemented.  To allow NULL-security connections you must first call:
+/// ```sql
+/// SELECT duck_net_allow_zeromq_plaintext(true);
+/// ```
+/// This makes the decision explicit and visible in the audit log.
+///
 /// The endpoint must be in the form `tcp://host:port`. Connects, performs
 /// the ZMTP/3.0 handshake, sends the message as a REQ request (with the
 /// required empty delimiter frame), reads the response, and returns it.
@@ -364,12 +404,20 @@ fn read_frames(stream: &mut TcpStream) -> Result<Vec<Vec<u8>>, String> {
 /// Security: validates host and message size. Enforces connection and I/O
 /// timeouts.
 pub fn request(endpoint: &str, message: &str) -> ZmqResult {
-    // Warn about ZeroMQ NULL security mechanism (CWE-319)
-    crate::security_warnings::warn_plaintext(
-        "ZeroMQ",
-        "PLAINTEXT_ZEROMQ",
-        "ZeroMQ CURVE encryption (not yet supported by duck_net)",
-    );
+    // Block plaintext unless the caller has made an explicit, informed opt-in.
+    // CURVE encryption is not yet available; silently sending cleartext violates
+    // the principle of secure-by-default (CWE-319).
+    if !plaintext_allowed() {
+        return ZmqResult {
+            success: false,
+            response: String::new(),
+            message: "ZeroMQ plaintext (NULL security) is blocked by default because \
+                      CURVE encryption is not yet implemented in duck_net. \
+                      To explicitly opt in to cleartext ZeroMQ on a trusted network, call: \
+                      SELECT duck_net_allow_zeromq_plaintext(true);"
+                .to_string(),
+        };
+    }
 
     if message.is_empty() {
         return ZmqResult {

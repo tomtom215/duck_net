@@ -100,13 +100,40 @@ fn client_credentials_inner(
         ));
     }
 
-    // Parse JSON response
-    let access_token = extract_json_string(&body_str, "access_token")
-        .ok_or_else(|| "access_token not found in token response".to_string())?;
+    // Parse JSON response using serde_json for correctness and safety.
+    // The manual parser previously used was vulnerable to key-name ambiguity,
+    // did not handle Unicode escapes (\uXXXX), and could misparse valid JSON
+    // responses that use non-standard formatting (CWE-116).
+    let json: serde_json::Value = serde_json::from_str(&body_str)
+        .map_err(|e| format!("Failed to parse token response as JSON: {e}"))?;
 
-    let token_type = extract_json_string(&body_str, "token_type").unwrap_or_default();
-    let expires_in = extract_json_number(&body_str, "expires_in").unwrap_or(-1);
-    let resp_scope = extract_json_string(&body_str, "scope").unwrap_or_default();
+    let obj = json
+        .as_object()
+        .ok_or_else(|| "Token response JSON is not an object".to_string())?;
+
+    let access_token = obj
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "access_token not found in token response".to_string())?
+        .to_string();
+
+    let token_type = obj
+        .get("token_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // expires_in may be a JSON number or a quoted string depending on the AS.
+    let expires_in = obj
+        .get("expires_in")
+        .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(-1);
+
+    let resp_scope = obj
+        .get("scope")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     Ok(OAuth2TokenResult {
         success: true,
@@ -118,8 +145,7 @@ fn client_credentials_inner(
     })
 }
 
-/// Minimal URL-encoding for OAuth2 form fields.
-/// Encodes the characters that are not unreserved per RFC 3986.
+/// URL-encoding for OAuth2 form fields (RFC 3986 unreserved characters).
 fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -140,74 +166,6 @@ fn url_encode(s: &str) -> String {
                         .to_ascii_uppercase(),
                 );
             }
-        }
-    }
-    out
-}
-
-/// Minimal JSON string field extractor (no external dep).
-fn extract_json_string(json: &str, key: &str) -> Option<String> {
-    let needle = format!("\"{}\"", key);
-    let pos = json.find(&needle)?;
-    let after_key = &json[pos + needle.len()..];
-    let colon_pos = after_key.find(':')? + 1;
-    let after_colon = after_key[colon_pos..].trim_start();
-    if !after_colon.starts_with('"') {
-        return None;
-    }
-    let inner = &after_colon[1..];
-    let end = find_string_end(inner)?;
-    Some(unescape_json_string(&inner[..end]))
-}
-
-/// Minimal JSON number field extractor.
-fn extract_json_number(json: &str, key: &str) -> Option<i64> {
-    let needle = format!("\"{}\"", key);
-    let pos = json.find(&needle)?;
-    let after_key = &json[pos + needle.len()..];
-    let colon_pos = after_key.find(':')? + 1;
-    let after_colon = after_key[colon_pos..].trim_start();
-    let end = after_colon
-        .find(|c: char| !c.is_ascii_digit() && c != '-')
-        .unwrap_or(after_colon.len());
-    after_colon[..end].parse().ok()
-}
-
-/// Find the end of a JSON string (index of the closing unescaped `"`).
-fn find_string_end(s: &str) -> Option<usize> {
-    let mut escaped = false;
-    for (i, c) in s.char_indices() {
-        if escaped {
-            escaped = false;
-        } else if c == '\\' {
-            escaped = true;
-        } else if c == '"' {
-            return Some(i);
-        }
-    }
-    None
-}
-
-fn unescape_json_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next() {
-                Some('"') => out.push('"'),
-                Some('\\') => out.push('\\'),
-                Some('/') => out.push('/'),
-                Some('n') => out.push('\n'),
-                Some('r') => out.push('\r'),
-                Some('t') => out.push('\t'),
-                Some(other) => {
-                    out.push('\\');
-                    out.push(other);
-                }
-                None => {}
-            }
-        } else {
-            out.push(c);
         }
     }
     out
