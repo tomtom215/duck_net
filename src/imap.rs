@@ -513,7 +513,14 @@ pub fn idle(
     let timeout_secs = timeout_secs.clamp(1, 300);
     let max_notifications = max_notifications.min(10_000);
 
-    match idle_inner(url, username, password, mailbox, timeout_secs, max_notifications) {
+    match idle_inner(
+        url,
+        username,
+        password,
+        mailbox,
+        timeout_secs,
+        max_notifications,
+    ) {
         Ok((notifications, msg)) => ImapIdleResult {
             success: true,
             notifications,
@@ -582,8 +589,7 @@ fn idle_inner(
                 }
                 // Parse untagged responses: "* N TYPE [extra]"
                 let trimmed = line.trim();
-                if trimmed.starts_with("* ") {
-                    let rest = &trimmed[2..];
+                if let Some(rest) = trimmed.strip_prefix("* ") {
                     let mut parts = rest.splitn(3, ' ');
                     let first = parts.next().unwrap_or("");
                     let second = parts.next().unwrap_or("");
@@ -607,16 +613,12 @@ fn idle_inner(
             }
             Err(e) => {
                 // Timeout = idle window expired, that's normal
-                if e.contains("timed out")
-                    || e.contains("WouldBlock")
-                    || e.contains("os error 11")
+                if e.contains("timed out") || e.contains("WouldBlock") || e.contains("os error 11")
                 {
                     break;
                 }
                 // Server closed connection
-                if e.contains("Connection reset")
-                    || e.contains("EOF")
-                    || e.contains("broken pipe")
+                if e.contains("Connection reset") || e.contains("EOF") || e.contains("broken pipe")
                 {
                     break;
                 }

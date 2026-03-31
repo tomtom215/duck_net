@@ -375,10 +375,18 @@ unsafe extern "C" fn imap_idle_bind(info: duckdb_bind_info) {
     let mailbox = bind.get_parameter_value(3).as_str().unwrap_or_default();
 
     let timeout_val = bind.get_named_parameter_value("timeout_secs");
-    let timeout_secs = if timeout_val.is_null() { 30 } else { timeout_val.as_i64() as u64 };
+    let timeout_secs = if timeout_val.is_null() {
+        30
+    } else {
+        timeout_val.as_i64() as u64
+    };
 
     let max_val = bind.get_named_parameter_value("max_notifications");
-    let max_notifications = if max_val.is_null() { 100 } else { max_val.as_i64() as usize };
+    let max_notifications = if max_val.is_null() {
+        100
+    } else {
+        max_val.as_i64() as usize
+    };
 
     bind.add_result_column("notification_type", TypeId::Varchar);
     bind.add_result_column("count", TypeId::BigInt);

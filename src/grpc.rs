@@ -12,7 +12,7 @@ pub(crate) fn build_grpc_tls_config(
     override_ca_pem: Option<&str>,
     override_cert_and_key: Option<(&str, &str)>,
 ) -> Result<rustls::ClientConfig, String> {
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+    use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -20,18 +20,23 @@ pub(crate) fn build_grpc_tls_config(
     // Apply global CA bundle (or per-call override)
     let ca_pem = override_ca_pem
         .map(|s| s.to_string())
-        .or_else(|| crate::http::ca_bundle_pem());
+        .or_else(crate::http::ca_bundle_pem);
     if let Some(ref pem) = ca_pem {
         for result in CertificateDer::pem_slice_iter(pem.as_bytes()) {
             let cert = result.map_err(|e| format!("CA cert parse error: {e}"))?;
-            root_store.add(cert).map_err(|e| format!("CA cert add error: {e}"))?;
+            root_store
+                .add(cert)
+                .map_err(|e| format!("CA cert add error: {e}"))?;
         }
     }
 
     // Determine client cert / key (per-call override wins over global)
     let (cert_pem_opt, key_pem_opt) = match override_cert_and_key {
         Some((c, k)) => (Some(c.to_string()), Some(k.to_string())),
-        None => (crate::http::client_cert_pem(), crate::http::client_key_pem()),
+        None => (
+            crate::http::client_cert_pem(),
+            crate::http::client_key_pem(),
+        ),
     };
 
     let config = match (cert_pem_opt, key_pem_opt) {
@@ -169,7 +174,9 @@ pub(crate) fn decode_grpc_message(data: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     // Use checked addition to defend against pathological inputs (CWE-190).
-    let frame_end = 5usize.checked_add(length).ok_or("gRPC frame length overflow")?;
+    let frame_end = 5usize
+        .checked_add(length)
+        .ok_or("gRPC frame length overflow")?;
     if data.len() < frame_end {
         return Err(format!(
             "gRPC response truncated: expected {} bytes, got {}",

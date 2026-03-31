@@ -237,8 +237,7 @@ fn subscribe_inner(
 ) -> Result<(Vec<WsSubscribeMessage>, String), String> {
     use tungstenite::{connect, Message};
 
-    let (mut socket, _) =
-        connect(url).map_err(|e| format!("WebSocket connect failed: {e}"))?;
+    let (mut socket, _) = connect(url).map_err(|e| format!("WebSocket connect failed: {e}"))?;
 
     // Set read timeout so we stop waiting once the window expires
     {

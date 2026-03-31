@@ -149,8 +149,12 @@ quack_rs::table_scan_callback!(grpc_stream_scan, |info, output| {
 
     if !init_data.fetched {
         init_data.fetched = true;
-        let result =
-            grpc::call_stream(&bind_data.url, &bind_data.service, &bind_data.method, &bind_data.payload);
+        let result = grpc::call_stream(
+            &bind_data.url,
+            &bind_data.service,
+            &bind_data.method,
+            &bind_data.payload,
+        );
         if !result.success && result.messages.is_empty() {
             let fi = FunctionInfo::new(info);
             fi.set_error(&result.grpc_message);

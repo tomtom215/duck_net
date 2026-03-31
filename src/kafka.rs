@@ -42,7 +42,9 @@ pub fn consume(
 
     let max_messages = max_messages.clamp(1, MAX_CONSUME_MESSAGES);
 
-    runtime::block_on(async { consume_async(brokers, topic, partition, start_offset, max_messages).await })
+    runtime::block_on(async {
+        consume_async(brokers, topic, partition, start_offset, max_messages).await
+    })
 }
 
 async fn consume_async(

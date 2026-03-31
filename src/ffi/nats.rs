@@ -112,7 +112,11 @@ unsafe extern "C" fn nats_subscribe_bind(info: duckdb_bind_info) {
     let subject = bind.get_parameter_value(1).as_str().unwrap_or_default();
 
     let max_val = bind.get_named_parameter_value("max_messages");
-    let max_messages = if max_val.is_null() { 1000 } else { max_val.as_i64() };
+    let max_messages = if max_val.is_null() {
+        1000
+    } else {
+        max_val.as_i64()
+    };
 
     let timeout_val = bind.get_named_parameter_value("timeout_ms");
     let timeout_ms = if timeout_val.is_null() {
@@ -148,14 +152,13 @@ unsafe extern "C" fn nats_subscribe_init(info: duckdb_init_info) {
 }
 
 quack_rs::table_scan_callback!(nats_subscribe_scan, |info, output| {
-    let bind_data =
-        match unsafe { FfiBindData::<NatsSubscribeBindData>::get_from_function(info) } {
-            Some(d) => d,
-            None => {
-                unsafe { DataChunk::from_raw(output).set_size(0) };
-                return;
-            }
-        };
+    let bind_data = match unsafe { FfiBindData::<NatsSubscribeBindData>::get_from_function(info) } {
+        Some(d) => d,
+        None => {
+            unsafe { DataChunk::from_raw(output).set_size(0) };
+            return;
+        }
+    };
     let init_data = match unsafe { FfiInitData::<NatsSubscribeInitData>::get_mut(info) } {
         Some(d) => d,
         None => {

@@ -159,7 +159,7 @@ quack_rs::table_scan_callback!(snmp_walk_scan, |info, output| {
 
 fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, String> {
     let hex = hex.trim();
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(format!(
             "Hex string must have even length, got {} chars",
             hex.len()
@@ -282,14 +282,13 @@ unsafe extern "C" fn snmp_v3_walk_init(info: duckdb_init_info) {
 }
 
 quack_rs::table_scan_callback!(snmp_v3_walk_scan, |info, output| {
-    let bind_data =
-        match unsafe { FfiBindData::<SnmpV3WalkBindData>::get_from_function(info) } {
-            Some(d) => d,
-            None => {
-                unsafe { DataChunk::from_raw(output).set_size(0) };
-                return;
-            }
-        };
+    let bind_data = match unsafe { FfiBindData::<SnmpV3WalkBindData>::get_from_function(info) } {
+        Some(d) => d,
+        None => {
+            unsafe { DataChunk::from_raw(output).set_size(0) };
+            return;
+        }
+    };
     let init_data = match unsafe { FfiInitData::<SnmpV3WalkInitData>::get_mut(info) } {
         Some(d) => d,
         None => {

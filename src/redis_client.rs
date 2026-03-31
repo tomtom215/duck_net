@@ -552,9 +552,7 @@ fn subscribe_inner(
             }
             Err(e) => {
                 // Read timeout means no more messages in the window
-                if e.contains("timed out")
-                    || e.contains("WouldBlock")
-                    || e.contains("os error 11")
+                if e.contains("timed out") || e.contains("WouldBlock") || e.contains("os error 11")
                 {
                     break;
                 }

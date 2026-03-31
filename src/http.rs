@@ -62,23 +62,25 @@ pub fn get_timeout_secs() -> u64 {
 }
 
 pub fn set_retry_statuses(statuses: Vec<u16>) {
-    *GLOBAL_RETRY_STATUSES.lock().unwrap_or_else(|p| p.into_inner()) = statuses;
+    *GLOBAL_RETRY_STATUSES
+        .lock()
+        .unwrap_or_else(|p| p.into_inner()) = statuses;
 }
 pub fn get_retry_statuses() -> Vec<u16> {
-    GLOBAL_RETRY_STATUSES.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    GLOBAL_RETRY_STATUSES
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
 }
 
 /// Global CA PEM content (set via duck_net_set_ca_bundle).
-static CA_BUNDLE_PEM: LazyLock<RwLock<Option<String>>> =
-    LazyLock::new(|| RwLock::new(None));
+static CA_BUNDLE_PEM: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
 
 /// Global client certificate PEM for mTLS (set via duck_net_set_client_cert).
-static CLIENT_CERT_PEM: LazyLock<RwLock<Option<String>>> =
-    LazyLock::new(|| RwLock::new(None));
+static CLIENT_CERT_PEM: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
 
 /// Global client private key PEM for mTLS.
-static CLIENT_KEY_PEM: LazyLock<RwLock<Option<String>>> =
-    LazyLock::new(|| RwLock::new(None));
+static CLIENT_KEY_PEM: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
 
 /// Cached custom HTTP agent (rebuilt when CA/cert config changes).
 static CUSTOM_HTTP_AGENT: LazyLock<RwLock<Option<Arc<Agent>>>> =
@@ -106,8 +108,7 @@ fn build_default_agent() -> Agent {
 
 /// Default agent: platform CA verifier, SSRF-safe resolver.
 /// Stored as `Arc<Agent>` so `get_agent()` can clone it cheaply.
-pub static AGENT: LazyLock<Arc<Agent>> =
-    LazyLock::new(|| Arc::new(build_default_agent()));
+pub static AGENT: LazyLock<Arc<Agent>> = LazyLock::new(|| Arc::new(build_default_agent()));
 
 /// Return the currently active HTTP agent.
 ///
@@ -130,7 +131,7 @@ pub fn get_agent() -> Arc<Agent> {
 /// going forward (including gRPC, which reads CA_BUNDLE_PEM directly).
 pub fn set_ca_bundle(ca_pem: &str) -> Result<String, String> {
     // Validate PEM by attempting to parse
-    use rustls::pki_types::{CertificateDer, pem::PemObject};
+    use rustls::pki_types::{pem::PemObject, CertificateDer};
     let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(ca_pem.as_bytes())
         .collect::<Result<_, _>>()
         .map_err(|e| format!("Failed to parse CA PEM: {e}"))?;
@@ -142,16 +143,21 @@ pub fn set_ca_bundle(ca_pem: &str) -> Result<String, String> {
     *CA_BUNDLE_PEM.write().unwrap_or_else(|p| p.into_inner()) = Some(ca_pem.to_string());
 
     // Rebuild ureq agent
-    let client_cert = CLIENT_CERT_PEM.read().unwrap_or_else(|p| p.into_inner()).clone();
-    let client_key = CLIENT_KEY_PEM.read().unwrap_or_else(|p| p.into_inner()).clone();
-    let new_agent = build_tls_agent(
-        Some(ca_pem),
-        client_cert.as_deref(),
-        client_key.as_deref(),
-    )?;
+    let client_cert = CLIENT_CERT_PEM
+        .read()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let client_key = CLIENT_KEY_PEM
+        .read()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let new_agent = build_tls_agent(Some(ca_pem), client_cert.as_deref(), client_key.as_deref())?;
     *CUSTOM_HTTP_AGENT.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(new_agent));
 
-    Ok(format!("CA bundle applied ({} cert(s)). All HTTPS requests will use the custom trust store.", certs.len()))
+    Ok(format!(
+        "CA bundle applied ({} cert(s)). All HTTPS requests will use the custom trust store.",
+        certs.len()
+    ))
 }
 
 /// Configure a client certificate + private key for mTLS on all HTTPS requests.
@@ -160,7 +166,7 @@ pub fn set_ca_bundle(ca_pem: &str) -> Result<String, String> {
 /// directly (not a file path).
 pub fn set_client_cert(cert_pem: &str, key_pem: &str) -> Result<String, String> {
     // Validate cert
-    use rustls::pki_types::{CertificateDer, pem::PemObject};
+    use rustls::pki_types::{pem::PemObject, CertificateDer};
     let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
         .collect::<Result<_, _>>()
         .map_err(|e| format!("Failed to parse client cert PEM: {e}"))?;
@@ -176,7 +182,10 @@ pub fn set_client_cert(cert_pem: &str, key_pem: &str) -> Result<String, String> 
     *CLIENT_CERT_PEM.write().unwrap_or_else(|p| p.into_inner()) = Some(cert_pem.to_string());
     *CLIENT_KEY_PEM.write().unwrap_or_else(|p| p.into_inner()) = Some(key_pem.to_string());
 
-    let ca_pem = CA_BUNDLE_PEM.read().unwrap_or_else(|p| p.into_inner()).clone();
+    let ca_pem = CA_BUNDLE_PEM
+        .read()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
     let new_agent = build_tls_agent(ca_pem.as_deref(), Some(cert_pem), Some(key_pem))?;
     *CUSTOM_HTTP_AGENT.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(new_agent));
 
@@ -189,17 +198,26 @@ pub fn set_client_cert(cert_pem: &str, key_pem: &str) -> Result<String, String> 
 /// Return the globally configured CA bundle PEM (for protocols that build their
 /// own TLS stack, e.g. gRPC via tokio-rustls).
 pub fn ca_bundle_pem() -> Option<String> {
-    CA_BUNDLE_PEM.read().unwrap_or_else(|p| p.into_inner()).clone()
+    CA_BUNDLE_PEM
+        .read()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
 }
 
 /// Return the globally configured client cert PEM.
 pub fn client_cert_pem() -> Option<String> {
-    CLIENT_CERT_PEM.read().unwrap_or_else(|p| p.into_inner()).clone()
+    CLIENT_CERT_PEM
+        .read()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
 }
 
 /// Return the globally configured client private key PEM.
 pub fn client_key_pem() -> Option<String> {
-    CLIENT_KEY_PEM.read().unwrap_or_else(|p| p.into_inner()).clone()
+    CLIENT_KEY_PEM
+        .read()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
 }
 
 /// Build a ureq `Agent` with optional custom CA roots and/or mTLS client cert.
@@ -210,7 +228,7 @@ fn build_tls_agent(
     client_cert_pem: Option<&str>,
     client_key_pem: Option<&str>,
 ) -> Result<Agent, String> {
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+    use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
     use std::sync::Arc as StdArc;
 
     // Build root cert store: start from webpki-roots bundle
@@ -220,7 +238,9 @@ fn build_tls_agent(
     if let Some(pem) = ca_pem {
         for result in CertificateDer::pem_slice_iter(pem.as_bytes()) {
             let cert = result.map_err(|e| format!("CA cert parse error: {e}"))?;
-            root_store.add(cert).map_err(|e| format!("CA cert add error: {e}"))?;
+            root_store
+                .add(cert)
+                .map_err(|e| format!("CA cert add error: {e}"))?;
         }
     }
 
@@ -244,9 +264,7 @@ fn build_tls_agent(
     };
 
     // Build ureq Agent backed by our custom rustls ClientConfig.
-    let tls = TlsConfig::builder()
-        .root_certs(RootCerts::WebPki)
-        .build();
+    let tls = TlsConfig::builder().root_certs(RootCerts::WebPki).build();
     // Attach the rustls config via the underlying connector.
     // The TlsConfig above is overridden through AgentConfig.
     let _ = StdArc::new(tls_config); // stored for future direct-rustls connector integration

@@ -2,7 +2,7 @@
 name = "duck_net"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 description = "DuckDB extension for comprehensive network client operations"
 

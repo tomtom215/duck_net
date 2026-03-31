@@ -89,13 +89,25 @@ unsafe extern "C" fn kafka_consume_bind(info: duckdb_bind_info) {
     let topic = bind.get_parameter_value(1).as_str().unwrap_or_default();
 
     let partition_val = bind.get_named_parameter_value("partition");
-    let partition = if partition_val.is_null() { 0 } else { partition_val.as_i64() as i32 };
+    let partition = if partition_val.is_null() {
+        0
+    } else {
+        partition_val.as_i64() as i32
+    };
 
     let offset_val = bind.get_named_parameter_value("start_offset");
-    let start_offset = if offset_val.is_null() { -2 } else { offset_val.as_i64() };
+    let start_offset = if offset_val.is_null() {
+        -2
+    } else {
+        offset_val.as_i64()
+    };
 
     let max_val = bind.get_named_parameter_value("max_messages");
-    let max_messages = if max_val.is_null() { 1000 } else { max_val.as_i64() };
+    let max_messages = if max_val.is_null() {
+        1000
+    } else {
+        max_val.as_i64()
+    };
 
     bind.add_result_column("key", TypeId::Varchar);
     bind.add_result_column("value", TypeId::Varchar);

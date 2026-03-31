@@ -24,7 +24,9 @@ impl SnmpV3AuthProtocol {
             "MD5" => Ok(Self::Md5),
             "SHA" | "SHA1" | "SHA-1" => Ok(Self::Sha1),
             "NONE" | "" => Ok(Self::None),
-            _ => Err(format!("Unknown auth protocol: {s}. Use MD5, SHA1, or NONE")),
+            _ => Err(format!(
+                "Unknown auth protocol: {s}. Use MD5, SHA1, or NONE"
+            )),
         }
     }
 
@@ -72,7 +74,7 @@ fn password_to_key(password: &[u8], engine_id: &[u8], protocol: SnmpV3AuthProtoc
     };
 
     // Step 3: Localise the key using the engine ID (RFC 3414 §2.6)
-    let local_key = match protocol {
+    match protocol {
         SnmpV3AuthProtocol::Md5 => {
             use md5_digest::Digest;
             let mut h = Md5::new();
@@ -90,28 +92,21 @@ fn password_to_key(password: &[u8], engine_id: &[u8], protocol: SnmpV3AuthProtoc
             h.finalize().to_vec()
         }
         SnmpV3AuthProtocol::None => vec![],
-    };
-
-    local_key
+    }
 }
 
 /// Compute HMAC-MD5 or HMAC-SHA1 over `data` using `auth_key`, then truncate
 /// to the first 12 bytes (the SNMP authentication parameter, RFC 3414 §7.3.1).
-fn compute_auth_param(
-    auth_key: &[u8],
-    data: &[u8],
-    protocol: SnmpV3AuthProtocol,
-) -> [u8; 12] {
+fn compute_auth_param(auth_key: &[u8], data: &[u8], protocol: SnmpV3AuthProtocol) -> [u8; 12] {
     let full_mac = match protocol {
         SnmpV3AuthProtocol::Md5 => {
-            let mut mac = <Hmac<Md5>>::new_from_slice(auth_key)
-                .expect("HMAC accepts any key size");
+            let mut mac = <Hmac<Md5>>::new_from_slice(auth_key).expect("HMAC accepts any key size");
             mac.update(data);
             mac.finalize().into_bytes().to_vec()
         }
         SnmpV3AuthProtocol::Sha1 => {
-            let mut mac = <Hmac<Sha1>>::new_from_slice(auth_key)
-                .expect("HMAC accepts any key size");
+            let mut mac =
+                <Hmac<Sha1>>::new_from_slice(auth_key).expect("HMAC accepts any key size");
             mac.update(data);
             mac.finalize().into_bytes().to_vec()
         }
@@ -192,7 +187,11 @@ fn build_v3_request(
     let msg_id = encode_integer(request_id & 0x7FFFFFFF); // msgID fits in i32
     let msg_max_size = encode_integer(65507);
     // msgFlags: bit 0 = auth, bit 1 = priv, bit 2 = reportable
-    let auth_flag: u8 = if auth_protocol == SnmpV3AuthProtocol::None { 0x04 } else { 0x05 };
+    let auth_flag: u8 = if auth_protocol == SnmpV3AuthProtocol::None {
+        0x04
+    } else {
+        0x05
+    };
     let msg_flags = encode_octet_string(&[auth_flag]);
     let msg_security_model = encode_integer(3); // USM = 3
 
@@ -247,15 +246,8 @@ pub fn v3_get(
         vec![]
     };
 
-    let (mut packet, auth_offset) = build_v3_request(
-        oid,
-        username,
-        engine_id,
-        &auth_key,
-        auth_protocol,
-        0xA0,
-        1,
-    )?;
+    let (mut packet, auth_offset) =
+        build_v3_request(oid, username, engine_id, &auth_key, auth_protocol, 0xA0, 1)?;
 
     if let (Some(offset), false) = (auth_offset, auth_key.is_empty()) {
         let mac = compute_auth_param(&auth_key, &packet, auth_protocol);
@@ -264,7 +256,10 @@ pub fn v3_get(
 
     let response = send_udp(host, SNMP_PORT, &packet)?;
     parse_response(&response).and_then(|results| {
-        results.into_iter().next().ok_or_else(|| "No values in SNMPv3 response".to_string())
+        results
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No values in SNMPv3 response".to_string())
     })
 }
 

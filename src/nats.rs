@@ -646,9 +646,8 @@ fn subscribe_inner(
             }
         };
 
-        if line.starts_with("MSG ") {
+        if let Some(header) = line.strip_prefix("MSG ") {
             // MSG <subject> <sid> [<reply-to>] <byte_count>
-            let header = &line[4..];
             let parts: Vec<&str> = header.split_whitespace().collect();
             if parts.len() < 3 {
                 continue;

@@ -323,10 +323,18 @@ unsafe extern "C" fn redis_subscribe_bind(info: duckdb_bind_info) {
     let channel = bind.get_parameter_value(1).as_str().unwrap_or_default();
 
     let max_val = bind.get_named_parameter_value("max_messages");
-    let max_messages = if max_val.is_null() { 1000 } else { max_val.as_i64() };
+    let max_messages = if max_val.is_null() {
+        1000
+    } else {
+        max_val.as_i64()
+    };
 
     let timeout_val = bind.get_named_parameter_value("timeout_secs");
-    let timeout_secs = if timeout_val.is_null() { 10 } else { timeout_val.as_i64() };
+    let timeout_secs = if timeout_val.is_null() {
+        10
+    } else {
+        timeout_val.as_i64()
+    };
 
     bind.add_result_column("channel", TypeId::Varchar);
     bind.add_result_column("payload", TypeId::Varchar);
@@ -354,22 +362,21 @@ unsafe extern "C" fn redis_subscribe_init(info: duckdb_init_info) {
 }
 
 quack_rs::table_scan_callback!(redis_subscribe_scan, |info, output| {
-    let bind_data =
-        match unsafe { FfiBindData::<RedisSubscribeBindData>::get_from_function(info) } {
-            Some(d) => d,
-            None => {
-                unsafe { DataChunk::from_raw(output).set_size(0) };
-                return;
-            }
-        };
-    let init_data =
-        match unsafe { FfiInitData::<RedisSubscribeInitData>::get_mut(info) } {
-            Some(d) => d,
-            None => {
-                unsafe { DataChunk::from_raw(output).set_size(0) };
-                return;
-            }
-        };
+    let bind_data = match unsafe { FfiBindData::<RedisSubscribeBindData>::get_from_function(info) }
+    {
+        Some(d) => d,
+        None => {
+            unsafe { DataChunk::from_raw(output).set_size(0) };
+            return;
+        }
+    };
+    let init_data = match unsafe { FfiInitData::<RedisSubscribeInitData>::get_mut(info) } {
+        Some(d) => d,
+        None => {
+            unsafe { DataChunk::from_raw(output).set_size(0) };
+            return;
+        }
+    };
 
     if !init_data.fetched {
         init_data.fetched = true;

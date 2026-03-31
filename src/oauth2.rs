@@ -63,7 +63,8 @@ fn client_credentials_inner(
     crate::security::validate_no_ssrf(token_url)?;
 
     // Build form body
-    let mut body = format!("grant_type=client_credentials&client_id={}&client_secret={}",
+    let mut body = format!(
+        "grant_type=client_credentials&client_id={}&client_secret={}",
         url_encode(client_id),
         url_encode(client_secret),
     );
@@ -94,7 +95,9 @@ fn client_credentials_inner(
         String::from_utf8(buf).map_err(|_| "Token response is not valid UTF-8".to_string())?;
 
     if status != 200 {
-        return Err(format!("OAuth2 token endpoint returned HTTP {status}: {body_str}"));
+        return Err(format!(
+            "OAuth2 token endpoint returned HTTP {status}: {body_str}"
+        ));
     }
 
     // Parse JSON response
@@ -126,8 +129,16 @@ fn url_encode(s: &str) -> String {
             }
             _ => {
                 out.push('%');
-                out.push(char::from_digit((b >> 4) as u32, 16).unwrap_or('0').to_ascii_uppercase());
-                out.push(char::from_digit((b & 0xF) as u32, 16).unwrap_or('0').to_ascii_uppercase());
+                out.push(
+                    char::from_digit((b >> 4) as u32, 16)
+                        .unwrap_or('0')
+                        .to_ascii_uppercase(),
+                );
+                out.push(
+                    char::from_digit((b & 0xF) as u32, 16)
+                        .unwrap_or('0')
+                        .to_ascii_uppercase(),
+                );
             }
         }
     }

@@ -4,8 +4,8 @@
 use libduckdb_sys::*;
 use quack_rs::prelude::*;
 
-use crate::odata;
 use crate::metadata;
+use crate::odata;
 
 use super::scalars::{map_varchar_varchar, read_headers_map, response_type, write_response};
 
@@ -221,18 +221,15 @@ unsafe extern "C" fn odata_metadata_bind(info: duckdb_bind_info) {
         auth_val.as_str().ok()
     };
 
-    bind.add_result_column("entity_set",     TypeId::Varchar);
-    bind.add_result_column("entity_type",    TypeId::Varchar);
-    bind.add_result_column("property_name",  TypeId::Varchar);
-    bind.add_result_column("property_type",  TypeId::Varchar);
-    bind.add_result_column("nullable",       TypeId::Boolean);
-    bind.add_result_column("is_key",         TypeId::Boolean);
-    bind.add_result_column("is_navigation",  TypeId::Boolean);
+    bind.add_result_column("entity_set", TypeId::Varchar);
+    bind.add_result_column("entity_type", TypeId::Varchar);
+    bind.add_result_column("property_name", TypeId::Varchar);
+    bind.add_result_column("property_type", TypeId::Varchar);
+    bind.add_result_column("nullable", TypeId::Boolean);
+    bind.add_result_column("is_key", TypeId::Boolean);
+    bind.add_result_column("is_navigation", TypeId::Boolean);
 
-    FfiBindData::<ODataMetadataBindData>::set(
-        info,
-        ODataMetadataBindData { url, authorization },
-    );
+    FfiBindData::<ODataMetadataBindData>::set(info, ODataMetadataBindData { url, authorization });
 }
 
 unsafe extern "C" fn odata_metadata_init(info: duckdb_init_info) {
@@ -241,7 +238,10 @@ unsafe extern "C" fn odata_metadata_init(info: duckdb_init_info) {
         None => {
             FfiInitData::<ODataMetadataInitData>::set(
                 info,
-                ODataMetadataInitData { rows: vec![], idx: 0 },
+                ODataMetadataInitData {
+                    rows: vec![],
+                    idx: 0,
+                },
             );
             return;
         }
@@ -261,10 +261,7 @@ unsafe extern "C" fn odata_metadata_init(info: duckdb_init_info) {
         }
     };
 
-    FfiInitData::<ODataMetadataInitData>::set(
-        info,
-        ODataMetadataInitData { rows, idx: 0 },
-    );
+    FfiInitData::<ODataMetadataInitData>::set(info, ODataMetadataInitData { rows, idx: 0 });
 }
 
 quack_rs::table_scan_callback!(odata_metadata_scan, |info, output| {
@@ -277,13 +274,13 @@ quack_rs::table_scan_callback!(odata_metadata_scan, |info, output| {
     };
 
     let out_chunk = unsafe { DataChunk::from_raw(output) };
-    let mut set_w  = unsafe { out_chunk.writer(0) };
+    let mut set_w = unsafe { out_chunk.writer(0) };
     let mut type_w = unsafe { out_chunk.writer(1) };
     let mut prop_w = unsafe { out_chunk.writer(2) };
     let mut ptype_w = unsafe { out_chunk.writer(3) };
     let mut null_w = unsafe { out_chunk.writer(4) };
-    let mut key_w  = unsafe { out_chunk.writer(5) };
-    let mut nav_w  = unsafe { out_chunk.writer(6) };
+    let mut key_w = unsafe { out_chunk.writer(5) };
+    let mut nav_w = unsafe { out_chunk.writer(6) };
 
     let max_chunk: usize = 2048;
     let mut count: usize = 0;

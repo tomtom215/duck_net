@@ -119,7 +119,11 @@ unsafe extern "C" fn ws_subscribe_bind(info: duckdb_bind_info) {
     let subscribe_msg = bind.get_parameter_value(1).as_str().unwrap_or_default();
 
     let max_val = bind.get_named_parameter_value("max_messages");
-    let max_messages = if max_val.is_null() { 1000 } else { max_val.as_i64() };
+    let max_messages = if max_val.is_null() {
+        1000
+    } else {
+        max_val.as_i64()
+    };
 
     let timeout_val = bind.get_named_parameter_value("timeout_secs");
     let timeout_secs = if timeout_val.is_null() {

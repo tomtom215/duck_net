@@ -233,9 +233,8 @@ fn check_known_hosts(host: &str, key_type: &str, key_data: &str) -> KnownHostRes
 fn append_known_host(host: &str, key_type: &str, key_data: &str) -> std::io::Result<()> {
     use std::io::Write;
 
-    let path = dirs_known_hosts().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "HOME not set")
-    })?;
+    let path = dirs_known_hosts()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "HOME not set"))?;
 
     // Ensure ~/.ssh/ directory exists with 0700 permissions
     if let Some(parent) = std::path::Path::new(&path).parent() {
