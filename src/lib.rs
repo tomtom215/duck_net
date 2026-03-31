@@ -11,6 +11,7 @@ mod dns;
 mod doh;
 pub(crate) mod duckdb_secrets_bridge;
 mod elasticsearch;
+mod features;
 mod ffi;
 mod ftp;
 mod ftp_cache;
