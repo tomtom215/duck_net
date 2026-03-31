@@ -9,6 +9,8 @@
 >
 > **If you use this extension in a production environment and end up on the front page of a security blog, that's on you — and honestly, kind of on you for reading this warning and continuing anyway.**
 >
+> **Why does this exist?** This project grew out of a specific frustration: while evaluating other network-capable DuckDB extensions, analytics and telemetry were discovered built into them — quietly phoning home as a side effect of loading a SQL extension. That felt wrong. So this was built from scratch, with full visibility into every network call it makes. What started as a minimal HTTP client gradually grew to support more and more protocols, because once you have the plumbing in place, the next one is always "just one more." Here we are.
+>
 > This project exists for research, internal tooling, and the joy of absurdly powerful SQL. Use it in isolated environments, behind strict network controls, and never against data you cannot afford to lose or expose.
 >
 > *["Here be dragons"](https://en.wikipedia.org/wiki/Here_be_dragons) — the old cartographer's warning for uncharted, dangerous territory. Consider this README the edge of the known map.*
