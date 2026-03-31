@@ -1,3 +1,20 @@
+> [!CAUTION]
+> ## Here Be Dragons
+>
+> **This extension is highly experimental and has not been reviewed or validated by security researchers.**
+>
+> Neither the author nor any AI assistant is a credentialed security professional. The hardening features in this codebase (SSRF protection, credential zeroization, audit logging, etc.) represent good-faith engineering effort — they are **not** a substitute for a professional security audit.
+>
+> Beyond that, there are deep architectural reasons why a database engine should never talk directly to the network: exfiltration of sensitive data, SSRF attacks pivoting through your database host, credential leakage into query logs, denial-of-service via unbounded connections, and more.
+>
+> **If you use this extension in a production environment and end up on the front page of a security blog, that's on you — and honestly, kind of on you for reading this warning and continuing anyway.**
+>
+> This project exists for research, internal tooling, and the joy of absurdly powerful SQL. Use it in isolated environments, behind strict network controls, and never against data you cannot afford to lose or expose.
+>
+> *["Here be dragons"](https://en.wikipedia.org/wiki/Here_be_dragons) — the old cartographer's warning for uncharted, dangerous territory. Consider this README the edge of the known map.*
+
+---
+
 # duck_net
 
 **49+ network protocols as DuckDB SQL functions**, written in pure Rust.
