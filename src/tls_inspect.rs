@@ -31,6 +31,15 @@ pub struct TlsCertInfo {
 
 /// Inspect the TLS certificate of a host.
 pub fn inspect(host: &str, port: u16) -> Result<TlsCertInfo, String> {
+    let outcome = inspect_inner(host, port);
+    match &outcome {
+        Ok(_) => crate::audit_log::record("tls_inspect", "inspect", host, true, port as i32, ""),
+        Err(e) => crate::audit_log::record("tls_inspect", "inspect", host, false, port as i32, e),
+    }
+    outcome
+}
+
+fn inspect_inner(host: &str, port: u16) -> Result<TlsCertInfo, String> {
     // Input validation
     crate::security::validate_host(host)?;
     // SSRF protection: block connections to private/reserved IPs (CWE-918)

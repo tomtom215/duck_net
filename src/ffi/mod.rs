@@ -59,6 +59,52 @@ mod zeromq;
 
 use quack_rs::prelude::*;
 
+/// Inspect `~/.duckdb/stored_secrets/` at extension load time and emit a
+/// security warning if it is present, non-empty, or world-readable. The
+/// directory is created by DuckDB's secrets manager for persistent secrets
+/// (CREATE PERSISTENT SECRET …) which are stored in unencrypted binary
+/// form (CWE-312).
+fn warn_if_persistent_secrets_present() {
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let path = std::path::Path::new(&home).join(".duckdb/stored_secrets");
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return;
+    };
+    if !meta.is_dir() {
+        return;
+    }
+
+    // Count entries (cheap; directory usually has 0..few files).
+    let entry_count = std::fs::read_dir(&path).map(|d| d.count()).unwrap_or(0);
+
+    #[cfg(unix)]
+    let mode = {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o777
+    };
+    #[cfg(not(unix))]
+    let mode: u32 = 0o700;
+
+    if entry_count > 0 || (mode & 0o077) != 0 {
+        let extra = if (mode & 0o077) != 0 {
+            format!(" (permissions {mode:04o} allow access beyond the owner)")
+        } else {
+            String::new()
+        };
+        eprintln!(
+            "[duck_net] WARNING: DuckDB persistent-secrets directory {} contains {} entry(ies){}. \
+             Persistent secrets are stored in UNENCRYPTED binary form. Prefer duck_net_add_secret() \
+             for in-memory, zeroized credentials. CWE-312.",
+            path.display(),
+            entry_count,
+            extra
+        );
+        crate::security_warnings::warn_persistent_secret_unencrypted();
+    }
+}
+
 /// Convenience macro: only call `$module::register_all(con)?` when the named
 /// opt-in protocol is present in the user's config file.
 macro_rules! register_if_enabled {
@@ -78,6 +124,18 @@ pub fn register_all(con: &Connection) -> Result<(), ExtensionError> {
     //    a DuckDB load error rather than a panic later.
     crate::runtime::init().map_err(ExtensionError::new)?;
     crate::dns::init().map_err(ExtensionError::new)?;
+
+    // 3. Initialise audit log and security warning subsystems.
+    crate::audit_log::init();
+    crate::security_warnings::init();
+
+    // 4. Check whether DuckDB's persistent secrets directory exists and warn
+    //    if it is present, non-empty, or has lax permissions. Persistent
+    //    secrets created via `CREATE PERSISTENT SECRET` are stored in
+    //    unencrypted binary form on disk (CWE-312). This lets duck_net alert
+    //    operators before their first query, independent of whether they call
+    //    duck_net_secret().
+    warn_if_persistent_secrets_present();
 
     unsafe {
         // ── Core web (always on) ──────────────────────────────────────────

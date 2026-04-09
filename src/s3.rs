@@ -242,7 +242,7 @@ pub fn s3_get(
     let resp = http::execute(Method::Get, &url, &headers, None);
 
     let status = resp.status as i32;
-    if resp.status == 200 {
+    let result = if resp.status == 200 {
         S3Result {
             success: true,
             body: resp.body,
@@ -256,7 +256,16 @@ pub fn s3_get(
             status,
             message: format!("S3 GET failed with status {}: {}", resp.status, resp.reason),
         }
-    }
+    };
+    crate::audit_log::record(
+        "s3",
+        "get",
+        &host,
+        result.success,
+        result.status,
+        &result.message,
+    );
+    result
 }
 
 /// Upload an object to S3 (or any S3-compatible store).
@@ -329,7 +338,7 @@ pub fn s3_put(
     let resp = http::execute(Method::Put, &url, &headers, Some(body));
 
     let status = resp.status as i32;
-    if resp.status == 200 || resp.status == 201 || resp.status == 204 {
+    let result = if resp.status == 200 || resp.status == 201 || resp.status == 204 {
         S3Result {
             success: true,
             body: resp.body,
@@ -343,7 +352,16 @@ pub fn s3_put(
             status,
             message: format!("S3 PUT failed with status {}: {}", resp.status, resp.reason),
         }
-    }
+    };
+    crate::audit_log::record(
+        "s3",
+        "put",
+        &host,
+        result.success,
+        result.status,
+        &result.message,
+    );
+    result
 }
 
 /// List objects in an S3 bucket with an optional prefix (ListObjectsV2).
@@ -405,7 +423,7 @@ pub fn s3_list(
     let headers = build_s3_headers(&signed, &host);
     let resp = http::execute(Method::Get, &url, &headers, None);
 
-    if resp.status == 200 {
+    let result = if resp.status == 200 {
         let (keys, truncated) = parse_list_keys(&resp.body);
         let message = if truncated {
             "OK (results truncated; use continuation tokens for full listing)".to_string()
@@ -422,5 +440,14 @@ pub fn s3_list(
             "S3 LIST failed with status {}: {}",
             resp.status, resp.reason
         ))
-    }
+    };
+    crate::audit_log::record(
+        "s3",
+        "list",
+        &host,
+        result.success,
+        result.keys.len() as i32,
+        &result.message,
+    );
+    result
 }

@@ -20,7 +20,7 @@ pub struct SipResult {
 
 /// Send a SIP OPTIONS ping to check if a SIP server is alive.
 pub fn options_ping(host: &str, port: u16) -> SipResult {
-    match options_ping_inner(host, port) {
+    let r = match options_ping_inner(host, port) {
         Ok(result) => result,
         Err(e) => SipResult {
             alive: false,
@@ -30,21 +30,33 @@ pub fn options_ping(host: &str, port: u16) -> SipResult {
             allow_methods: String::new(),
             raw_response: String::new(),
         },
-    }
+    };
+    crate::audit_log::record(
+        "sip",
+        "options_ping",
+        host,
+        r.alive,
+        r.status_code,
+        &r.status_text,
+    );
+    r
 }
 
 fn options_ping_inner(host: &str, port: u16) -> Result<SipResult, String> {
     // Validate host
     crate::security::validate_host(host)?;
 
-    // SSRF protection: block connections to private/reserved IPs (CWE-918)
-    crate::security::validate_no_ssrf_host(host)?;
-
     let port = if port == 0 { SIP_DEFAULT_PORT } else { port };
-    let addr = format!("{host}:{port}");
+    // Atomic resolve-and-validate (closes UDP DNS-rebinding TOCTOU, CWE-918).
+    let addr = crate::security::resolve_and_validate_udp(host, port)?;
 
+    let bind_addr = if addr.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
     let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+        UdpSocket::bind(bind_addr).map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
@@ -71,7 +83,7 @@ fn options_ping_inner(host: &str, port: u16) -> Result<SipResult, String> {
     );
 
     socket
-        .send_to(request.as_bytes(), &addr)
+        .send_to(request.as_bytes(), addr)
         .map_err(|e| format!("Failed to send SIP OPTIONS: {e}"))?;
 
     let mut buf = vec![0u8; MAX_RESPONSE_BYTES];

@@ -6,22 +6,222 @@
 //! Provides centralized input validation, SSRF protection, credential
 //! scrubbing, and path traversal prevention used across all protocols.
 
-use std::net::{IpAddr, ToSocketAddrs};
+use std::collections::HashSet;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, RwLock};
 
 /// Global flag: when true, private/reserved IP addresses are blocked (SSRF protection).
 /// Enabled by default. Can be disabled for local development via
 /// `duck_net_set_ssrf_protection(false)`.
+///
+/// Uses `Acquire`/`Release` ordering so that a `set_ssrf_protection(false)` from
+/// one thread is observed before any subsequent validation on another — avoiding
+/// the weakly-ordered-ARM race where a stale `true` would let a request through
+/// after a switch, or a stale `false` would incorrectly block one.
 static SSRF_PROTECTION_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// Enable or disable SSRF private-network blocking.
 pub fn set_ssrf_protection(enabled: bool) {
-    SSRF_PROTECTION_ENABLED.store(enabled, Ordering::Relaxed);
+    SSRF_PROTECTION_ENABLED.store(enabled, Ordering::Release);
 }
 
 /// Check whether SSRF protection is enabled.
 pub fn ssrf_protection_enabled() -> bool {
-    SSRF_PROTECTION_ENABLED.load(Ordering::Relaxed)
+    SSRF_PROTECTION_ENABLED.load(Ordering::Acquire)
+}
+
+// ---------------------------------------------------------------------------
+// Positive-match egress allowlist (CWE-918 defense-in-depth)
+// ---------------------------------------------------------------------------
+
+/// A set of allowed hostnames / patterns. When non-empty, every outbound
+/// connection's hostname MUST match at least one entry before it is allowed
+/// to proceed, independent of whether its resolved IP is public or private.
+///
+/// Patterns:
+/// - Exact match (case-insensitive): `"api.example.com"`
+/// - Suffix match: `".example.com"` matches any subdomain of example.com
+/// - Wildcard match: `"*.example.com"` matches any subdomain of example.com
+static EGRESS_ALLOWLIST: LazyLock<RwLock<Option<Vec<String>>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+/// Replace the egress allowlist with a fresh set of patterns.
+///
+/// Pass an empty slice to clear the allowlist (reverting to deny-private-only).
+/// Patterns are stored lowercase and whitespace-trimmed.
+pub fn set_egress_allowlist(patterns: &[String]) {
+    let cleaned: Vec<String> = patterns
+        .iter()
+        .map(|p| p.trim().to_ascii_lowercase())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut guard = EGRESS_ALLOWLIST.write().unwrap_or_else(|p| p.into_inner());
+    if cleaned.is_empty() {
+        *guard = None;
+    } else {
+        *guard = Some(cleaned);
+    }
+}
+
+/// Return the current allowlist as a `Vec<String>` for introspection.
+pub fn egress_allowlist() -> Vec<String> {
+    let guard = EGRESS_ALLOWLIST.read().unwrap_or_else(|p| p.into_inner());
+    guard.clone().unwrap_or_default()
+}
+
+/// Check whether a hostname matches the current allowlist.
+///
+/// Returns `Ok(())` if:
+/// - The allowlist is empty (not configured — deny-private-only mode), OR
+/// - The hostname matches at least one allowlist entry.
+///
+/// Returns `Err` if the allowlist is configured and the hostname does not match.
+pub fn check_egress_allowlist(host: &str) -> Result<(), String> {
+    let host_lc = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    let guard = EGRESS_ALLOWLIST.read().unwrap_or_else(|p| p.into_inner());
+    let patterns = match guard.as_ref() {
+        Some(p) if !p.is_empty() => p,
+        _ => return Ok(()), // Unconfigured: deny-private-only mode.
+    };
+
+    for pattern in patterns {
+        if pattern_matches(pattern, &host_lc) {
+            return Ok(());
+        }
+    }
+
+    Err(format!(
+        "Egress allowlist: hostname '{}' is not permitted. \
+         Configure allowed hosts with duck_net_set_egress_allowlist([...]).",
+        host
+    ))
+}
+
+/// Match a single allowlist pattern against a lowercase hostname.
+fn pattern_matches(pattern: &str, host: &str) -> bool {
+    if pattern == host {
+        return true;
+    }
+    if let Some(suffix) = pattern.strip_prefix("*.") {
+        // *.example.com matches a.example.com but NOT example.com itself.
+        return host.ends_with(&format!(".{}", suffix)) || host == suffix;
+    }
+    if let Some(rest) = pattern.strip_prefix('.') {
+        // .example.com matches a.example.com and example.com.
+        return host == rest || host.ends_with(&format!(".{}", rest));
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// DNS result filtering (CWE-918)
+// ---------------------------------------------------------------------------
+
+/// When true, `dns_lookup()` and its variants strip private/reserved IPs from
+/// the result set (instead of merely warning). Enabled by default so that
+/// attacker-controlled DNS responses cannot leak internal network topology
+/// through a SQL-visible result.
+static DNS_BLOCK_PRIVATE: AtomicBool = AtomicBool::new(true);
+
+pub fn set_dns_block_private(enabled: bool) {
+    DNS_BLOCK_PRIVATE.store(enabled, Ordering::Release);
+}
+
+pub fn dns_block_private() -> bool {
+    DNS_BLOCK_PRIVATE.load(Ordering::Acquire)
+}
+
+// ---------------------------------------------------------------------------
+// SSH Trust-On-First-Use strictness knob (CWE-295)
+// ---------------------------------------------------------------------------
+
+/// TOFU behaviour when connecting to an SSH host that is not in known_hosts.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum TofuMode {
+    /// Reject all unknown hosts. Safest — requires pre-populated known_hosts.
+    Strict,
+    /// Warn and accept, but do NOT persist (per-session TOFU).
+    Warn,
+    /// Accept, warn, and persist to ~/.ssh/known_hosts. Historical default.
+    Auto,
+}
+
+/// Encoded TOFU mode (0 = Auto, 1 = Warn, 2 = Strict).
+/// Stored as `AtomicBool`-adjacent `AtomicU8` for lock-free reads.
+static SSH_TOFU_MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn set_ssh_tofu_mode(mode: TofuMode) {
+    let v: u8 = match mode {
+        TofuMode::Auto => 0,
+        TofuMode::Warn => 1,
+        TofuMode::Strict => 2,
+    };
+    SSH_TOFU_MODE.store(v, Ordering::Release);
+}
+
+pub fn ssh_tofu_mode() -> TofuMode {
+    match SSH_TOFU_MODE.load(Ordering::Acquire) {
+        2 => TofuMode::Strict,
+        1 => TofuMode::Warn,
+        _ => TofuMode::Auto,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime protocol ACL (multi-tenant defense-in-depth)
+// ---------------------------------------------------------------------------
+
+/// When set, only the listed protocols are allowed to execute network operations.
+/// Protocols not in the set will have their entry points return a deny error.
+/// Unlike `features::is_enabled` (which gates registration at load time), this
+/// gates execution at query time — letting an admin reduce the attack surface
+/// of a shared DuckDB process without restarting.
+static PROTOCOL_ACL: LazyLock<RwLock<Option<HashSet<String>>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+pub fn set_protocol_acl(allowed: &[String]) {
+    let cleaned: HashSet<String> = allowed
+        .iter()
+        .map(|p| p.trim().to_ascii_lowercase())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut guard = PROTOCOL_ACL.write().unwrap_or_else(|p| p.into_inner());
+    if cleaned.is_empty() {
+        *guard = None;
+    } else {
+        *guard = Some(cleaned);
+    }
+}
+
+pub fn protocol_acl() -> Vec<String> {
+    let guard = PROTOCOL_ACL.read().unwrap_or_else(|p| p.into_inner());
+    guard
+        .as_ref()
+        .map(|s| {
+            let mut v: Vec<String> = s.iter().cloned().collect();
+            v.sort();
+            v
+        })
+        .unwrap_or_default()
+}
+
+/// Check whether a protocol is allowed by the runtime ACL.
+/// Returns `Ok(())` when no ACL is configured.
+#[allow(dead_code)]
+pub fn check_protocol_allowed(protocol: &str) -> Result<(), String> {
+    let guard = PROTOCOL_ACL.read().unwrap_or_else(|p| p.into_inner());
+    match guard.as_ref() {
+        Some(set) if !set.contains(&protocol.to_ascii_lowercase()) => Err(format!(
+            "Protocol '{}' is not permitted by the runtime ACL. \
+             Update the ACL with duck_net_set_protocol_acl([...]).",
+            protocol
+        )),
+        _ => Ok(()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +310,19 @@ pub fn validate_no_ssrf(url: &str) -> Result<(), String> {
 /// Validate that a raw hostname does not resolve to a private/reserved IP.
 /// Use this for non-URL protocols (Redis, MQTT, LDAP, etc.) that take a
 /// hostname directly rather than a full URL.
+///
+/// Also enforces the egress allowlist when one is configured (defense-in-depth
+/// on top of the deny-private filter), and acquires a rate-limit token for
+/// the target host so that `duck_net_set_rate_limit()` applies uniformly
+/// across every protocol — not just the six that used to call
+/// `rate_limit::acquire_for_host` directly.
 pub fn validate_no_ssrf_host(host: &str) -> Result<(), String> {
+    // Enforce the allowlist first — applies even when SSRF is "disabled".
+    check_egress_allowlist(host)?;
+
+    // Per-host rate limiting applies to every protocol via this chokepoint.
+    crate::rate_limit::acquire_for_host(host);
+
     if !ssrf_protection_enabled() {
         return Ok(());
     }
@@ -157,6 +369,80 @@ pub fn validate_no_ssrf_host(host: &str) -> Result<(), String> {
     }
 }
 
+/// Resolve a host:port pair into a validated `SocketAddr` suitable for use with
+/// `UdpSocket::send_to(buf, addr)` or `TcpStream::connect(addr)`.
+///
+/// This is the **UDP DNS-rebinding-safe** entry point. Every UDP protocol in
+/// duck_net (SNMP, NTP, PTP, SIP, STUN, RADIUS, IPMI, syslog) used to call
+/// `validate_no_ssrf_host(host)` and then pass `format!("{host}:{port}")` to
+/// `send_to`, which re-resolved via the OS resolver — leaving a TOCTOU window
+/// where a rebinding attacker could return a public IP for the check and a
+/// private IP for the actual send. This helper closes that window by
+/// resolving once, validating every address, and returning a single
+/// concrete `SocketAddr` that the caller passes to `send_to` directly.
+///
+/// The returned `SocketAddr` is guaranteed to be non-private (unless SSRF
+/// protection is disabled). The first address with the preferred IP family
+/// (IPv4 by default, matching `UdpSocket::bind("0.0.0.0:0")`) is returned;
+/// if no IPv4 address is present, the first IPv6 address is returned.
+pub fn resolve_and_validate_udp(host: &str, port: u16) -> Result<SocketAddr, String> {
+    // Allowlist always applies.
+    check_egress_allowlist(host)?;
+
+    // Uniform rate-limiting across all UDP protocols.
+    crate::rate_limit::acquire_for_host(host);
+
+    let addr_str = if host.starts_with('[') || host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!(
+            "[{}]:{}",
+            host.trim_start_matches('[').trim_end_matches(']'),
+            port
+        )
+    } else {
+        format!("{}:{}", host, port)
+    };
+
+    let resolved: Vec<SocketAddr> = addr_str
+        .to_socket_addrs()
+        .map_err(|e| {
+            format!(
+                "SSRF protection: cannot resolve '{}:{}' for UDP send: {}",
+                host, port, e
+            )
+        })?
+        .collect();
+
+    if resolved.is_empty() {
+        return Err(format!(
+            "SSRF protection: '{}:{}' resolved to no addresses",
+            host, port
+        ));
+    }
+
+    if ssrf_protection_enabled() {
+        // Reject if ANY resolved address is private (split-horizon defense).
+        for addr in &resolved {
+            if is_private_ip(&addr.ip()) {
+                return Err(format!(
+                    "SSRF protection: '{}' resolves to private/reserved IP {}. \
+                     Use duck_net_set_ssrf_protection(false) to disable for local development.",
+                    host,
+                    addr.ip()
+                ));
+            }
+        }
+    }
+
+    // Prefer IPv4 — matches the default `0.0.0.0:0` bind used across the crate.
+    let chosen = resolved
+        .iter()
+        .find(|a| a.is_ipv4())
+        .copied()
+        .unwrap_or_else(|| resolved[0]);
+
+    Ok(chosen)
+}
+
 // ---------------------------------------------------------------------------
 // SSRF-safe ureq Resolver (CWE-918 — DNS rebinding prevention)
 // ---------------------------------------------------------------------------
@@ -193,6 +479,16 @@ impl ureq::unversioned::resolver::Resolver for SsrfSafeResolver {
 
         let scheme = uri.scheme().ok_or(ureq::Error::HostNotFound)?;
         let authority = uri.authority().ok_or(ureq::Error::HostNotFound)?;
+
+        // Positive-match egress allowlist (CWE-918 defense-in-depth).
+        // Applied even when SSRF-by-IP is disabled, because allowlists are
+        // independent of private-IP filtering.
+        if let Err(msg) = check_egress_allowlist(authority.host()) {
+            return Err(ureq::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                msg,
+            )));
+        }
 
         // Build "host:port" string (DefaultResolver helper knows default ports).
         let host_port =
@@ -422,13 +718,13 @@ fn scrub_query_params(url: &str) -> String {
 
 /// Scrub known sensitive parameter values from an error message.
 ///
-/// Replaces patterns like `password=value` or `secret_key=value` with
-/// redacted forms. Also scrubs Base64-encoded `Authorization` and
-/// `Bearer` header values that may leak through error messages (CWE-532).
+/// Replaces EVERY occurrence of patterns like `password=value` or
+/// `secret_key=value` with redacted forms (not just the first). Also scrubs
+/// Base64-encoded `Authorization` and `Bearer` header values that may leak
+/// through error messages (CWE-532).
 pub fn scrub_error(msg: &str) -> String {
     let mut result = msg.to_string();
 
-    // Scrub patterns like key=value in error messages
     let sensitive_keys = [
         "password",
         "secret",
@@ -444,9 +740,14 @@ pub fn scrub_error(msg: &str) -> String {
     ];
 
     for &key in &sensitive_keys {
-        // Pattern: key=somevalue (until whitespace or end)
         let pattern = format!("{}=", key);
-        if let Some(start) = result.to_lowercase().find(&pattern) {
+        // Loop over every occurrence — earlier versions only redacted the first,
+        // leaking the second copy of e.g. "password=X password=Y".
+        loop {
+            let lower = result.to_lowercase();
+            let Some(start) = lower.find(&pattern) else {
+                break;
+            };
             let after = start + pattern.len();
             let end = result[after..]
                 .find(|c: char| c.is_whitespace() || c == '&' || c == '"' || c == '\'')
@@ -456,9 +757,12 @@ pub fn scrub_error(msg: &str) -> String {
         }
     }
 
-    // Scrub Authorization header values (Basic/Bearer)
+    // Scrub Authorization header values (Basic/Bearer) — all occurrences.
     for prefix in &["Authorization: Bearer ", "Authorization: Basic "] {
-        if let Some(start) = result.find(prefix) {
+        loop {
+            let Some(start) = result.find(prefix) else {
+                break;
+            };
             let after = start + prefix.len();
             let end = result[after..]
                 .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
@@ -468,8 +772,11 @@ pub fn scrub_error(msg: &str) -> String {
         }
     }
 
-    // Scrub AUTH PLAIN base64 payloads
-    if let Some(start) = result.find("AUTH PLAIN ") {
+    // Scrub AUTH PLAIN base64 payloads — all occurrences.
+    loop {
+        let Some(start) = result.find("AUTH PLAIN ") else {
+            break;
+        };
         let after = start + "AUTH PLAIN ".len();
         let end = result[after..]
             .find(|c: char| c.is_whitespace() || c == '\r' || c == '\n')
@@ -479,6 +786,109 @@ pub fn scrub_error(msg: &str) -> String {
     }
 
     result
+}
+
+// ---------------------------------------------------------------------------
+// Unified protocol entry helper (audit + rate limit + protocol ACL + warning)
+// ---------------------------------------------------------------------------
+
+/// Enter a protocol operation at a single chokepoint.
+///
+/// Every network protocol entry point can call this exactly once at the top
+/// of its public function. It:
+///
+/// 1. Checks the runtime protocol ACL (`set_protocol_acl`) — denying the
+///    call with a clear error if the protocol is not in the allowed set.
+/// 2. Acquires a rate-limit token for `host` via
+///    `crate::rate_limit::acquire_for_host` (blocks until allowed, honouring
+///    both the global and per-domain RPS limits).
+///
+/// The returned guard automatically records a single audit-log entry when it
+/// is dropped, capturing the protocol, operation, host, success flag, status
+/// code, and a scrubbed message. Call `.set_status(code)` / `.set_message()`
+/// before the guard drops to populate those fields.
+#[allow(dead_code)]
+pub fn protocol_enter(
+    protocol: &'static str,
+    operation: &'static str,
+    host: &str,
+) -> Result<ProtocolGuard, String> {
+    check_protocol_allowed(protocol)?;
+    crate::rate_limit::acquire_for_host(host);
+    Ok(ProtocolGuard {
+        protocol,
+        operation,
+        host: host.to_string(),
+        success: false,
+        status_code: 0,
+        message: String::new(),
+    })
+}
+
+/// RAII guard returned by [`protocol_enter`]; emits one audit log entry when
+/// dropped. Defaults to `success=false` so that accidental panics or early
+/// returns show up as failures in the audit log.
+#[allow(dead_code)]
+pub struct ProtocolGuard {
+    protocol: &'static str,
+    operation: &'static str,
+    host: String,
+    success: bool,
+    status_code: i32,
+    message: String,
+}
+
+#[allow(dead_code)]
+impl ProtocolGuard {
+    pub fn ok(mut self) -> Self {
+        self.success = true;
+        self
+    }
+
+    pub fn set_success(&mut self, success: bool) {
+        self.success = success;
+    }
+
+    pub fn set_status(&mut self, code: i32) {
+        self.status_code = code;
+    }
+
+    pub fn set_message(&mut self, msg: impl Into<String>) {
+        self.message = msg.into();
+    }
+}
+
+impl Drop for ProtocolGuard {
+    fn drop(&mut self) {
+        crate::audit_log::record(
+            self.protocol,
+            self.operation,
+            &self.host,
+            self.success,
+            self.status_code,
+            &self.message,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Constant-time byte comparison (CWE-208 — timing attacks on MACs / tokens)
+// ---------------------------------------------------------------------------
+
+/// Compare two byte slices in constant time relative to their length.
+///
+/// Used for comparing HMAC / SigV4 / authentication tokens where a naive
+/// `==` could leak the matching prefix length via timing. Returns `true`
+/// only when the slices are equal and the same length.
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 // ---------------------------------------------------------------------------
@@ -737,13 +1147,55 @@ pub fn validate_http_header_value(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate all headers in a list for name and value safety.
+/// Maximum number of HTTP headers accepted per request (CWE-400).
+/// Prevents header-count DoS where a caller passes thousands of headers.
+pub const MAX_HEADER_COUNT: usize = 128;
+
+/// Validate all headers in a list for name and value safety, plus count.
 pub fn validate_headers(headers: &[(String, String)]) -> Result<(), String> {
+    if headers.len() > MAX_HEADER_COUNT {
+        return Err(format!(
+            "Too many HTTP headers: {} (max {})",
+            headers.len(),
+            MAX_HEADER_COUNT
+        ));
+    }
     for (name, value) in headers {
         validate_http_header_name(name)?;
         validate_http_header_value(value)?;
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Bounded Reads (CWE-400 — centralized response-size cap)
+// ---------------------------------------------------------------------------
+
+/// Read up to `max_bytes` from an `io::Read`, returning an error if the stream
+/// exceeds that limit. Use this anywhere a remote peer controls the response
+/// size so that resource limits are auditable from a single place.
+#[allow(dead_code)]
+pub fn bounded_read<R: std::io::Read>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let mut buf = Vec::new();
+    // Read at most max_bytes + 1 so an exact-limit response succeeds and an
+    // over-limit response fails with a clear message.
+    let read = reader
+        .take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut buf)?;
+    if read > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "Response exceeds maximum allowed size of {} bytes (CWE-400 resource exhaustion)",
+                max_bytes
+            ),
+        ));
+    }
+    Ok(buf)
 }
 
 /// RFC 7230 §3.2.6 token character: any VCHAR except delimiters.

@@ -59,14 +59,23 @@ pub fn query(url: &str, promql: &str) -> PrometheusResult {
     let resp = http::execute(Method::Get, &api_url, &[], None);
 
     if resp.status != 200 {
+        let msg = format!(
+            "Prometheus API returned status {}: {}",
+            resp.status, resp.reason
+        );
+        crate::audit_log::record(
+            "prometheus",
+            "query",
+            &crate::audit_log::host_from_url(url),
+            false,
+            resp.status as i32,
+            &msg,
+        );
         return PrometheusResult {
             success: false,
             result_type: String::new(),
             body: resp.body.clone(),
-            message: format!(
-                "Prometheus API returned status {}: {}",
-                resp.status, resp.reason
-            ),
+            message: msg,
         };
     }
 
@@ -83,14 +92,31 @@ pub fn query(url: &str, promql: &str) -> PrometheusResult {
         let error_msg = crate::json::extract_string(&resp.body, "error")
             .unwrap_or("Unknown error")
             .to_string();
+        let full_msg = format!("Prometheus error: {error_msg}");
+        crate::audit_log::record(
+            "prometheus",
+            "query",
+            &crate::audit_log::host_from_url(url),
+            false,
+            resp.status as i32,
+            &full_msg,
+        );
         return PrometheusResult {
             success: false,
             result_type,
             body: resp.body,
-            message: format!("Prometheus error: {error_msg}"),
+            message: full_msg,
         };
     }
 
+    crate::audit_log::record(
+        "prometheus",
+        "query",
+        &crate::audit_log::host_from_url(url),
+        true,
+        resp.status as i32,
+        "",
+    );
     PrometheusResult {
         success: true,
         result_type,
@@ -140,14 +166,23 @@ pub fn query_range(
     let resp = http::execute(Method::Get, &api_url, &[], None);
 
     if resp.status != 200 {
+        let msg = format!(
+            "Prometheus API returned status {}: {}",
+            resp.status, resp.reason
+        );
+        crate::audit_log::record(
+            "prometheus",
+            "query_range",
+            &crate::audit_log::host_from_url(url),
+            false,
+            resp.status as i32,
+            &msg,
+        );
         return PrometheusResult {
             success: false,
             result_type: String::new(),
             body: resp.body.clone(),
-            message: format!(
-                "Prometheus API returned status {}: {}",
-                resp.status, resp.reason
-            ),
+            message: msg,
         };
     }
 
@@ -162,14 +197,31 @@ pub fn query_range(
         let error_msg = crate::json::extract_string(&resp.body, "error")
             .unwrap_or("Unknown error")
             .to_string();
+        let full_msg = format!("Prometheus error: {error_msg}");
+        crate::audit_log::record(
+            "prometheus",
+            "query_range",
+            &crate::audit_log::host_from_url(url),
+            false,
+            resp.status as i32,
+            &full_msg,
+        );
         return PrometheusResult {
             success: false,
             result_type,
             body: resp.body,
-            message: format!("Prometheus error: {error_msg}"),
+            message: full_msg,
         };
     }
 
+    crate::audit_log::record(
+        "prometheus",
+        "query_range",
+        &crate::audit_log::host_from_url(url),
+        true,
+        resp.status as i32,
+        "",
+    );
     PrometheusResult {
         success: true,
         result_type,

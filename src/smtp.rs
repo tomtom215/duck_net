@@ -66,15 +66,32 @@ fn dot_stuff(body: &str) -> String {
 }
 
 pub fn send(config: &SmtpConfig) -> SmtpResult {
-    match send_inner(config) {
-        Ok(msg) => SmtpResult {
-            success: true,
-            message: msg,
+    // Plaintext-credential warning (CWE-319): calling send without TLS over
+    // the historical 25/587 port with a username+password leaks credentials.
+    if !config.use_tls && (config.username.is_some() || config.password.is_some()) {
+        crate::security_warnings::warn_plaintext("SMTP", "PLAINTEXT_SMTP", "smtps://");
+    }
+
+    let result = send_inner(config);
+    let (success, msg) = match &result {
+        Ok(m) => (true, m.clone()),
+        Err(m) => (false, m.clone()),
+    };
+    crate::audit_log::record(
+        "smtp",
+        if config.use_tls {
+            "send_tls"
+        } else {
+            "send_starttls"
         },
-        Err(msg) => SmtpResult {
-            success: false,
-            message: msg,
-        },
+        &config.host,
+        success,
+        0,
+        &msg,
+    );
+    SmtpResult {
+        success,
+        message: msg,
     }
 }
 

@@ -87,17 +87,9 @@ pub fn auth(host: &str, port: u16, secret: &str, username: &str, password: &str)
         };
     }
 
-    // SSRF protection: block connections to private/reserved IPs (CWE-918)
-    if let Err(e) = crate::security::validate_no_ssrf_host(host) {
-        return RadiusResult {
-            success: false,
-            code: -1,
-            code_name: String::new(),
-            message: e,
-        };
-    }
-
-    match auth_inner(host, port, secret, username, password) {
+    // Atomic resolve-and-validate performed inside auth_inner to close UDP
+    // DNS-rebinding TOCTOU (CWE-918).
+    let r = match auth_inner(host, port, secret, username, password) {
         Ok(r) => r,
         Err(e) => RadiusResult {
             success: false,
@@ -105,7 +97,9 @@ pub fn auth(host: &str, port: u16, secret: &str, username: &str, password: &str)
             code_name: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("radius", "auth", host, r.success, r.code, &r.message);
+    r
 }
 
 /// Convenience wrapper using default port.
@@ -120,13 +114,19 @@ fn auth_inner(
     username: &str,
     password: &str,
 ) -> Result<RadiusResult, String> {
+    // Atomic resolve-and-validate (closes UDP DNS-rebinding TOCTOU, CWE-918).
+    let addr = crate::security::resolve_and_validate_udp(host, port)?;
+
+    let bind_addr = if addr.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
     let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+        UdpSocket::bind(bind_addr).map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
-
-    let addr = format!("{host}:{port}");
 
     // Generate cryptographically secure random authenticator (16 bytes)
     let authenticator = crate::security::random_bytes::<16>();
@@ -162,7 +162,7 @@ fn auth_inner(
 
     // Send request
     socket
-        .send_to(&packet, &addr)
+        .send_to(&packet, addr)
         .map_err(|e| format!("RADIUS send failed: {e}"))?;
 
     // Receive response

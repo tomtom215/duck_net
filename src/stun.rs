@@ -56,7 +56,7 @@ pub fn lookup(server: &str) -> StunResult {
         };
     }
 
-    match lookup_inner(&host, port) {
+    let r = match lookup_inner(&host, port) {
         Ok(r) => r,
         Err(e) => StunResult {
             success: false,
@@ -64,7 +64,16 @@ pub fn lookup(server: &str) -> StunResult {
             public_port: 0,
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "stun",
+        "lookup",
+        &host,
+        r.success,
+        r.public_port as i32,
+        &r.message,
+    );
+    r
 }
 
 /// Parse server string: host[:port] (default port 3478).
@@ -81,11 +90,16 @@ fn parse_server(server: &str) -> (String, u16) {
 }
 
 fn lookup_inner(host: &str, port: u16) -> Result<StunResult, String> {
-    // SSRF protection: block connections to private/reserved IPs (CWE-918)
-    crate::security::validate_no_ssrf_host(host)?;
+    // Atomic resolve-and-validate (closes UDP DNS-rebinding TOCTOU, CWE-918).
+    let addr = crate::security::resolve_and_validate_udp(host, port)?;
 
+    let bind_addr = if addr.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
     let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+        UdpSocket::bind(bind_addr).map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
@@ -108,9 +122,8 @@ fn lookup_inner(host: &str, port: u16) -> Result<StunResult, String> {
     // Transaction ID (12 bytes)
     request.extend_from_slice(&transaction_id);
 
-    let addr = format!("{host}:{port}");
     socket
-        .send_to(&request, &addr)
+        .send_to(&request, addr)
         .map_err(|e| format!("STUN send failed: {e}"))?;
 
     // Receive response

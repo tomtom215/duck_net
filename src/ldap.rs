@@ -84,9 +84,19 @@ pub fn search(url: &str, base_dn: &str, filter: &str, attributes: &[&str]) -> Ld
         }
     };
 
-    runtime::block_on(async {
+    let host_for_audit = host.clone();
+    let r = runtime::block_on(async {
         search_async(&host, port, use_tls, base_dn, filter, attributes).await
-    })
+    });
+    crate::audit_log::record(
+        "ldap",
+        "search",
+        &host_for_audit,
+        r.success,
+        r.entries.len() as i32,
+        &r.message,
+    );
+    r
 }
 
 async fn search_async(
@@ -202,7 +212,10 @@ pub fn bind(url: &str, bind_dn: &str, password: &str) -> LdapBindResult {
         }
     };
 
-    runtime::block_on(async { bind_async(&host, port, use_tls, bind_dn, password).await })
+    let host_for_audit = host.clone();
+    let r = runtime::block_on(async { bind_async(&host, port, use_tls, bind_dn, password).await });
+    crate::audit_log::record("ldap", "bind", &host_for_audit, r.success, 0, &r.message);
+    r
 }
 
 async fn bind_async(

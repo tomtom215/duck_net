@@ -8,8 +8,13 @@ use crate::json;
 ///
 /// Builds a JSON body `{"query": ..., "variables": ...}` and POSTs it.
 ///
-/// Security: validates query payload size to prevent resource exhaustion
-/// (CWE-400) before sending to the server.
+/// Security:
+/// - Validates query payload size (CWE-400) before sending.
+/// - Validates the variables payload size independently — the query text alone
+///   was previously capped but an attacker could still pass megabytes of
+///   variables and exhaust server memory.
+/// - Validates that `variables`, if present, parses as JSON so a malformed
+///   blob cannot be smuggled into the outgoing POST body.
 pub fn query(
     url: &str,
     query_str: &str,
@@ -26,6 +31,30 @@ pub fn query(
         };
     }
 
+    // Validate variables size + shape (CWE-400 + CWE-20).
+    if let Some(vars) = variables {
+        if !vars.trim().is_empty() {
+            if let Err(e) = crate::security_validate::validate_query_size(vars, "GraphQL variables")
+            {
+                return HttpResponse {
+                    status: 0,
+                    reason: e.clone(),
+                    headers: vec![],
+                    body: e,
+                };
+            }
+            if let Err(e) = serde_json::from_str::<serde_json::Value>(vars) {
+                let msg = format!("GraphQL variables must be valid JSON: {e}");
+                return HttpResponse {
+                    status: 0,
+                    reason: msg.clone(),
+                    headers: vec![],
+                    body: msg,
+                };
+            }
+        }
+    }
+
     let body = build_body(query_str, variables);
 
     let mut all_headers: Vec<(String, String)> = headers.to_vec();
@@ -37,7 +66,15 @@ pub fn query(
         all_headers.push(("Content-Type".into(), "application/json".into()));
     }
 
-    http::execute(Method::Post, url, &all_headers, Some(&body))
+    let resp = http::execute(Method::Post, url, &all_headers, Some(&body));
+    crate::audit_log::record_http(
+        "graphql",
+        "query",
+        &crate::audit_log::host_from_url(url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 fn build_body(query_str: &str, variables: Option<&str>) -> String {

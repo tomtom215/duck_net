@@ -101,7 +101,7 @@ pub fn get(host: &str, key: &str) -> MemcachedResult {
         };
     }
 
-    match get_inner(host, key) {
+    let result = match get_inner(host, key) {
         Ok((value, msg)) => MemcachedResult {
             success: true,
             value,
@@ -112,7 +112,9 @@ pub fn get(host: &str, key: &str) -> MemcachedResult {
             value: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("memcached", "get", host, result.success, 0, &result.message);
+    result
 }
 
 fn get_inner(host: &str, key: &str) -> Result<(String, String), String> {
@@ -204,7 +206,7 @@ pub fn set(host: &str, key: &str, value: &str, ttl: u32) -> MemcachedResult {
         };
     }
 
-    match set_inner(host, key, value, ttl) {
+    let result = match set_inner(host, key, value, ttl) {
         Ok(msg) => MemcachedResult {
             success: true,
             value: String::new(),
@@ -215,7 +217,9 @@ pub fn set(host: &str, key: &str, value: &str, ttl: u32) -> MemcachedResult {
             value: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("memcached", "set", host, result.success, 0, &result.message);
+    result
 }
 
 fn set_inner(host: &str, key: &str, value: &str, ttl: u32) -> Result<String, String> {

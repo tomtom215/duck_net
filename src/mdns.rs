@@ -95,7 +95,9 @@ pub fn discover(service_type: &str, timeout_secs: u32) -> Result<Vec<MdnsService
     // Leave multicast group
     let _ = socket.leave_multicast_v4(&MDNS_ADDR, &Ipv4Addr::UNSPECIFIED);
 
-    Ok(services.into_values().collect())
+    let out: Vec<MdnsService> = services.into_values().collect();
+    crate::audit_log::record("mdns", "discover", service_type, true, out.len() as i32, "");
+    Ok(out)
 }
 
 /// Build a DNS query packet for mDNS.

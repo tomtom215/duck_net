@@ -127,7 +127,7 @@ pub fn send(
 
     let packet = format!("<{priority}>1 {timestamp} {hostname} {app_name} {pid} - - {message}");
 
-    match send_udp(host, port, packet.as_bytes()) {
+    let r = match send_udp(host, port, packet.as_bytes()) {
         Ok(()) => SyslogResult {
             success: true,
             message: format!("Sent {len} bytes to {host}:{port}", len = packet.len()),
@@ -136,7 +136,9 @@ pub fn send(
             success: false,
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("syslog", "send", host, r.success, port as i32, &r.message);
+    r
 }
 
 /// Validate syslog host: alphanumeric, dots, hyphens, colons (IPv6), brackets.
@@ -153,14 +155,18 @@ fn send_udp(host: &str, port: u16, data: &[u8]) -> Result<(), String> {
     if !is_valid_host(host) {
         return Err(format!("Invalid syslog host: {host}"));
     }
-    // SSRF protection: block connections to private/reserved IPs (CWE-918)
-    crate::security::validate_no_ssrf_host(host)?;
+    // Atomic resolve-and-validate (closes UDP DNS-rebinding TOCTOU, CWE-918).
+    let addr = crate::security::resolve_and_validate_udp(host, port)?;
 
+    let bind_addr = if addr.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
     let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
-    let addr = format!("{host}:{port}");
+        UdpSocket::bind(bind_addr).map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
-        .send_to(data, &addr)
+        .send_to(data, addr)
         .map_err(|e| format!("Failed to send to {addr}: {e}"))?;
     Ok(())
 }

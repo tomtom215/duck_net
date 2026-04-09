@@ -63,7 +63,39 @@ fn validate_hostname(hostname: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Partition a result list into (public, private) based on duck_net's SSRF
+/// private-IP definition. The private list is returned only for the warning.
+fn partition_private(ips: Vec<String>) -> (Vec<String>, Vec<String>) {
+    let (private, public): (Vec<String>, Vec<String>) = ips
+        .into_iter()
+        .partition(|s| crate::security::is_private_ip_str(s));
+    (public, private)
+}
+
+/// Apply the DNS block-private policy. When enabled (the default), private
+/// results are removed from the returned list AND a warning is emitted so the
+/// caller can see what was filtered. When disabled, private results are
+/// returned verbatim with only a warning (legacy behaviour).
+fn apply_dns_policy(hostname: &str, ips: Vec<String>) -> Vec<String> {
+    let (public, private) = partition_private(ips);
+    if !private.is_empty() {
+        crate::security_warnings::warn_dns_private_result(hostname, &private);
+    }
+    let out = if crate::security::dns_block_private() {
+        public
+    } else {
+        let mut all = public;
+        all.extend(private);
+        all
+    };
+    crate::audit_log::record("dns", "lookup", hostname, true, out.len() as i32, "");
+    out
+}
+
 /// Resolve a hostname to all IP addresses (IPv4 + IPv6).
+///
+/// Private/reserved IPs are filtered out by default (CWE-918). Disable with
+/// `SELECT duck_net_set_dns_block_private(false);` for development.
 pub fn lookup(hostname: &str) -> Result<Vec<String>, String> {
     validate_hostname(hostname)?;
     runtime::block_on(async {
@@ -72,20 +104,13 @@ pub fn lookup(hostname: &str) -> Result<Vec<String>, String> {
             .await
             .map_err(|e| format!("DNS lookup failed for {hostname}: {e}"))?;
         let ips: Vec<String> = response.iter().map(|ip: IpAddr| ip.to_string()).collect();
-        // Warn if any result is a private/reserved IP (CWE-918)
-        let private: Vec<String> = ips
-            .iter()
-            .filter(|s| crate::security::is_private_ip_str(s))
-            .cloned()
-            .collect();
-        if !private.is_empty() {
-            crate::security_warnings::warn_dns_private_result(hostname, &private);
-        }
-        Ok(ips)
+        Ok(apply_dns_policy(hostname, ips))
     })
 }
 
 /// Resolve a hostname to IPv4 addresses only.
+///
+/// Private/reserved IPs are filtered out by default (CWE-918).
 pub fn lookup_a(hostname: &str) -> Result<Vec<String>, String> {
     validate_hostname(hostname)?;
     runtime::block_on(async {
@@ -93,15 +118,18 @@ pub fn lookup_a(hostname: &str) -> Result<Vec<String>, String> {
             .lookup_ip(hostname)
             .await
             .map_err(|e| format!("DNS lookup failed for {hostname}: {e}"))?;
-        Ok(response
+        let ips: Vec<String> = response
             .iter()
             .filter(|ip: &IpAddr| ip.is_ipv4())
             .map(|ip: IpAddr| ip.to_string())
-            .collect())
+            .collect();
+        Ok(apply_dns_policy(hostname, ips))
     })
 }
 
 /// Resolve a hostname to IPv6 addresses only.
+///
+/// Private/reserved IPs are filtered out by default (CWE-918).
 pub fn lookup_aaaa(hostname: &str) -> Result<Vec<String>, String> {
     validate_hostname(hostname)?;
     runtime::block_on(async {
@@ -109,11 +137,12 @@ pub fn lookup_aaaa(hostname: &str) -> Result<Vec<String>, String> {
             .lookup_ip(hostname)
             .await
             .map_err(|e| format!("DNS lookup failed for {hostname}: {e}"))?;
-        Ok(response
+        let ips: Vec<String> = response
             .iter()
             .filter(|ip: &IpAddr| ip.is_ipv6())
             .map(|ip: IpAddr| ip.to_string())
-            .collect())
+            .collect();
+        Ok(apply_dns_policy(hostname, ips))
     })
 }
 

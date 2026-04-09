@@ -261,13 +261,15 @@ pub fn read(url: &str, token: &str, path: &str) -> VaultResult {
     let headers = vec![("X-Vault-Token".to_string(), token.to_string())];
 
     let resp = http::execute(Method::Get, &api_url, &headers, None);
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
-        return vault_err(format!(
-            "Vault returned status {}: {}",
-            resp.status, resp.reason
-        ));
+        let msg = format!("Vault returned status {}: {}", resp.status, resp.reason);
+        crate::audit_log::record("vault", "read", &host, false, resp.status as i32, &msg);
+        return vault_err(msg);
     }
+
+    crate::audit_log::record("vault", "read", &host, true, resp.status as i32, "");
 
     let lease_duration = extract_i64(&resp.body, "lease_duration").unwrap_or(0);
     let renewable = extract_bool(&resp.body, "renewable").unwrap_or(false);
@@ -333,13 +335,15 @@ pub fn write(url: &str, token: &str, path: &str, data_json: &str) -> VaultResult
     ];
 
     let resp = http::execute(Method::Post, &api_url, &headers, Some(data_json));
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 && resp.status != 204 {
-        return vault_err(format!(
-            "Vault returned status {}: {}",
-            resp.status, resp.reason
-        ));
+        let msg = format!("Vault returned status {}: {}", resp.status, resp.reason);
+        crate::audit_log::record("vault", "write", &host, false, resp.status as i32, &msg);
+        return vault_err(msg);
     }
+
+    crate::audit_log::record("vault", "write", &host, true, resp.status as i32, "");
 
     let lease_duration = extract_i64(&resp.body, "lease_duration").unwrap_or(0);
     let renewable = extract_bool(&resp.body, "renewable").unwrap_or(false);
@@ -380,13 +384,15 @@ pub fn list(url: &str, token: &str, path: &str) -> VaultResult {
     // Vault's LIST method is not in the standard Method enum.  Use the raw
     // method helper which accepts an arbitrary method string.
     let resp = http::execute_raw_method("LIST", &api_url, &headers, None);
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
-        return vault_err(format!(
-            "Vault returned status {}: {}",
-            resp.status, resp.reason
-        ));
+        let msg = format!("Vault returned status {}: {}", resp.status, resp.reason);
+        crate::audit_log::record("vault", "list", &host, false, resp.status as i32, &msg);
+        return vault_err(msg);
     }
+
+    crate::audit_log::record("vault", "list", &host, true, resp.status as i32, "");
 
     let lease_duration = extract_i64(&resp.body, "lease_duration").unwrap_or(0);
     let renewable = extract_bool(&resp.body, "renewable").unwrap_or(false);
@@ -453,8 +459,18 @@ pub fn health(url: &str) -> VaultHealthResult {
         _ => format!("Vault health returned status {}", resp.status),
     };
 
+    let host = crate::audit_log::host_from_url(url);
+    let success = resp.status == 200;
+    crate::audit_log::record(
+        "vault",
+        "health",
+        &host,
+        success,
+        resp.status as i32,
+        &message,
+    );
     VaultHealthResult {
-        success: resp.status == 200,
+        success,
         initialized,
         sealed,
         standby,

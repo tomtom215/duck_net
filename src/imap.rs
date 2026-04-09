@@ -70,21 +70,30 @@ pub fn list_messages(
     search_criteria: &str,
     limit: i64,
 ) -> ImapListResult {
-    match list_messages_inner(url, username, password, mailbox, search_criteria, limit) {
+    let host_for_audit = parse_imap_url(url)
+        .map(|(h, _, _)| h)
+        .unwrap_or_else(|_| url.to_string());
+    let result = list_messages_inner(url, username, password, mailbox, search_criteria, limit);
+    let r = match result {
         Ok(messages) => {
             let count = messages.len();
+            crate::audit_log::record("imap", "list", &host_for_audit, true, count as i32, "");
             ImapListResult {
                 success: true,
                 messages,
                 message: format!("Found {count} messages"),
             }
         }
-        Err(e) => ImapListResult {
-            success: false,
-            messages: vec![],
-            message: e,
-        },
-    }
+        Err(e) => {
+            crate::audit_log::record("imap", "list", &host_for_audit, false, 0, &e);
+            ImapListResult {
+                success: false,
+                messages: vec![],
+                message: e,
+            }
+        }
+    };
+    r
 }
 
 fn list_messages_inner(
@@ -165,7 +174,10 @@ pub fn fetch_message(
     mailbox: &str,
     uid: i64,
 ) -> ImapFetchResult {
-    match fetch_message_inner(url, username, password, mailbox, uid) {
+    let host_for_audit = parse_imap_url(url)
+        .map(|(h, _, _)| h)
+        .unwrap_or_else(|_| url.to_string());
+    let r = match fetch_message_inner(url, username, password, mailbox, uid) {
         Ok(body) => ImapFetchResult {
             success: true,
             body,
@@ -176,7 +188,9 @@ pub fn fetch_message(
             body: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("imap", "fetch", &host_for_audit, r.success, 0, &r.message);
+    r
 }
 
 fn fetch_message_inner(
@@ -513,7 +527,10 @@ pub fn idle(
     let timeout_secs = timeout_secs.clamp(1, 300);
     let max_notifications = max_notifications.min(10_000);
 
-    match idle_inner(
+    let host_for_audit = parse_imap_url(url)
+        .map(|(h, _, _)| h)
+        .unwrap_or_else(|_| url.to_string());
+    let r = match idle_inner(
         url,
         username,
         password,
@@ -531,7 +548,16 @@ pub fn idle(
             notifications: vec![],
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "imap",
+        "idle",
+        &host_for_audit,
+        r.success,
+        r.notifications.len() as i32,
+        &r.message,
+    );
+    r
 }
 
 fn idle_inner(

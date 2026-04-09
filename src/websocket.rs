@@ -66,7 +66,7 @@ pub fn request(url: &str, message: &str, timeout_secs: u32) -> WsResult {
 
     let timeout = Duration::from_secs(timeout_secs.clamp(1, 300) as u64);
 
-    match request_inner(url, message, timeout) {
+    let r = match request_inner(url, message, timeout) {
         Ok(response) => WsResult {
             success: true,
             response,
@@ -77,7 +77,16 @@ pub fn request(url: &str, message: &str, timeout_secs: u32) -> WsResult {
             response: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "websocket",
+        "request",
+        &crate::audit_log::host_from_url(url),
+        r.success,
+        0,
+        &r.message,
+    );
+    r
 }
 
 /// Default timeout variant.
@@ -215,7 +224,7 @@ pub fn subscribe(
     let max = (max_messages.clamp(1, MAX_SUBSCRIBE_MESSAGES as i64)) as usize;
     let timeout = Duration::from_secs(timeout_secs.clamp(1, 300) as u64);
 
-    match subscribe_inner(url, subscribe_msg, max, timeout) {
+    let r = match subscribe_inner(url, subscribe_msg, max, timeout) {
         Ok((msgs, msg)) => WsSubscribeResult {
             success: true,
             messages: msgs,
@@ -226,7 +235,16 @@ pub fn subscribe(
             messages: vec![],
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "websocket",
+        "subscribe",
+        &crate::audit_log::host_from_url(url),
+        r.success,
+        r.messages.len() as i32,
+        &r.message,
+    );
+    r
 }
 
 fn subscribe_inner(
@@ -364,7 +382,7 @@ pub fn multi_request(url: &str, messages: &[String], timeout_secs: u32) -> WsMul
 
     let timeout = Duration::from_secs(timeout_secs.clamp(1, 300) as u64);
 
-    match multi_request_inner(url, messages, timeout) {
+    let r = match multi_request_inner(url, messages, timeout) {
         Ok(responses) => WsMultiResult {
             success: true,
             responses,
@@ -375,7 +393,16 @@ pub fn multi_request(url: &str, messages: &[String], timeout_secs: u32) -> WsMul
             responses,
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "websocket",
+        "multi_request",
+        &crate::audit_log::host_from_url(url),
+        r.success,
+        r.responses.len() as i32,
+        &r.message,
+    );
+    r
 }
 
 /// Default timeout variant for multi-message requests.

@@ -177,16 +177,29 @@ fn parse_ipmi_response(buf: &[u8]) -> Result<(u8, Vec<u8>), String> {
 
 /// Send an IPMI command over RMCP/UDP and return the parsed response.
 fn send_ipmi(host: &str, netfn: u8, cmd: u8, data: &[u8]) -> Result<(u8, Vec<u8>), String> {
+    let result = send_ipmi_inner(host, netfn, cmd, data);
+    let op = format!("0x{netfn:02X}/0x{cmd:02X}");
+    match &result {
+        Ok((cc, _)) => crate::audit_log::record("ipmi", &op, host, true, *cc as i32, ""),
+        Err(e) => crate::audit_log::record("ipmi", &op, host, false, 0, e),
+    }
+    result
+}
+
+fn send_ipmi_inner(host: &str, netfn: u8, cmd: u8, data: &[u8]) -> Result<(u8, Vec<u8>), String> {
     if !is_valid_host(host) {
         return Err(format!("Invalid host: {host}"));
     }
-    // SSRF protection: block connections to private/reserved IPs (CWE-918)
-    crate::security::validate_no_ssrf_host(host)?;
+    // Atomic resolve-and-validate (closes UDP DNS-rebinding TOCTOU, CWE-918).
+    let addr = crate::security::resolve_and_validate_udp(host, IPMI_PORT)?;
 
-    let addr = format!("{host}:{IPMI_PORT}");
-
+    let bind_addr = if addr.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
     let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+        UdpSocket::bind(bind_addr).map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
@@ -194,7 +207,7 @@ fn send_ipmi(host: &str, netfn: u8, cmd: u8, data: &[u8]) -> Result<(u8, Vec<u8>
     let packet = build_ipmi_request(netfn, cmd, data);
 
     socket
-        .send_to(&packet, &addr)
+        .send_to(&packet, addr)
         .map_err(|e| format!("Failed to send IPMI request: {e}"))?;
 
     let mut response = [0u8; MAX_RESPONSE_SIZE];

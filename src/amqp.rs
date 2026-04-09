@@ -33,9 +33,19 @@ pub fn publish(
         );
     }
 
-    runtime::block_on(async {
+    let result = runtime::block_on(async {
         publish_async(url, exchange, routing_key, message, content_type).await
-    })
+    });
+    let host_for_audit = crate::security::scrub_url(url);
+    crate::audit_log::record(
+        "amqp",
+        "publish",
+        &host_for_audit,
+        result.success,
+        0,
+        &result.message,
+    );
+    result
 }
 
 async fn publish_async(

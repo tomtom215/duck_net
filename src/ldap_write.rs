@@ -51,6 +51,70 @@ fn validate_write_params(
     None
 }
 
+/// Validate an LDAP attribute type (the name on the left of `=`).
+///
+/// Per RFC 4512, attribute types must match `ALPHA *(ALPHA / DIGIT / "-")`.
+/// Additionally duck_net allows `;option` suffixes (e.g. `userCertificate;binary`).
+/// CWE-90 defence: rejects any character that could otherwise be injected
+/// into an LDAP DN / filter or used for modify-smuggling.
+fn validate_ldap_attribute_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("LDAP attribute name must not be empty".to_string());
+    }
+    if name.len() > 255 {
+        return Err(format!(
+            "LDAP attribute name too long: {} chars (max 255)",
+            name.len()
+        ));
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() {
+        return Err(format!(
+            "LDAP attribute name must start with a letter: '{}'",
+            name
+        ));
+    }
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '-' || c == ';') {
+            return Err(format!(
+                "LDAP attribute name contains invalid character '{}' in '{}'",
+                c, name
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate and sanitise an LDAP attribute value for use in add/modify/replace.
+///
+/// CWE-90: Rejects null bytes and embedded newlines / control chars that
+/// could terminate a protocol message. Embedded LDAP filter metacharacters
+/// (`*`, `(`, `)`, `\`, NUL) are permitted here because the ldap3 crate
+/// transports values as length-prefixed octets — they are not re-parsed as a
+/// search filter — but NUL is still rejected because some servers truncate
+/// on it and it can be used to forge C-string comparisons.
+fn validate_ldap_attribute_value(value: &str) -> Result<(), String> {
+    if value.len() > 64 * 1024 {
+        return Err(format!(
+            "LDAP attribute value too long: {} bytes (max 65536)",
+            value.len()
+        ));
+    }
+    for c in value.chars() {
+        if c == '\0' {
+            return Err("LDAP attribute value must not contain null bytes".to_string());
+        }
+        if (c as u32) < 0x20 && c != '\t' {
+            return Err(format!(
+                "LDAP attribute value must not contain control char 0x{:02X}",
+                c as u32
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Parse the attributes string for an LDAP add operation.
 ///
 /// Format: `attr1=val1,attr2=val2,objectClass=top;person;inetOrgPerson`
@@ -74,6 +138,7 @@ fn parse_add_attributes(input: &str) -> Result<Vec<(String, Vec<String>)>, Strin
         if key.is_empty() {
             return Err(format!("Empty attribute name in pair: {pair}"));
         }
+        validate_ldap_attribute_name(key)?;
         let values: Vec<String> = value_part
             .split(';')
             .map(|v| v.trim().to_string())
@@ -81,6 +146,9 @@ fn parse_add_attributes(input: &str) -> Result<Vec<(String, Vec<String>)>, Strin
             .collect();
         if values.is_empty() {
             return Err(format!("No values for attribute: {key}"));
+        }
+        for v in &values {
+            validate_ldap_attribute_value(v)?;
         }
         attrs.push((key.to_string(), values));
     }
@@ -90,6 +158,17 @@ fn parse_add_attributes(input: &str) -> Result<Vec<(String, Vec<String>)>, Strin
     }
 
     Ok(attrs)
+}
+
+/// Expose the value validator so `ldap_write_async::parse_modifications`
+/// can reuse it without duplicating the logic.
+pub(super) fn ldap_value_is_safe(value: &str) -> Result<(), String> {
+    validate_ldap_attribute_value(value)
+}
+
+/// Expose the attribute-name validator to `ldap_write_async`.
+pub(super) fn ldap_attr_is_safe(name: &str) -> Result<(), String> {
+    validate_ldap_attribute_name(name)
 }
 
 /// Add a new entry to the LDAP directory.

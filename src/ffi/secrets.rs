@@ -220,6 +220,132 @@ quack_rs::scalar_callback!(cb_set_ssh_strict, |_info, input, output| {
     }
 });
 
+// duck_net_set_dns_block_private(enabled BOOLEAN) -> VARCHAR
+quack_rs::scalar_callback!(cb_set_dns_block_private, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let bool_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let enabled = unsafe { bool_reader.read_bool(row) };
+        security::set_dns_block_private(enabled);
+        let msg = if enabled {
+            "dns_lookup() filters private/reserved IP results (default; CWE-918)"
+        } else {
+            "dns_lookup() returns private/reserved IP results verbatim (warnings still emitted)"
+        };
+        unsafe { writer.write_varchar(row, msg) };
+    }
+});
+
+// duck_net_set_egress_allowlist(patterns VARCHAR) -> VARCHAR
+// Accepts comma-separated list of hostnames / patterns:
+//   "api.example.com,*.internal.net,.trusted.org"
+// An empty string clears the allowlist (reverts to deny-private-only mode).
+quack_rs::scalar_callback!(cb_set_egress_allowlist, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let patterns_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let patterns = unsafe { patterns_reader.read_str(row) };
+        let parsed: Vec<String> = patterns
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let count = parsed.len();
+        security::set_egress_allowlist(&parsed);
+        let msg = if count == 0 {
+            "Egress allowlist cleared (deny-private-only mode)".to_string()
+        } else {
+            format!("Egress allowlist set: {} pattern(s)", count)
+        };
+        unsafe { writer.write_varchar(row, &msg) };
+    }
+});
+
+// duck_net_egress_allowlist() -> VARCHAR (comma-separated list, or empty)
+quack_rs::scalar_callback!(cb_egress_allowlist, |_info, _input, output| {
+    let list = security::egress_allowlist();
+    let joined = list.join(",");
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+    unsafe { writer.write_varchar(0, &joined) };
+});
+
+// duck_net_set_ssh_tofu(mode VARCHAR) -> VARCHAR
+// mode is one of 'strict', 'warn', or 'auto' (case-insensitive).
+quack_rs::scalar_callback!(cb_set_ssh_tofu, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let mode_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let mode_str = unsafe { mode_reader.read_str(row) };
+        let (mode, msg) = match mode_str.trim().to_ascii_lowercase().as_str() {
+            "strict" => (
+                Some(security::TofuMode::Strict),
+                "SSH TOFU mode: strict — unknown hosts are rejected".to_string(),
+            ),
+            "warn" => (
+                Some(security::TofuMode::Warn),
+                "SSH TOFU mode: warn — unknown hosts are accepted per-session but not persisted"
+                    .to_string(),
+            ),
+            "auto" => (
+                Some(security::TofuMode::Auto),
+                "SSH TOFU mode: auto — unknown hosts are accepted and persisted to ~/.ssh/known_hosts"
+                    .to_string(),
+            ),
+            other => (
+                None,
+                format!("Error: invalid TOFU mode '{other}' — expected 'strict', 'warn', or 'auto'"),
+            ),
+        };
+        if let Some(m) = mode {
+            security::set_ssh_tofu_mode(m);
+        }
+        unsafe { writer.write_varchar(row, &msg) };
+    }
+});
+
+// duck_net_set_protocol_acl(protocols VARCHAR) -> VARCHAR
+// Accepts comma-separated protocol names. Empty string clears the ACL.
+quack_rs::scalar_callback!(cb_set_protocol_acl, |_info, input, output| {
+    let chunk = unsafe { DataChunk::from_raw(input) };
+    let row_count = chunk.size();
+    let list_reader = unsafe { chunk.reader(0) };
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+
+    for row in 0..row_count {
+        let list_str = unsafe { list_reader.read_str(row) };
+        let parsed: Vec<String> = list_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let count = parsed.len();
+        security::set_protocol_acl(&parsed);
+        let msg = if count == 0 {
+            "Runtime protocol ACL cleared (all registered protocols allowed)".to_string()
+        } else {
+            format!("Runtime protocol ACL set: {} protocol(s) allowed", count)
+        };
+        unsafe { writer.write_varchar(row, &msg) };
+    }
+});
+
+// duck_net_protocol_acl() -> VARCHAR (comma-separated list, or empty)
+quack_rs::scalar_callback!(cb_protocol_acl, |_info, _input, output| {
+    let list = security::protocol_acl();
+    let joined = list.join(",");
+    let mut writer = unsafe { VectorWriter::from_vector(output) };
+    unsafe { writer.write_varchar(0, &joined) };
+});
+
 // duck_net_security_status() -> VARCHAR
 // Returns a JSON summary of current security configuration for auditing.
 quack_rs::scalar_callback!(cb_security_status, |_info, _input, output| {
@@ -356,6 +482,46 @@ pub unsafe fn register_all(con: &Connection) -> Result<(), ExtensionError> {
         .param(TypeId::Boolean)
         .returns(TypeId::Varchar)
         .function(cb_set_ssh_strict)
+        .register(con.as_raw_connection())?;
+
+    // duck_net_set_dns_block_private(enabled BOOLEAN) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_dns_block_private")
+        .param(TypeId::Boolean)
+        .returns(TypeId::Varchar)
+        .function(cb_set_dns_block_private)
+        .register(con.as_raw_connection())?;
+
+    // duck_net_set_egress_allowlist(patterns VARCHAR) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_egress_allowlist")
+        .param(v)
+        .returns(TypeId::Varchar)
+        .function(cb_set_egress_allowlist)
+        .register(con.as_raw_connection())?;
+
+    // duck_net_egress_allowlist() -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_egress_allowlist")
+        .returns(TypeId::Varchar)
+        .function(cb_egress_allowlist)
+        .register(con.as_raw_connection())?;
+
+    // duck_net_set_ssh_tofu(mode VARCHAR) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_ssh_tofu")
+        .param(v)
+        .returns(TypeId::Varchar)
+        .function(cb_set_ssh_tofu)
+        .register(con.as_raw_connection())?;
+
+    // duck_net_set_protocol_acl(protocols VARCHAR) -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_set_protocol_acl")
+        .param(v)
+        .returns(TypeId::Varchar)
+        .function(cb_set_protocol_acl)
+        .register(con.as_raw_connection())?;
+
+    // duck_net_protocol_acl() -> VARCHAR
+    ScalarFunctionBuilder::new("duck_net_protocol_acl")
+        .returns(TypeId::Varchar)
+        .function(cb_protocol_acl)
         .register(con.as_raw_connection())?;
 
     // --- Protocol-specific overloads (S3, SMTP, Vault, SSH, Consul, InfluxDB, HTTP, etc.) ---

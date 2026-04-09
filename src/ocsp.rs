@@ -48,10 +48,12 @@ pub fn check(host: &str, port: u16) -> OcspResult {
         return err_result("Invalid port: 0");
     }
 
-    match check_inner(host, port) {
+    let r = match check_inner(host, port) {
         Ok(r) => r,
         Err(e) => err_result(&e),
-    }
+    };
+    crate::audit_log::record("ocsp", "check", host, r.success, 0, &r.message);
+    r
 }
 
 fn err_result(msg: &str) -> OcspResult {

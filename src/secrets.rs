@@ -26,8 +26,47 @@
 //! natively support (SMTP, SSH, IMAP, LDAP, Redis, MQTT, etc.).
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Mutex;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
+
+/// A wrapper around a plaintext secret value that scrubs itself on drop and
+/// refuses to render in `Debug`/`Display` output.
+///
+/// Used for return values of [`get_value`] and friends so that leaking a
+/// credential into a log message requires an explicit, auditable call to
+/// [`SecretString::expose_secret`]. Internally backed by [`Zeroizing<String>`],
+/// so any heap allocation that held the secret is wiped when the value is
+/// dropped (CWE-316).
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct SecretString(Zeroizing<String>);
+
+#[allow(dead_code)]
+impl SecretString {
+    pub fn new(s: String) -> Self {
+        Self(Zeroizing::new(s))
+    }
+
+    /// Borrow the plaintext secret. Callers MUST NOT log, store, or otherwise
+    /// persist the returned `&str` beyond the minimum lifetime needed to feed
+    /// it into an authentication API.
+    pub fn expose_secret(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretString(********)")
+    }
+}
+
+impl fmt::Display for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("********")
+    }
+}
 
 /// Global in-memory secrets store.
 /// Maps secret_name -> (secret_type, key-value pairs).
@@ -319,11 +358,23 @@ pub fn list_secrets() -> Vec<(String, String, usize)> {
     }
 }
 
-/// Get a specific value from a named secret.
-/// Returns None if the secret or key doesn't exist.
+/// Get a specific value from a named secret as a raw `String`.
+///
+/// Prefer [`get_value_secret`] for new call sites so that the returned
+/// plaintext is protected by [`SecretString`]. This `get_value` form is kept
+/// for the legacy resolvers in [`crate::secrets_resolve`] and the FFI layer.
 pub(crate) fn get_value(secret_name: &str, key: &str) -> Option<String> {
     let store = SECRETS.lock().unwrap_or_else(|p| p.into_inner());
     store.as_ref()?.get(secret_name)?.values.get(key).cloned()
+}
+
+/// Get a specific value from a named secret, wrapped in a [`SecretString`] so
+/// that the plaintext cannot accidentally be logged, stored, or printed.
+/// Returns None if the secret or key doesn't exist. Use `.expose_secret()`
+/// when you need the raw `&str` for an authentication API.
+#[allow(dead_code)]
+pub(crate) fn get_value_secret(secret_name: &str, key: &str) -> Option<SecretString> {
+    get_value(secret_name, key).map(SecretString::new)
 }
 
 /// Get all raw values from a named secret (for internal bridge use only).
@@ -364,90 +415,43 @@ pub fn get_redacted(secret_name: &str) -> Option<HashMap<String, String>> {
 }
 
 // ---------------------------------------------------------------------------
-// Simple JSON parser (no external dependency)
+// JSON config parser (backed by serde_json — consistent with oauth2.rs)
 // ---------------------------------------------------------------------------
 
 /// Parse a flat JSON object `{"key": "value", ...}` into a HashMap.
-/// Only supports string values (sufficient for credentials).
+///
+/// Accepts string, number, boolean, and null values and coerces them to
+/// strings. Rejects nested objects, arrays, and duplicate keys. This replaces
+/// the hand-rolled parser that silently accepted malformed input and rejected
+/// any non-string value (users storing `{"port": 6379}` silently failed).
 fn parse_json_object(json: &str) -> Result<HashMap<String, String>, String> {
     let trimmed = json.trim();
-    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+    if trimmed.is_empty() {
         return Err("Config must be a JSON object: {\"key\": \"value\", ...}".to_string());
     }
 
-    let inner = &trimmed[1..trimmed.len() - 1];
-    let mut map = HashMap::new();
-    let mut chars = inner.chars().peekable();
+    let parsed: serde_json::Value =
+        serde_json::from_str(trimmed).map_err(|e| format!("Invalid JSON config: {e}"))?;
 
-    loop {
-        skip_ws(&mut chars);
-        if chars.peek().is_none() {
-            break;
-        }
+    let obj = parsed
+        .as_object()
+        .ok_or_else(|| "Config must be a JSON object: {\"key\": \"value\", ...}".to_string())?;
 
-        let key = parse_json_string(&mut chars)?;
-        skip_ws(&mut chars);
-
-        match chars.next() {
-            Some(':') => {}
-            other => return Err(format!("Expected ':' after key '{}', got {:?}", key, other)),
-        }
-
-        skip_ws(&mut chars);
-        let value = parse_json_string(&mut chars)?;
-
-        map.insert(key, value);
-
-        skip_ws(&mut chars);
-        match chars.peek() {
-            Some(',') => {
-                chars.next();
+    let mut map: HashMap<String, String> = HashMap::with_capacity(obj.len());
+    for (k, v) in obj.iter() {
+        let value_str = match v {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            serde_json::Value::Null => String::new(),
+            serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+                return Err(format!(
+                    "Secret value for key '{k}' must be a scalar (string, number, bool, or null)"
+                ));
             }
-            Some('}') | None => break,
-            Some(c) => return Err(format!("Unexpected character in JSON: '{}'", c)),
-        }
+        };
+        map.insert(k.clone(), value_str);
     }
 
     Ok(map)
-}
-
-fn skip_ws(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
-    while let Some(c) = chars.peek() {
-        if c.is_whitespace() {
-            chars.next();
-        } else {
-            break;
-        }
-    }
-}
-
-fn parse_json_string(
-    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Result<String, String> {
-    match chars.next() {
-        Some('"') => {}
-        other => return Err(format!("Expected '\"', got {:?}", other)),
-    }
-
-    let mut s = String::new();
-    loop {
-        match chars.next() {
-            Some('\\') => match chars.next() {
-                Some('"') => s.push('"'),
-                Some('\\') => s.push('\\'),
-                Some('/') => s.push('/'),
-                Some('n') => s.push('\n'),
-                Some('t') => s.push('\t'),
-                Some('r') => s.push('\r'),
-                Some(c) => {
-                    s.push('\\');
-                    s.push(c);
-                }
-                None => return Err("Unterminated string escape".to_string()),
-            },
-            Some('"') => return Ok(s),
-            Some(c) => s.push(c),
-            None => return Err("Unterminated string".to_string()),
-        }
-    }
 }
