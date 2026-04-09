@@ -126,6 +126,15 @@ fn now_unix_secs() -> f64 {
 /// Extracts all NTP header fields and computes clock offset and round-trip
 /// delay with nanosecond granularity.
 pub fn sntp_query(server: &str) -> Result<SntpResult, String> {
+    let result = sntp_query_inner(server);
+    match &result {
+        Ok(_) => crate::audit_log::record("ptp", "sntp_query", server, true, 0, ""),
+        Err(e) => crate::audit_log::record("ptp", "sntp_query", server, false, 0, e),
+    }
+    result
+}
+
+fn sntp_query_inner(server: &str) -> Result<SntpResult, String> {
     validate_server(server)?;
     // Atomic resolve-and-validate (closes UDP DNS-rebinding TOCTOU, CWE-918).
     let addr = crate::security::resolve_and_validate_udp(server, NTP_PORT)?;

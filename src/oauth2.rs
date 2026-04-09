@@ -24,7 +24,8 @@ pub fn client_credentials(
     client_secret: &str,
     scope: &str,
 ) -> OAuth2TokenResult {
-    match client_credentials_inner(token_url, client_id, client_secret, scope) {
+    let host = crate::audit_log::host_from_url(token_url);
+    let r = match client_credentials_inner(token_url, client_id, client_secret, scope) {
         Ok(r) => r,
         Err(e) => OAuth2TokenResult {
             success: false,
@@ -34,7 +35,16 @@ pub fn client_credentials(
             scope: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "oauth2",
+        "client_credentials",
+        &host,
+        r.success,
+        0,
+        &r.message,
+    );
+    r
 }
 
 fn client_credentials_inner(

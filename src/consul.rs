@@ -76,14 +76,18 @@ pub fn consul_get(url: &str, key: &str, token: &str) -> KvResult {
     }
 
     let resp = http::execute(Method::Get, &api_url, &headers, None);
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
-        return fail(format!(
+        let msg = format!(
             "Consul GET returned status {}: {}",
             resp.status, resp.reason
-        ));
+        );
+        crate::audit_log::record("consul", "get", &host, false, resp.status as i32, &msg);
+        return fail(msg);
     }
 
+    crate::audit_log::record("consul", "get", &host, true, resp.status as i32, "");
     KvResult {
         success: true,
         value: resp.body,
@@ -111,23 +115,28 @@ pub fn consul_set(url: &str, key: &str, value: &str, token: &str) -> KvResult {
     }
 
     let resp = http::execute(Method::Put, &api_url, &headers, Some(value));
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
-        return fail(format!(
+        let msg = format!(
             "Consul PUT returned status {}: {}",
             resp.status, resp.reason
-        ));
+        );
+        crate::audit_log::record("consul", "set", &host, false, resp.status as i32, &msg);
+        return fail(msg);
     }
 
     let wrote = resp.body.trim() == "true";
+    let msg = if wrote {
+        "OK".to_string()
+    } else {
+        "Consul returned false — write was rejected".to_string()
+    };
+    crate::audit_log::record("consul", "set", &host, wrote, resp.status as i32, &msg);
     KvResult {
         success: wrote,
         value: String::new(),
-        message: if wrote {
-            "OK".to_string()
-        } else {
-            "Consul returned false — write was rejected".to_string()
-        },
+        message: msg,
     }
 }
 
@@ -150,14 +159,18 @@ pub fn consul_delete(url: &str, key: &str, token: &str) -> KvResult {
     }
 
     let resp = http::execute(Method::Delete, &api_url, &headers, None);
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
-        return fail(format!(
+        let msg = format!(
             "Consul DELETE returned status {}: {}",
             resp.status, resp.reason
-        ));
+        );
+        crate::audit_log::record("consul", "delete", &host, false, resp.status as i32, &msg);
+        return fail(msg);
     }
 
+    crate::audit_log::record("consul", "delete", &host, true, resp.status as i32, "");
     KvResult {
         success: true,
         value: String::new(),
@@ -193,12 +206,15 @@ pub fn etcd_get(url: &str, key: &str) -> KvResult {
     let headers: Vec<(String, String)> = vec![("Content-Type".into(), "application/json".into())];
 
     let resp = http::execute(Method::Post, &api_url, &headers, Some(&body));
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
-        return fail(format!(
+        let msg = format!(
             "etcd range returned status {}: {}",
             resp.status, resp.reason
-        ));
+        );
+        crate::audit_log::record("etcd", "get", &host, false, resp.status as i32, &msg);
+        return fail(msg);
     }
 
     // Extract the first value from the kvs array.
@@ -222,6 +238,7 @@ pub fn etcd_get(url: &str, key: &str) -> KvResult {
         }
     };
 
+    crate::audit_log::record("etcd", "get", &host, true, resp.status as i32, "");
     KvResult {
         success: true,
         value: decoded,
@@ -250,14 +267,15 @@ pub fn etcd_put(url: &str, key: &str, value: &str) -> KvResult {
     let headers: Vec<(String, String)> = vec![("Content-Type".into(), "application/json".into())];
 
     let resp = http::execute(Method::Post, &api_url, &headers, Some(&body));
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
-        return fail(format!(
-            "etcd put returned status {}: {}",
-            resp.status, resp.reason
-        ));
+        let msg = format!("etcd put returned status {}: {}", resp.status, resp.reason);
+        crate::audit_log::record("etcd", "put", &host, false, resp.status as i32, &msg);
+        return fail(msg);
     }
 
+    crate::audit_log::record("etcd", "put", &host, true, resp.status as i32, "");
     KvResult {
         success: true,
         value: String::new(),

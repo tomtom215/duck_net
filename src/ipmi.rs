@@ -177,6 +177,16 @@ fn parse_ipmi_response(buf: &[u8]) -> Result<(u8, Vec<u8>), String> {
 
 /// Send an IPMI command over RMCP/UDP and return the parsed response.
 fn send_ipmi(host: &str, netfn: u8, cmd: u8, data: &[u8]) -> Result<(u8, Vec<u8>), String> {
+    let result = send_ipmi_inner(host, netfn, cmd, data);
+    let op = format!("0x{netfn:02X}/0x{cmd:02X}");
+    match &result {
+        Ok((cc, _)) => crate::audit_log::record("ipmi", &op, host, true, *cc as i32, ""),
+        Err(e) => crate::audit_log::record("ipmi", &op, host, false, 0, e),
+    }
+    result
+}
+
+fn send_ipmi_inner(host: &str, netfn: u8, cmd: u8, data: &[u8]) -> Result<(u8, Vec<u8>), String> {
     if !is_valid_host(host) {
         return Err(format!("Invalid host: {host}"));
     }

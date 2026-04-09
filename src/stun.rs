@@ -56,7 +56,7 @@ pub fn lookup(server: &str) -> StunResult {
         };
     }
 
-    match lookup_inner(&host, port) {
+    let r = match lookup_inner(&host, port) {
         Ok(r) => r,
         Err(e) => StunResult {
             success: false,
@@ -64,7 +64,16 @@ pub fn lookup(server: &str) -> StunResult {
             public_port: 0,
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "stun",
+        "lookup",
+        &host,
+        r.success,
+        r.public_port as i32,
+        &r.message,
+    );
+    r
 }
 
 /// Parse server string: host[:port] (default port 3478).

@@ -87,7 +87,13 @@ pub fn query_server(server: &str, query: &str) -> Result<String, String> {
     }
 
     buf.truncate(total);
-    String::from_utf8(buf).map_err(|e| format!("WHOIS response is not valid UTF-8: {e}"))
+    let outcome =
+        String::from_utf8(buf).map_err(|e| format!("WHOIS response is not valid UTF-8: {e}"));
+    match &outcome {
+        Ok(_) => crate::audit_log::record("whois", "query", server, true, total as i32, ""),
+        Err(e) => crate::audit_log::record("whois", "query", server, false, 0, e),
+    }
+    outcome
 }
 
 /// Extract the "refer:" field from an IANA WHOIS response.

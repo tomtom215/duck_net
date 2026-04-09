@@ -139,27 +139,40 @@ impl FtpConn {
     }
 }
 
+/// Extract the hostname from an ftp:// / ftps:// URL for audit-log records.
+fn host_for_audit(url: &str) -> String {
+    parse_url(url)
+        .map(|(h, _, _, _, _)| h)
+        .unwrap_or_else(|_| crate::security::scrub_url(url))
+}
+
 pub fn list(url: &str) -> Result<Vec<FtpEntry>, String> {
-    let mut conn = connect_and_login(url)?;
-
-    let listing = conn
-        .stream
-        .list(Some(&conn.path))
-        .map_err(|e| format!("FTP list failed: {e}"))?;
-
-    let mut entries = Vec::new();
-    for line in &listing {
-        if let Some(entry) = parse_list_line(line) {
-            entries.push(entry);
+    let host = host_for_audit(url);
+    let outcome: Result<Vec<FtpEntry>, String> = (|| {
+        let mut conn = connect_and_login(url)?;
+        let listing = conn
+            .stream
+            .list(Some(&conn.path))
+            .map_err(|e| format!("FTP list failed: {e}"))?;
+        let mut entries = Vec::new();
+        for line in &listing {
+            if let Some(entry) = parse_list_line(line) {
+                entries.push(entry);
+            }
         }
+        conn.return_to_cache();
+        Ok(entries)
+    })();
+    match &outcome {
+        Ok(v) => crate::audit_log::record("ftp", "list", &host, true, v.len() as i32, ""),
+        Err(e) => crate::audit_log::record("ftp", "list", &host, false, 0, e),
     }
-
-    conn.return_to_cache();
-    Ok(entries)
+    outcome
 }
 
 pub fn read(url: &str) -> FtpReadResult {
-    match read_inner(url) {
+    let host = host_for_audit(url);
+    let r = match read_inner(url) {
         Ok(r) => r,
         Err(msg) => FtpReadResult {
             success: false,
@@ -167,7 +180,9 @@ pub fn read(url: &str) -> FtpReadResult {
             size: 0,
             message: msg,
         },
-    }
+    };
+    crate::audit_log::record("ftp", "read", &host, r.success, r.size as i32, &r.message);
+    r
 }
 
 fn read_inner(url: &str) -> Result<FtpReadResult, String> {
@@ -202,7 +217,8 @@ fn read_inner(url: &str) -> Result<FtpReadResult, String> {
 
 /// Read a file as raw bytes (binary).
 pub fn read_blob(url: &str) -> FtpReadBlobResult {
-    match read_blob_inner(url) {
+    let host = host_for_audit(url);
+    let r = match read_blob_inner(url) {
         Ok(r) => r,
         Err(msg) => FtpReadBlobResult {
             success: false,
@@ -210,7 +226,16 @@ pub fn read_blob(url: &str) -> FtpReadBlobResult {
             size: 0,
             message: msg,
         },
-    }
+    };
+    crate::audit_log::record(
+        "ftp",
+        "read_blob",
+        &host,
+        r.success,
+        r.size as i32,
+        &r.message,
+    );
+    r
 }
 
 fn read_blob_inner(url: &str) -> Result<FtpReadBlobResult, String> {
@@ -241,14 +266,24 @@ fn read_blob_inner(url: &str) -> Result<FtpReadBlobResult, String> {
 }
 
 pub fn write(url: &str, content: &str) -> FtpWriteResult {
-    match write_inner(url, content) {
+    let host = host_for_audit(url);
+    let r = match write_inner(url, content) {
         Ok(r) => r,
         Err(msg) => FtpWriteResult {
             success: false,
             bytes_written: 0,
             message: msg,
         },
-    }
+    };
+    crate::audit_log::record(
+        "ftp",
+        "write",
+        &host,
+        r.success,
+        r.bytes_written as i32,
+        &r.message,
+    );
+    r
 }
 
 fn write_inner(url: &str, content: &str) -> Result<FtpWriteResult, String> {
@@ -270,7 +305,8 @@ fn write_inner(url: &str, content: &str) -> Result<FtpWriteResult, String> {
 }
 
 pub fn delete(url: &str) -> FtpResult {
-    match delete_inner(url) {
+    let host = host_for_audit(url);
+    let r = match delete_inner(url) {
         Ok(msg) => FtpResult {
             success: true,
             message: msg,
@@ -279,7 +315,9 @@ pub fn delete(url: &str) -> FtpResult {
             success: false,
             message: msg,
         },
-    }
+    };
+    crate::audit_log::record("ftp", "delete", &host, r.success, 0, &r.message);
+    r
 }
 
 fn delete_inner(url: &str) -> Result<String, String> {

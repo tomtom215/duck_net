@@ -81,13 +81,15 @@ fn apply_dns_policy(hostname: &str, ips: Vec<String>) -> Vec<String> {
     if !private.is_empty() {
         crate::security_warnings::warn_dns_private_result(hostname, &private);
     }
-    if crate::security::dns_block_private() {
+    let out = if crate::security::dns_block_private() {
         public
     } else {
         let mut all = public;
         all.extend(private);
         all
-    }
+    };
+    crate::audit_log::record("dns", "lookup", hostname, true, out.len() as i32, "");
+    out
 }
 
 /// Resolve a hostname to all IP addresses (IPv4 + IPv6).

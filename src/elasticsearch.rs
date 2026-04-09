@@ -3,6 +3,15 @@
 
 use crate::http::{self, Method};
 
+/// Best-effort hostname extraction for audit-log records.
+fn host_for_audit(url: &str) -> String {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    rest.split('/').next().unwrap_or(rest).to_string()
+}
+
 pub struct EsResult {
     pub success: bool,
     pub body: String,
@@ -89,8 +98,8 @@ pub fn search(url: &str, index: &str, query_json: &str) -> EsResult {
     };
 
     let resp = http::execute(Method::Post, &api_url, &headers, body);
-
-    if resp.status >= 200 && resp.status < 300 {
+    let status = resp.status as i32;
+    let result = if resp.status >= 200 && resp.status < 300 {
         EsResult {
             success: true,
             body: resp.body,
@@ -105,7 +114,16 @@ pub fn search(url: &str, index: &str, query_json: &str) -> EsResult {
                 resp.status, resp.reason
             ),
         }
-    }
+    };
+    crate::audit_log::record(
+        "elasticsearch",
+        "search",
+        &host_for_audit(url),
+        result.success,
+        status,
+        &result.message,
+    );
+    result
 }
 
 /// Count documents in an Elasticsearch index using the _count endpoint.
@@ -136,8 +154,8 @@ pub fn count(url: &str, index: &str, query_json: &str) -> EsResult {
     };
 
     let resp = http::execute(Method::Post, &api_url, &headers, body);
-
-    if resp.status >= 200 && resp.status < 300 {
+    let status = resp.status as i32;
+    let result = if resp.status >= 200 && resp.status < 300 {
         EsResult {
             success: true,
             body: resp.body,
@@ -152,7 +170,16 @@ pub fn count(url: &str, index: &str, query_json: &str) -> EsResult {
                 resp.status, resp.reason
             ),
         }
-    }
+    };
+    crate::audit_log::record(
+        "elasticsearch",
+        "count",
+        &host_for_audit(url),
+        result.success,
+        status,
+        &result.message,
+    );
+    result
 }
 
 /// Get cluster/index info using the _cat endpoint.
@@ -200,8 +227,8 @@ pub fn cat(url: &str, endpoint: &str) -> EsResult {
     );
 
     let resp = http::execute(Method::Get, &api_url, &[], None);
-
-    if resp.status >= 200 && resp.status < 300 {
+    let status = resp.status as i32;
+    let result = if resp.status >= 200 && resp.status < 300 {
         EsResult {
             success: true,
             body: resp.body,
@@ -216,5 +243,14 @@ pub fn cat(url: &str, endpoint: &str) -> EsResult {
                 resp.status, resp.reason
             ),
         }
-    }
+    };
+    crate::audit_log::record(
+        "elasticsearch",
+        "cat",
+        &host_for_audit(url),
+        result.success,
+        status,
+        &result.message,
+    );
+    result
 }

@@ -82,18 +82,22 @@ pub fn query(url: &str, org: &str, token: &str, flux_query: &str) -> InfluxResul
     ];
 
     let resp = http::execute(Method::Post, &api_url, &headers, Some(flux_query));
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
+        let msg = format!(
+            "InfluxDB query API returned status {}: {}",
+            resp.status, resp.reason
+        );
+        crate::audit_log::record("influxdb", "query", &host, false, resp.status as i32, &msg);
         return InfluxResult {
             success: false,
             body: resp.body.clone(),
-            message: format!(
-                "InfluxDB query API returned status {}: {}",
-                resp.status, resp.reason
-            ),
+            message: msg,
         };
     }
 
+    crate::audit_log::record("influxdb", "query", &host, true, resp.status as i32, "");
     InfluxResult {
         success: true,
         body: resp.body,
@@ -179,18 +183,22 @@ pub fn write(url: &str, org: &str, bucket: &str, token: &str, line_protocol: &st
     ];
 
     let resp = http::execute(Method::Post, &api_url, &headers, Some(line_protocol));
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 204 {
+        let msg = format!(
+            "InfluxDB write API returned status {}: {}",
+            resp.status, resp.reason
+        );
+        crate::audit_log::record("influxdb", "write", &host, false, resp.status as i32, &msg);
         return InfluxResult {
             success: false,
             body: resp.body.clone(),
-            message: format!(
-                "InfluxDB write API returned status {}: {}",
-                resp.status, resp.reason
-            ),
+            message: msg,
         };
     }
 
+    crate::audit_log::record("influxdb", "write", &host, true, resp.status as i32, "");
     InfluxResult {
         success: true,
         body: resp.body,
@@ -213,18 +221,22 @@ pub fn health(url: &str) -> InfluxResult {
     let api_url = format!("{}/health", url.trim_end_matches('/'));
 
     let resp = http::execute(Method::Get, &api_url, &[], None);
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
+        let msg = format!(
+            "InfluxDB health check returned status {}: {}",
+            resp.status, resp.reason
+        );
+        crate::audit_log::record("influxdb", "health", &host, false, resp.status as i32, &msg);
         return InfluxResult {
             success: false,
             body: resp.body.clone(),
-            message: format!(
-                "InfluxDB health check returned status {}: {}",
-                resp.status, resp.reason
-            ),
+            message: msg,
         };
     }
 
+    crate::audit_log::record("influxdb", "health", &host, true, resp.status as i32, "");
     InfluxResult {
         success: true,
         body: resp.body,

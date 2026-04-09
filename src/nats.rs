@@ -215,7 +215,10 @@ pub fn publish(url: &str, subject: &str, payload: &str) -> NatsResult {
         };
     }
 
-    match publish_inner(url, subject, payload) {
+    let host_for_audit = parse_nats_url(url)
+        .map(|(h, _, _, _)| h)
+        .unwrap_or_else(|_| scrub_url(url));
+    let result = match publish_inner(url, subject, payload) {
         Ok(msg) => NatsResult {
             success: true,
             message: msg,
@@ -224,7 +227,16 @@ pub fn publish(url: &str, subject: &str, payload: &str) -> NatsResult {
             success: false,
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "nats",
+        "publish",
+        &host_for_audit,
+        result.success,
+        0,
+        &result.message,
+    );
+    result
 }
 
 fn publish_inner(url: &str, subject: &str, payload: &str) -> Result<String, String> {
@@ -328,7 +340,10 @@ pub fn request(url: &str, subject: &str, payload: &str, timeout_ms: u32) -> Nats
         };
     }
 
-    match request_inner(url, subject, payload, timeout_ms) {
+    let host_for_audit = parse_nats_url(url)
+        .map(|(h, _, _, _)| h)
+        .unwrap_or_else(|_| scrub_url(url));
+    let result = match request_inner(url, subject, payload, timeout_ms) {
         Ok((response, msg)) => NatsRequestResult {
             success: true,
             response,
@@ -339,7 +354,16 @@ pub fn request(url: &str, subject: &str, payload: &str, timeout_ms: u32) -> Nats
             response: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "nats",
+        "request",
+        &host_for_audit,
+        result.success,
+        0,
+        &result.message,
+    );
+    result
 }
 
 fn request_inner(
@@ -540,7 +564,10 @@ pub fn subscribe(
     }
     let max = max_messages.clamp(1, 100_000) as usize;
 
-    match subscribe_inner(url, subject, max, timeout_ms) {
+    let host_for_audit = parse_nats_url(url)
+        .map(|(h, _, _, _)| h)
+        .unwrap_or_else(|_| scrub_url(url));
+    let result = match subscribe_inner(url, subject, max, timeout_ms) {
         Ok((msgs, msg)) => NatsSubscribeResult {
             success: true,
             messages: msgs,
@@ -551,7 +578,16 @@ pub fn subscribe(
             messages: vec![],
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "nats",
+        "subscribe",
+        &host_for_audit,
+        result.success,
+        result.messages.len() as i32,
+        &result.message,
+    );
+    result
 }
 
 fn subscribe_inner(

@@ -66,7 +66,15 @@ pub fn query(
         all_headers.push(("Content-Type".into(), "application/json".into()));
     }
 
-    http::execute(Method::Post, url, &all_headers, Some(&body))
+    let resp = http::execute(Method::Post, url, &all_headers, Some(&body));
+    crate::audit_log::record_http(
+        "graphql",
+        "query",
+        &crate::audit_log::host_from_url(url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 fn build_body(query_str: &str, variables: Option<&str>) -> String {

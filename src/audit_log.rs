@@ -154,6 +154,29 @@ pub fn len() -> usize {
     }
 }
 
+/// Extract the `host[:port]` portion from a URL-ish string for audit records.
+/// Handles `scheme://host/...` and plain `host:port` input gracefully. If the
+/// string contains a `user:pass@` prefix, it is stripped. This helper is used
+/// across every protocol module so audit entries carry a consistent host field.
+pub fn host_from_url(url: &str) -> String {
+    let rest = url.find("://").map(|idx| &url[idx + 3..]).unwrap_or(url);
+    // Strip userinfo@
+    let after_auth = rest.rsplit_once('@').map(|(_, h)| h).unwrap_or(rest);
+    // Trim path/query/fragment.
+    let host = after_auth
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(after_auth);
+    host.to_string()
+}
+
+/// Convenience: record an audit entry derived from an HTTP status code.
+/// Success is determined by `status` being in `200..=399`.
+pub fn record_http(protocol: &str, operation: &str, host: &str, status: u16, message: &str) {
+    let success = (200..400).contains(&status);
+    record(protocol, operation, host, success, status as i32, message);
+}
+
 /// Format a Unix timestamp as a minimal ISO 8601 UTC string.
 /// Example: "2026-03-31T14:05:22Z"
 fn format_iso8601(secs: i64) -> String {

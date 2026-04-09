@@ -20,7 +20,7 @@ pub struct SipResult {
 
 /// Send a SIP OPTIONS ping to check if a SIP server is alive.
 pub fn options_ping(host: &str, port: u16) -> SipResult {
-    match options_ping_inner(host, port) {
+    let r = match options_ping_inner(host, port) {
         Ok(result) => result,
         Err(e) => SipResult {
             alive: false,
@@ -30,7 +30,16 @@ pub fn options_ping(host: &str, port: u16) -> SipResult {
             allow_methods: String::new(),
             raw_response: String::new(),
         },
-    }
+    };
+    crate::audit_log::record(
+        "sip",
+        "options_ping",
+        host,
+        r.alive,
+        r.status_code,
+        &r.status_text,
+    );
+    r
 }
 
 fn options_ping_inner(host: &str, port: u16) -> Result<SipResult, String> {

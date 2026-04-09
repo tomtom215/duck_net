@@ -89,7 +89,7 @@ pub fn auth(host: &str, port: u16, secret: &str, username: &str, password: &str)
 
     // Atomic resolve-and-validate performed inside auth_inner to close UDP
     // DNS-rebinding TOCTOU (CWE-918).
-    match auth_inner(host, port, secret, username, password) {
+    let r = match auth_inner(host, port, secret, username, password) {
         Ok(r) => r,
         Err(e) => RadiusResult {
             success: false,
@@ -97,7 +97,9 @@ pub fn auth(host: &str, port: u16, secret: &str, username: &str, password: &str)
             code_name: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("radius", "auth", host, r.success, r.code, &r.message);
+    r
 }
 
 /// Convenience wrapper using default port.

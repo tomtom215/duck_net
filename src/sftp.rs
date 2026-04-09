@@ -253,12 +253,25 @@ async fn connect_sftp(
     Ok(sftp)
 }
 
+/// Extract the hostname from an sftp:// URL for audit-log records.
+fn host_for_audit(url: &str) -> String {
+    parse_url(url)
+        .map(|(h, _, _, _, _)| h)
+        .unwrap_or_else(|_| crate::security::scrub_url(url))
+}
+
 pub fn list(url: &str, key_file: Option<&str>) -> Result<Vec<SftpEntry>, String> {
     // Validate path component for traversal (CWE-22)
     if let Ok((_, _, _, _, ref path)) = parse_url(url) {
         crate::security::validate_path_no_traversal(path)?;
     }
-    runtime::block_on(list_async(url, key_file))
+    let host = host_for_audit(url);
+    let r = runtime::block_on(list_async(url, key_file));
+    match &r {
+        Ok(v) => crate::audit_log::record("sftp", "list", &host, true, v.len() as i32, ""),
+        Err(e) => crate::audit_log::record("sftp", "list", &host, false, 0, e),
+    }
+    r
 }
 
 async fn list_async(url: &str, key_file: Option<&str>) -> Result<Vec<SftpEntry>, String> {
@@ -297,7 +310,8 @@ pub fn read(url: &str, key_file: Option<&str>) -> SftpReadResult {
             };
         }
     }
-    match runtime::block_on(read_async(url, key_file)) {
+    let host = host_for_audit(url);
+    let r = match runtime::block_on(read_async(url, key_file)) {
         Ok(r) => r,
         Err(msg) => SftpReadResult {
             success: false,
@@ -305,7 +319,9 @@ pub fn read(url: &str, key_file: Option<&str>) -> SftpReadResult {
             size: 0,
             message: msg,
         },
-    }
+    };
+    crate::audit_log::record("sftp", "read", &host, r.success, r.size as i32, &r.message);
+    r
 }
 
 async fn read_async(url: &str, key_file: Option<&str>) -> Result<SftpReadResult, String> {
@@ -351,7 +367,8 @@ pub fn read_blob(url: &str, key_file: Option<&str>) -> SftpReadBlobResult {
             };
         }
     }
-    match runtime::block_on(read_blob_async(url, key_file)) {
+    let host = host_for_audit(url);
+    let r = match runtime::block_on(read_blob_async(url, key_file)) {
         Ok(r) => r,
         Err(msg) => SftpReadBlobResult {
             success: false,
@@ -359,7 +376,16 @@ pub fn read_blob(url: &str, key_file: Option<&str>) -> SftpReadBlobResult {
             size: 0,
             message: msg,
         },
-    }
+    };
+    crate::audit_log::record(
+        "sftp",
+        "read_blob",
+        &host,
+        r.success,
+        r.size as i32,
+        &r.message,
+    );
+    r
 }
 
 async fn read_blob_async(url: &str, key_file: Option<&str>) -> Result<SftpReadBlobResult, String> {
@@ -400,14 +426,24 @@ pub fn write(url: &str, content: &str, key_file: Option<&str>) -> SftpWriteResul
             };
         }
     }
-    match runtime::block_on(write_async(url, content, key_file)) {
+    let host = host_for_audit(url);
+    let r = match runtime::block_on(write_async(url, content, key_file)) {
         Ok(r) => r,
         Err(msg) => SftpWriteResult {
             success: false,
             bytes_written: 0,
             message: msg,
         },
-    }
+    };
+    crate::audit_log::record(
+        "sftp",
+        "write",
+        &host,
+        r.success,
+        r.bytes_written as i32,
+        &r.message,
+    );
+    r
 }
 
 async fn write_async(
@@ -442,7 +478,8 @@ pub fn delete(url: &str, key_file: Option<&str>) -> SftpResult {
             };
         }
     }
-    match runtime::block_on(delete_async(url, key_file)) {
+    let host = host_for_audit(url);
+    let r = match runtime::block_on(delete_async(url, key_file)) {
         Ok(msg) => SftpResult {
             success: true,
             message: msg,
@@ -451,7 +488,9 @@ pub fn delete(url: &str, key_file: Option<&str>) -> SftpResult {
             success: false,
             message: msg,
         },
-    }
+    };
+    crate::audit_log::record("sftp", "delete", &host, r.success, 0, &r.message);
+    r
 }
 
 async fn delete_async(url: &str, key_file: Option<&str>) -> Result<String, String> {

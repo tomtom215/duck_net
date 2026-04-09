@@ -77,7 +77,15 @@ pub fn query(
         all_headers.push(("Accept".into(), "application/json".into()));
     }
 
-    http::execute(Method::Get, &url, &all_headers, None)
+    let resp = http::execute(Method::Get, &url, &all_headers, None);
+    crate::audit_log::record_http(
+        "odata",
+        "query",
+        &crate::audit_log::host_from_url(base_url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 /// Extract the next-page URL from a response body for pagination.

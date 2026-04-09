@@ -174,7 +174,10 @@ pub fn fetch_message(
     mailbox: &str,
     uid: i64,
 ) -> ImapFetchResult {
-    match fetch_message_inner(url, username, password, mailbox, uid) {
+    let host_for_audit = parse_imap_url(url)
+        .map(|(h, _, _)| h)
+        .unwrap_or_else(|_| url.to_string());
+    let r = match fetch_message_inner(url, username, password, mailbox, uid) {
         Ok(body) => ImapFetchResult {
             success: true,
             body,
@@ -185,7 +188,9 @@ pub fn fetch_message(
             body: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("imap", "fetch", &host_for_audit, r.success, 0, &r.message);
+    r
 }
 
 fn fetch_message_inner(
@@ -522,7 +527,10 @@ pub fn idle(
     let timeout_secs = timeout_secs.clamp(1, 300);
     let max_notifications = max_notifications.min(10_000);
 
-    match idle_inner(
+    let host_for_audit = parse_imap_url(url)
+        .map(|(h, _, _)| h)
+        .unwrap_or_else(|_| url.to_string());
+    let r = match idle_inner(
         url,
         username,
         password,
@@ -540,7 +548,16 @@ pub fn idle(
             notifications: vec![],
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "imap",
+        "idle",
+        &host_for_audit,
+        r.success,
+        r.notifications.len() as i32,
+        &r.message,
+    );
+    r
 }
 
 fn idle_inner(

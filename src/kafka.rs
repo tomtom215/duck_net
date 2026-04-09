@@ -42,9 +42,24 @@ pub fn consume(
 
     let max_messages = max_messages.clamp(1, MAX_CONSUME_MESSAGES);
 
-    runtime::block_on(async {
+    let result = runtime::block_on(async {
         consume_async(brokers, topic, partition, start_offset, max_messages).await
-    })
+    });
+    let host_for_audit = brokers
+        .split(',')
+        .next()
+        .unwrap_or(brokers)
+        .trim()
+        .to_string();
+    crate::audit_log::record(
+        "kafka",
+        "consume",
+        &host_for_audit,
+        result.success,
+        result.messages.len() as i32,
+        &result.message,
+    );
+    result
 }
 
 async fn consume_async(
@@ -213,7 +228,22 @@ pub fn produce(brokers: &str, topic: &str, key: Option<&str>, value: &str) -> Ka
         "Kafka with SASL/TLS via a dedicated Kafka extension",
     );
 
-    runtime::block_on(async { produce_async(brokers, topic, key, value).await })
+    let result = runtime::block_on(async { produce_async(brokers, topic, key, value).await });
+    let host_for_audit = brokers
+        .split(',')
+        .next()
+        .unwrap_or(brokers)
+        .trim()
+        .to_string();
+    crate::audit_log::record(
+        "kafka",
+        "produce",
+        &host_for_audit,
+        result.success,
+        result.partition,
+        &result.message,
+    );
+    result
 }
 
 async fn produce_async(

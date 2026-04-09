@@ -6,10 +6,38 @@
 //! These functions resolve named secrets into protocol-specific credential
 //! tuples. They read from the shared in-memory secrets store defined in
 //! [`crate::secrets`].
+//!
+//! ## Memory hygiene
+//!
+//! Every read goes through [`crate::secrets::get_value_secret`], which
+//! returns a [`crate::secrets::SecretString`] whose heap allocation is
+//! wiped when it drops. For tuple/struct return types where the outer API
+//! is a plain `String`, the intermediate [`SecretString`] is still dropped
+//! at the end of the resolver, wiping the transient copy taken from the
+//! in-memory secrets store. Sensitive-field owning types additionally
+//! implement [`Drop`] to zero their fields on the way out.
+//!
+//! The plaintext `String` copies produced here are unavoidable at the FFI
+//! boundary, where duck_net must feed them to underlying protocol crates
+//! (ldap3, russh, ureq, hmac, …) that take `&str` without a zeroizing
+//! intermediary. Centralising the plaintext extraction in this module
+//! keeps that blast radius small and makes the audit trail obvious.
 
-use crate::secrets::get_value;
+use crate::secrets::get_value_secret;
+use zeroize::Zeroize;
+
+/// Read a sensitive value from the secrets store and expose it as a plain
+/// `String`, relying on [`SecretString`] to wipe the transient heap buffer
+/// on drop. Returns `None` if the secret or key does not exist.
+fn take_secret(secret_name: &str, key: &str) -> Option<String> {
+    get_value_secret(secret_name, key).map(|s| s.expose_secret().to_string())
+}
 
 /// Resolved S3 credentials from a named secret.
+///
+/// `access_key`, `secret_key`, and `session_token` are zeroized when this
+/// struct drops so that the plaintext cannot linger on the heap after the
+/// request they signed has completed (CWE-316).
 #[allow(dead_code)]
 pub struct S3Creds {
     pub endpoint: String,
@@ -22,29 +50,95 @@ pub struct S3Creds {
     pub use_ssl: bool,
 }
 
+impl Drop for S3Creds {
+    fn drop(&mut self) {
+        self.access_key.zeroize();
+        self.secret_key.zeroize();
+        if let Some(ref mut token) = self.session_token {
+            token.zeroize();
+        }
+    }
+}
+
+/// Resolved credentials for `resolve_credentials`. The password is zeroized
+/// on drop so callers don't leak plaintext through heap reuse.
+#[allow(dead_code)]
+pub struct ResolvedCredentials {
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
+impl Drop for ResolvedCredentials {
+    fn drop(&mut self) {
+        if let Some(ref mut p) = self.password {
+            p.zeroize();
+        }
+    }
+}
+
+impl ResolvedCredentials {
+    /// Convert to the historical `(Option<String>, Option<String>)` tuple
+    /// shape, *without* moving the internal strings — the caller gets clones
+    /// that are not zeroized, but the originals held by the struct still are.
+    ///
+    /// Prefer reading `.username` / `.password` directly.
+    #[allow(dead_code)]
+    pub fn as_tuple(&self) -> (Option<String>, Option<String>) {
+        (self.username.clone(), self.password.clone())
+    }
+}
+
+/// Resolved SSH credentials. Password field is zeroized on drop; `key_file`
+/// is a filesystem path and is not sensitive in itself.
+#[allow(dead_code)]
+pub struct ResolvedSsh {
+    pub username: String,
+    pub key_file: Option<String>,
+    pub password: Option<String>,
+}
+
+impl Drop for ResolvedSsh {
+    fn drop(&mut self) {
+        if let Some(ref mut p) = self.password {
+            p.zeroize();
+        }
+    }
+}
+
+/// A zeroize-on-drop owned token. The plaintext `String` is wiped when this
+/// value is dropped.
+#[allow(dead_code)]
+pub struct ResolvedToken(pub String);
+
+impl Drop for ResolvedToken {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
 /// Resolve S3 credentials from a named secret.
 ///
 /// Accepts DuckDB-compatible field names (KEY_ID, SECRET, REGION, ENDPOINT,
 /// SESSION_TOKEN, USE_SSL) as well as alternative aliases.
 pub fn resolve_s3(secret_name: &str) -> Result<S3Creds, String> {
-    let access_key = get_value(secret_name, "key_id")
-        .or_else(|| get_value(secret_name, "access_key"))
+    let access_key = take_secret(secret_name, "key_id")
+        .or_else(|| take_secret(secret_name, "access_key"))
         .ok_or_else(|| format!("Secret '{}' missing 'key_id' or 'access_key'", secret_name))?;
 
-    let secret_key = get_value(secret_name, "secret")
-        .or_else(|| get_value(secret_name, "secret_key"))
+    let secret_key = take_secret(secret_name, "secret")
+        .or_else(|| take_secret(secret_name, "secret_key"))
         .ok_or_else(|| format!("Secret '{}' missing 'secret' or 'secret_key'", secret_name))?;
 
-    let region = get_value(secret_name, "region").unwrap_or_else(|| "us-east-1".to_string());
+    let region = take_secret(secret_name, "region").unwrap_or_else(|| "us-east-1".to_string());
 
-    let endpoint = get_value(secret_name, "endpoint")
+    let endpoint = take_secret(secret_name, "endpoint")
         .unwrap_or_else(|| "https://s3.amazonaws.com".to_string());
 
     // STS session token for temporary credentials
-    let session_token = get_value(secret_name, "session_token");
+    let session_token = take_secret(secret_name, "session_token");
 
     // use_ssl: default true; false only when explicitly set to "false"
-    let use_ssl = get_value(secret_name, "use_ssl")
+    let use_ssl = take_secret(secret_name, "use_ssl")
         .map(|v| !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
 
@@ -59,21 +153,38 @@ pub fn resolve_s3(secret_name: &str) -> Result<S3Creds, String> {
 }
 
 /// Resolve HTTP auth credentials from a named secret.
-/// Returns (bearer_token, extra_headers).
+/// Returns a header list to attach to the outgoing request.
+///
+/// Any `Authorization` header built here contains the bearer token or
+/// Base64-encoded Basic credentials in its value. That plaintext lives in
+/// an ordinary `String` for the lifetime of the request because `ureq`'s
+/// header API takes `&str`, but duck_net wipes the intermediate
+/// `SecretString` / password fields that were read from the store before
+/// the value was assembled.
 pub fn resolve_http(secret_name: &str) -> Result<Vec<(String, String)>, String> {
     let mut headers = Vec::new();
 
-    if let Some(token) =
-        get_value(secret_name, "bearer_token").or_else(|| get_value(secret_name, "token"))
+    if let Some(token) = get_value_secret(secret_name, "bearer_token")
+        .or_else(|| get_value_secret(secret_name, "token"))
     {
-        headers.push(("Authorization".to_string(), format!("Bearer {}", token)));
+        headers.push((
+            "Authorization".to_string(),
+            format!("Bearer {}", token.expose_secret()),
+        ));
     }
 
-    if let Some(user) = get_value(secret_name, "username") {
-        if let Some(pass) = get_value(secret_name, "password") {
+    if let Some(user) = get_value_secret(secret_name, "username") {
+        if let Some(pass) = get_value_secret(secret_name, "password") {
             use base64::Engine as _;
-            let encoded =
-                base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", user, pass));
+            // Format into a Zeroizing<String> so the intermediate concat is
+            // wiped once we've base64-encoded it.
+            let mut joined = zeroize::Zeroizing::new(format!(
+                "{}:{}",
+                user.expose_secret(),
+                pass.expose_secret()
+            ));
+            let encoded = base64::engine::general_purpose::STANDARD.encode(joined.as_bytes());
+            joined.zeroize();
             headers.push(("Authorization".to_string(), format!("Basic {}", encoded)));
         }
     }
@@ -81,23 +192,37 @@ pub fn resolve_http(secret_name: &str) -> Result<Vec<(String, String)>, String> 
     Ok(headers)
 }
 
-/// Resolve generic credentials: returns (username, password) if present.
-pub fn resolve_credentials(secret_name: &str) -> Result<(Option<String>, Option<String>), String> {
+/// Resolve generic credentials: returns a [`ResolvedCredentials`] value
+/// whose password is zeroized on drop.
+#[allow(dead_code)]
+pub fn resolve_credentials_secret(secret_name: &str) -> Result<ResolvedCredentials, String> {
     // Verify the secret exists by checking the type (any stored secret has a type).
     crate::secrets::get_type(secret_name)
         .ok_or_else(|| format!("Secret '{}' not found", secret_name))?;
 
-    let username = get_value(secret_name, "username");
-    let password = get_value(secret_name, "password");
-
-    Ok((username, password))
+    Ok(ResolvedCredentials {
+        username: take_secret(secret_name, "username"),
+        password: take_secret(secret_name, "password"),
+    })
 }
 
-/// Resolve a token-based secret (Vault, Consul, InfluxDB, etc.).
-pub fn resolve_token(secret_name: &str) -> Result<String, String> {
-    get_value(secret_name, "token")
-        .or_else(|| get_value(secret_name, "bearer_token"))
-        .or_else(|| get_value(secret_name, "api_key"))
+/// Legacy tuple-shape wrapper for callers that haven't migrated to
+/// [`ResolvedCredentials`]. The returned tuple is a plain `(Option<String>,
+/// Option<String>)` but the internal `SecretString` intermediate is still
+/// zeroized on the way out.
+pub fn resolve_credentials(secret_name: &str) -> Result<(Option<String>, Option<String>), String> {
+    let rc = resolve_credentials_secret(secret_name)?;
+    Ok((rc.username.clone(), rc.password.clone()))
+}
+
+/// Resolve a token-based secret (Vault, Consul, InfluxDB, etc.) as a
+/// zeroize-on-drop [`ResolvedToken`].
+#[allow(dead_code)]
+pub fn resolve_token_secret(secret_name: &str) -> Result<ResolvedToken, String> {
+    take_secret(secret_name, "token")
+        .or_else(|| take_secret(secret_name, "bearer_token"))
+        .or_else(|| take_secret(secret_name, "api_key"))
+        .map(ResolvedToken)
         .ok_or_else(|| {
             format!(
                 "Secret '{}' missing 'token', 'bearer_token', or 'api_key'",
@@ -106,15 +231,24 @@ pub fn resolve_token(secret_name: &str) -> Result<String, String> {
         })
 }
 
+/// Legacy `String`-returning wrapper for `resolve_token_secret`. The
+/// intermediate [`SecretString`] is zeroized; only the final plain `String`
+/// survives (by necessity, for handing to ureq/http APIs).
+pub fn resolve_token(secret_name: &str) -> Result<String, String> {
+    let token = resolve_token_secret(secret_name)?;
+    Ok(token.0.clone())
+}
+
 /// Resolve SSH credentials from a named secret.
-/// Returns (username, auth) where auth is either a key_file path or password.
-pub fn resolve_ssh(secret_name: &str) -> Result<(String, Option<String>, Option<String>), String> {
-    let username = get_value(secret_name, "username")
-        .or_else(|| get_value(secret_name, "user"))
+/// Returns a [`ResolvedSsh`] whose password is zeroized on drop.
+#[allow(dead_code)]
+pub fn resolve_ssh_secret(secret_name: &str) -> Result<ResolvedSsh, String> {
+    let username = take_secret(secret_name, "username")
+        .or_else(|| take_secret(secret_name, "user"))
         .unwrap_or_else(|| "root".to_string());
 
-    let key_file = get_value(secret_name, "key_file");
-    let password = get_value(secret_name, "password");
+    let key_file = take_secret(secret_name, "key_file");
+    let password = take_secret(secret_name, "password");
 
     if key_file.is_none() && password.is_none() {
         return Err(format!(
@@ -123,19 +257,34 @@ pub fn resolve_ssh(secret_name: &str) -> Result<(String, Option<String>, Option<
         ));
     }
 
-    Ok((username, key_file, password))
+    Ok(ResolvedSsh {
+        username,
+        key_file,
+        password,
+    })
+}
+
+/// Legacy tuple wrapper for callers that haven't migrated to
+/// [`ResolvedSsh`].
+pub fn resolve_ssh(secret_name: &str) -> Result<(String, Option<String>, Option<String>), String> {
+    let rs = resolve_ssh_secret(secret_name)?;
+    Ok((
+        rs.username.clone(),
+        rs.key_file.clone(),
+        rs.password.clone(),
+    ))
 }
 
 /// Resolve SNMP community string from a secret.
 pub fn resolve_community(secret_name: &str) -> Result<String, String> {
-    get_value(secret_name, "community")
+    take_secret(secret_name, "community")
         .ok_or_else(|| format!("Secret '{}' missing 'community'", secret_name))
 }
 
 /// Resolve RADIUS shared secret from a secret.
 pub fn resolve_shared_secret(secret_name: &str) -> Result<String, String> {
-    get_value(secret_name, "shared_secret")
-        .or_else(|| get_value(secret_name, "secret"))
+    take_secret(secret_name, "shared_secret")
+        .or_else(|| take_secret(secret_name, "secret"))
         .ok_or_else(|| format!("Secret '{}' missing 'shared_secret'", secret_name))
 }
 

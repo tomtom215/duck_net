@@ -60,18 +60,21 @@ pub fn route(prefix: &str) -> BgpResult {
     );
 
     let resp = http::execute(Method::Get, &url, &[], None);
-
+    let status = resp.status as i32;
     if resp.status != 200 {
+        let msg = format!(
+            "RIPE RIS API returned status {}: {}",
+            resp.status, resp.reason
+        );
+        crate::audit_log::record("bgp", "route", "stat.ripe.net", false, status, &msg);
         return BgpResult {
             success: false,
             body: resp.body.clone(),
-            message: format!(
-                "RIPE RIS API returned status {}: {}",
-                resp.status, resp.reason
-            ),
+            message: msg,
         };
     }
 
+    crate::audit_log::record("bgp", "route", "stat.ripe.net", true, status, "");
     BgpResult {
         success: true,
         body: resp.body,
@@ -96,18 +99,28 @@ pub fn prefix_overview(prefix: &str) -> BgpResult {
     );
 
     let resp = http::execute(Method::Get, &url, &[], None);
-
+    let status = resp.status as i32;
     if resp.status != 200 {
+        let msg = format!(
+            "RIPE RIS API returned status {}: {}",
+            resp.status, resp.reason
+        );
+        crate::audit_log::record(
+            "bgp",
+            "prefix_overview",
+            "stat.ripe.net",
+            false,
+            status,
+            &msg,
+        );
         return BgpResult {
             success: false,
             body: resp.body.clone(),
-            message: format!(
-                "RIPE RIS API returned status {}: {}",
-                resp.status, resp.reason
-            ),
+            message: msg,
         };
     }
 
+    crate::audit_log::record("bgp", "prefix_overview", "stat.ripe.net", true, status, "");
     BgpResult {
         success: true,
         body: resp.body,
@@ -132,18 +145,21 @@ pub fn asn_info(asn: &str) -> BgpResult {
     );
 
     let resp = http::execute(Method::Get, &url, &[], None);
-
+    let status = resp.status as i32;
     if resp.status != 200 {
+        let msg = format!(
+            "RIPE RIS API returned status {}: {}",
+            resp.status, resp.reason
+        );
+        crate::audit_log::record("bgp", "asn_info", "stat.ripe.net", false, status, &msg);
         return BgpResult {
             success: false,
             body: resp.body.clone(),
-            message: format!(
-                "RIPE RIS API returned status {}: {}",
-                resp.status, resp.reason
-            ),
+            message: msg,
         };
     }
 
+    crate::audit_log::record("bgp", "asn_info", "stat.ripe.net", true, status, "");
     BgpResult {
         success: true,
         body: resp.body,

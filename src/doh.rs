@@ -102,12 +102,22 @@ pub fn lookup(resolver_url: &str, domain: &str, record_type: &str) -> DohResult 
 
     let headers = vec![("Accept".to_string(), "application/dns-json".to_string())];
     let resp = http::execute(Method::Get, &api_url, &headers, None);
+    let audit_host = crate::audit_log::host_from_url(url);
 
     if resp.status != 200 {
+        let msg = format!("DoH query failed: HTTP {} {}", resp.status, resp.reason);
+        crate::audit_log::record(
+            "doh",
+            "lookup",
+            &audit_host,
+            false,
+            resp.status as i32,
+            &msg,
+        );
         return DohResult {
             success: false,
             records: vec![],
-            message: format!("DoH query failed: HTTP {} {}", resp.status, resp.reason),
+            message: msg,
         };
     }
 
@@ -123,6 +133,7 @@ pub fn lookup(resolver_url: &str, domain: &str, record_type: &str) -> DohResult 
             2 => "Server failure (SERVFAIL)".to_string(),
             _ => format!("DNS status code: {status}"),
         };
+        crate::audit_log::record("doh", "lookup", &audit_host, true, 0, &msg);
         return DohResult {
             success: true,
             records: vec![],
@@ -130,6 +141,7 @@ pub fn lookup(resolver_url: &str, domain: &str, record_type: &str) -> DohResult 
         };
     }
 
+    crate::audit_log::record("doh", "lookup", &audit_host, true, records.len() as i32, "");
     DohResult {
         success: true,
         records,

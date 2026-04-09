@@ -3,6 +3,12 @@
 
 use crate::imap::{imap_escape, parse_imap_url, ImapSession};
 
+fn host_for_audit(url: &str) -> String {
+    parse_imap_url(url)
+        .map(|(h, _, _)| h)
+        .unwrap_or_else(|_| crate::security::scrub_url(url))
+}
+
 pub struct ImapWriteResult {
     pub success: bool,
     pub message: String,
@@ -36,7 +42,8 @@ pub fn move_message(
     uid: i64,
     dest_mailbox: &str,
 ) -> ImapWriteResult {
-    match move_message_inner(url, username, password, mailbox, uid, dest_mailbox) {
+    let host = host_for_audit(url);
+    let r = match move_message_inner(url, username, password, mailbox, uid, dest_mailbox) {
         Ok(msg) => ImapWriteResult {
             success: true,
             message: msg,
@@ -45,7 +52,9 @@ pub fn move_message(
             success: false,
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("imap", "move", &host, r.success, 0, &r.message);
+    r
 }
 
 fn move_message_inner(
@@ -98,7 +107,8 @@ pub fn delete_message(
     mailbox: &str,
     uid: i64,
 ) -> ImapWriteResult {
-    match delete_message_inner(url, username, password, mailbox, uid) {
+    let host = host_for_audit(url);
+    let r = match delete_message_inner(url, username, password, mailbox, uid) {
         Ok(msg) => ImapWriteResult {
             success: true,
             message: msg,
@@ -107,7 +117,9 @@ pub fn delete_message(
             success: false,
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("imap", "delete", &host, r.success, 0, &r.message);
+    r
 }
 
 fn delete_message_inner(
@@ -152,7 +164,8 @@ pub fn flag_message(
     uid: i64,
     flags: &str,
 ) -> ImapWriteResult {
-    match flag_message_inner(url, username, password, mailbox, uid, flags) {
+    let host = host_for_audit(url);
+    let r = match flag_message_inner(url, username, password, mailbox, uid, flags) {
         Ok(msg) => ImapWriteResult {
             success: true,
             message: msg,
@@ -161,7 +174,9 @@ pub fn flag_message(
             success: false,
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("imap", "flag", &host, r.success, 0, &r.message);
+    r
 }
 
 fn flag_message_inner(

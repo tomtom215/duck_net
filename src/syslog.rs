@@ -127,7 +127,7 @@ pub fn send(
 
     let packet = format!("<{priority}>1 {timestamp} {hostname} {app_name} {pid} - - {message}");
 
-    match send_udp(host, port, packet.as_bytes()) {
+    let r = match send_udp(host, port, packet.as_bytes()) {
         Ok(()) => SyslogResult {
             success: true,
             message: format!("Sent {len} bytes to {host}:{port}", len = packet.len()),
@@ -136,7 +136,9 @@ pub fn send(
             success: false,
             message: e,
         },
-    }
+    };
+    crate::audit_log::record("syslog", "send", host, r.success, port as i32, &r.message);
+    r
 }
 
 /// Validate syslog host: alphanumeric, dots, hyphens, colons (IPv6), brackets.

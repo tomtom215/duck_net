@@ -439,7 +439,10 @@ pub fn request(endpoint: &str, message: &str) -> ZmqResult {
         };
     }
 
-    match request_inner(endpoint, message) {
+    let host_for_audit = parse_zmq_endpoint(endpoint)
+        .map(|(h, _)| h)
+        .unwrap_or_else(|_| endpoint.to_string());
+    let result = match request_inner(endpoint, message) {
         Ok((response, msg)) => ZmqResult {
             success: true,
             response,
@@ -450,7 +453,16 @@ pub fn request(endpoint: &str, message: &str) -> ZmqResult {
             response: String::new(),
             message: e,
         },
-    }
+    };
+    crate::audit_log::record(
+        "zeromq",
+        "request",
+        &host_for_audit,
+        result.success,
+        0,
+        &result.message,
+    );
+    result
 }
 
 fn request_inner(endpoint: &str, message: &str) -> Result<(String, String), String> {

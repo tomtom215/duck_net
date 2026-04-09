@@ -30,7 +30,7 @@ pub fn ping(host: &str, timeout_secs: u32) -> PingResult {
         .args(["-c", "1", "-W", &timeout.to_string(), host])
         .output();
 
-    match output {
+    let r = match output {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
@@ -61,7 +61,9 @@ pub fn ping(host: &str, timeout_secs: u32) -> PingResult {
             ttl: 0,
             message: format!("Failed to execute ping: {e}"),
         },
-    }
+    };
+    crate::audit_log::record("ping", "ping", host, r.alive, r.ttl, &r.message);
+    r
 }
 
 /// Traceroute to a host.
@@ -73,6 +75,15 @@ pub struct TracerouteHop {
 }
 
 pub fn traceroute(host: &str, max_hops: u32) -> Result<Vec<TracerouteHop>, String> {
+    let result = traceroute_inner(host, max_hops);
+    match &result {
+        Ok(v) => crate::audit_log::record("ping", "traceroute", host, true, v.len() as i32, ""),
+        Err(e) => crate::audit_log::record("ping", "traceroute", host, false, 0, e),
+    }
+    result
+}
+
+fn traceroute_inner(host: &str, max_hops: u32) -> Result<Vec<TracerouteHop>, String> {
     if !is_valid_host(host) {
         return Err(format!("Invalid host: {host}"));
     }

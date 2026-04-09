@@ -35,27 +35,55 @@ pub fn list(
     all_headers.push(("Depth".into(), depth.to_string()));
 
     let resp = execute_propfind(url, &all_headers, propfind_body);
+    let host = crate::audit_log::host_from_url(url);
 
     if resp.status != 207 && resp.status != 200 {
-        return Err(format!("PROPFIND failed: {} {}", resp.status, resp.reason));
+        let msg = format!("PROPFIND failed: {} {}", resp.status, resp.reason);
+        crate::audit_log::record("webdav", "propfind", &host, false, resp.status as i32, &msg);
+        return Err(msg);
     }
 
+    crate::audit_log::record("webdav", "propfind", &host, true, resp.status as i32, "");
     Ok(parse_multistatus(&resp.body))
 }
 
 /// Read a file via WebDAV GET.
 pub fn read(url: &str, headers: &[(String, String)]) -> HttpResponse {
-    http::execute(Method::Get, url, headers, None)
+    let resp = http::execute(Method::Get, url, headers, None);
+    crate::audit_log::record_http(
+        "webdav",
+        "get",
+        &crate::audit_log::host_from_url(url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 /// Write/upload a file via WebDAV PUT.
 pub fn write(url: &str, content: &str, headers: &[(String, String)]) -> HttpResponse {
-    http::execute(Method::Put, url, headers, Some(content))
+    let resp = http::execute(Method::Put, url, headers, Some(content));
+    crate::audit_log::record_http(
+        "webdav",
+        "put",
+        &crate::audit_log::host_from_url(url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 /// Delete a resource via WebDAV DELETE.
 pub fn delete(url: &str, headers: &[(String, String)]) -> HttpResponse {
-    http::execute(Method::Delete, url, headers, None)
+    let resp = http::execute(Method::Delete, url, headers, None);
+    crate::audit_log::record_http(
+        "webdav",
+        "delete",
+        &crate::audit_log::host_from_url(url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 /// Create a collection (directory) via WebDAV MKCOL.
@@ -66,7 +94,15 @@ pub fn mkcol(url: &str, headers: &[(String, String)]) -> HttpResponse {
 
     // Use POST with X-HTTP-Method-Override for MKCOL, or direct approach
     // Actually, we need to make a raw MKCOL request. We'll use ureq directly.
-    execute_mkcol(url, &all_headers)
+    let resp = execute_mkcol(url, &all_headers);
+    crate::audit_log::record_http(
+        "webdav",
+        "mkcol",
+        &crate::audit_log::host_from_url(url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 fn execute_propfind(url: &str, headers: &[(String, String)], body: &str) -> HttpResponse {

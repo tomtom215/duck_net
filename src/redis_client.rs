@@ -165,8 +165,22 @@ fn read_response(reader: &mut BufReader<TcpStream>) -> Result<String, String> {
     crate::redis_resp::read_response(reader)
 }
 
+/// Extract hostname from a Redis URL for audit-log records.
+fn host_for_audit(url: &str) -> String {
+    parse_url(url)
+        .map(|(h, _, _, _)| h)
+        .unwrap_or_else(|_| scrub_url(url))
+}
+
 /// GET a key from Redis.
 pub fn get(url: &str, key: &str) -> RedisResult {
+    let host = host_for_audit(url);
+    let r = get_inner(url, key);
+    crate::audit_log::record("redis", "get", &host, r.success, 0, &r.value);
+    r
+}
+
+fn get_inner(url: &str, key: &str) -> RedisResult {
     if key.is_empty() {
         return RedisResult {
             success: false,
@@ -206,6 +220,13 @@ pub fn get(url: &str, key: &str) -> RedisResult {
 
 /// SET a key in Redis.
 pub fn set(url: &str, key: &str, value: &str) -> RedisResult {
+    let host = host_for_audit(url);
+    let r = set_inner(url, key, value);
+    crate::audit_log::record("redis", "set", &host, r.success, 0, &r.value);
+    r
+}
+
+fn set_inner(url: &str, key: &str, value: &str) -> RedisResult {
     if key.is_empty() {
         return RedisResult {
             success: false,
@@ -339,6 +360,13 @@ pub fn keys(url: &str, pattern: &str) -> RedisKeysResult {
 
 /// DEL a key from Redis. Returns the count of deleted keys.
 pub fn del(url: &str, key: &str) -> RedisResult {
+    let host = host_for_audit(url);
+    let r = del_inner(url, key);
+    crate::audit_log::record("redis", "del", &host, r.success, 0, &r.value);
+    r
+}
+
+fn del_inner(url: &str, key: &str) -> RedisResult {
     if key.is_empty() {
         return RedisResult {
             success: false,

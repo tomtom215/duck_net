@@ -81,13 +81,15 @@ pub fn scp_read(
         };
     }
 
-    runtime::block_on(scp_read_async(
+    let r = runtime::block_on(scp_read_async(
         host,
         port,
         user,
         SshAuth::Key(key_file),
         remote_path,
-    ))
+    ));
+    crate::audit_log::record("scp", "read", host, r.success, r.size as i32, &r.message);
+    r
 }
 
 /// Read a remote file via SCP (password authentication).
@@ -140,13 +142,22 @@ pub fn scp_read_password(
         };
     }
 
-    runtime::block_on(scp_read_async(
+    let r = runtime::block_on(scp_read_async(
         host,
         port,
         user,
         SshAuth::Password(password),
         remote_path,
-    ))
+    ));
+    crate::audit_log::record(
+        "scp",
+        "read_password",
+        host,
+        r.success,
+        r.size as i32,
+        &r.message,
+    );
+    r
 }
 
 /// Write data to a remote file via SCP (key-based authentication).
@@ -206,14 +217,23 @@ pub fn scp_write(
         };
     }
 
-    runtime::block_on(scp_write_async(
+    let r = runtime::block_on(scp_write_async(
         host,
         port,
         user,
         SshAuth::Key(key_file),
         remote_path,
         data,
-    ))
+    ));
+    crate::audit_log::record(
+        "scp",
+        "write",
+        host,
+        r.success,
+        r.bytes_written as i32,
+        &r.message,
+    );
+    r
 }
 
 /// Write data to a remote file via SCP (password authentication).
@@ -273,14 +293,23 @@ pub fn scp_write_password(
         };
     }
 
-    runtime::block_on(scp_write_async(
+    let r = runtime::block_on(scp_write_async(
         host,
         port,
         user,
         SshAuth::Password(password),
         remote_path,
         data,
-    ))
+    ));
+    crate::audit_log::record(
+        "scp",
+        "write_password",
+        host,
+        r.success,
+        r.bytes_written as i32,
+        &r.message,
+    );
+    r
 }
 
 async fn scp_read_async(

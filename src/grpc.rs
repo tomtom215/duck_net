@@ -214,7 +214,20 @@ pub fn call(url: &str, service: &str, method: &str, json_payload: &str) -> GrpcR
         };
     }
 
-    runtime::block_on(call_async(url, service, method, json_payload))
+    let host = parse_url(url)
+        .map(|(h, _, _)| h)
+        .unwrap_or_else(|_| url.to_string());
+    let r = runtime::block_on(call_async(url, service, method, json_payload));
+    let op = format!("{service}/{method}");
+    crate::audit_log::record(
+        "grpc",
+        &op,
+        &host,
+        r.success,
+        r.grpc_status,
+        &r.grpc_message,
+    );
+    r
 }
 
 async fn call_async(url: &str, service: &str, method: &str, json_payload: &str) -> GrpcResult {
@@ -475,7 +488,20 @@ pub fn call_stream(url: &str, service: &str, method: &str, json_payload: &str) -
             grpc_message: "Invalid method name".to_string(),
         };
     }
-    runtime::block_on(call_stream_async(url, service, method, json_payload))
+    let host = parse_url(url)
+        .map(|(h, _, _)| h)
+        .unwrap_or_else(|_| url.to_string());
+    let r = runtime::block_on(call_stream_async(url, service, method, json_payload));
+    let op = format!("stream:{service}/{method}");
+    crate::audit_log::record(
+        "grpc",
+        &op,
+        &host,
+        r.success,
+        r.messages.len() as i32,
+        &r.grpc_message,
+    );
+    r
 }
 
 async fn call_stream_async(

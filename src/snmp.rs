@@ -240,6 +240,22 @@ pub fn v3_get(
     auth_password: &str,
     engine_id: &[u8],
 ) -> Result<SnmpResult, String> {
+    let outcome = v3_get_inner(host, oid, username, auth_protocol, auth_password, engine_id);
+    match &outcome {
+        Ok(_) => crate::audit_log::record("snmp", "v3_get", host, true, 0, ""),
+        Err(e) => crate::audit_log::record("snmp", "v3_get", host, false, 0, e),
+    }
+    outcome
+}
+
+fn v3_get_inner(
+    host: &str,
+    oid: &str,
+    username: &str,
+    auth_protocol: SnmpV3AuthProtocol,
+    auth_password: &str,
+    engine_id: &[u8],
+) -> Result<SnmpResult, String> {
     let auth_key = if auth_protocol != SnmpV3AuthProtocol::None {
         password_to_key(auth_password.as_bytes(), engine_id, auth_protocol)
     } else {
@@ -265,6 +281,31 @@ pub fn v3_get(
 
 /// Perform an SNMPv3 WALK starting from `oid` (authNoPriv).
 pub fn v3_walk(
+    host: &str,
+    oid: &str,
+    username: &str,
+    auth_protocol: SnmpV3AuthProtocol,
+    auth_password: &str,
+    engine_id: &[u8],
+    max_entries: usize,
+) -> Result<Vec<SnmpResult>, String> {
+    let outcome = v3_walk_inner(
+        host,
+        oid,
+        username,
+        auth_protocol,
+        auth_password,
+        engine_id,
+        max_entries,
+    );
+    match &outcome {
+        Ok(v) => crate::audit_log::record("snmp", "v3_walk", host, true, v.len() as i32, ""),
+        Err(e) => crate::audit_log::record("snmp", "v3_walk", host, false, 0, e),
+    }
+    outcome
+}
+
+fn v3_walk_inner(
     host: &str,
     oid: &str,
     username: &str,
@@ -338,15 +379,22 @@ pub fn get(host: &str, oid: &str, community: &str) -> Result<SnmpResult, String>
         "SNMPv2c with plaintext community strings. \
          Consider SNMPv3 for authentication and encryption",
     );
-    validate_community(community)?;
-    let request = build_get_request(oid, community)?;
-    let response = send_udp(host, SNMP_PORT, &request)?;
-    parse_response(&response).and_then(|results| {
-        results
-            .into_iter()
-            .next()
-            .ok_or_else(|| "No values in SNMP response".to_string())
-    })
+    let outcome = (|| {
+        validate_community(community)?;
+        let request = build_get_request(oid, community)?;
+        let response = send_udp(host, SNMP_PORT, &request)?;
+        parse_response(&response).and_then(|results| {
+            results
+                .into_iter()
+                .next()
+                .ok_or_else(|| "No values in SNMP response".to_string())
+        })
+    })();
+    match &outcome {
+        Ok(_) => crate::audit_log::record("snmp", "get", host, true, 0, ""),
+        Err(e) => crate::audit_log::record("snmp", "get", host, false, 0, e),
+    }
+    outcome
 }
 
 /// Validate SNMP community string length and content.
@@ -368,6 +416,20 @@ const MAX_WALK_ENTRIES: usize = 10_000;
 
 /// Perform an SNMP WALK (repeated GET-NEXT) starting from an OID.
 pub fn walk(
+    host: &str,
+    oid: &str,
+    community: &str,
+    max_entries: usize,
+) -> Result<Vec<SnmpResult>, String> {
+    let outcome = walk_inner(host, oid, community, max_entries);
+    match &outcome {
+        Ok(v) => crate::audit_log::record("snmp", "walk", host, true, v.len() as i32, ""),
+        Err(e) => crate::audit_log::record("snmp", "walk", host, false, 0, e),
+    }
+    outcome
+}
+
+fn walk_inner(
     host: &str,
     oid: &str,
     community: &str,

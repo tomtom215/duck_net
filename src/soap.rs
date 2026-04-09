@@ -63,7 +63,15 @@ pub fn send_request(
         }
     }
 
-    http::execute(Method::Post, url, &headers, Some(&envelope))
+    let resp = http::execute(Method::Post, url, &headers, Some(&envelope));
+    crate::audit_log::record_http(
+        "soap",
+        &action,
+        &crate::audit_log::host_from_url(url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 /// Extract content from `<soap:Body>...</soap:Body>` with various namespace prefixes.

@@ -33,8 +33,24 @@ pub fn list_events(
     ));
     all_headers.push(("Depth".into(), "1".into()));
 
-    let resp = execute_report(url, &all_headers, &body)?;
-    Ok(parse_calendar_multistatus(&resp.body))
+    let host = crate::audit_log::host_from_url(url);
+    let resp = match execute_report(url, &all_headers, &body) {
+        Ok(r) => r,
+        Err(e) => {
+            crate::audit_log::record("caldav", "list_events", &host, false, 0, &e);
+            return Err(e);
+        }
+    };
+    let events = parse_calendar_multistatus(&resp.body);
+    crate::audit_log::record(
+        "caldav",
+        "list_events",
+        &host,
+        true,
+        events.len() as i32,
+        "",
+    );
+    Ok(events)
 }
 
 /// List contacts via CardDAV REPORT.
@@ -57,8 +73,24 @@ pub fn list_contacts(
     ));
     all_headers.push(("Depth".into(), "1".into()));
 
-    let resp = execute_report(url, &all_headers, body)?;
-    Ok(parse_carddav_multistatus(&resp.body))
+    let host = crate::audit_log::host_from_url(url);
+    let resp = match execute_report(url, &all_headers, body) {
+        Ok(r) => r,
+        Err(e) => {
+            crate::audit_log::record("carddav", "list_contacts", &host, false, 0, &e);
+            return Err(e);
+        }
+    };
+    let contacts = parse_carddav_multistatus(&resp.body);
+    crate::audit_log::record(
+        "carddav",
+        "list_contacts",
+        &host,
+        true,
+        contacts.len() as i32,
+        "",
+    );
+    Ok(contacts)
 }
 
 /// Discover CalDAV/CardDAV principal and collection URLs.
@@ -79,8 +111,16 @@ pub fn discover(url: &str, headers: &[(String, String)]) -> Result<Vec<String>, 
     ));
     all_headers.push(("Depth".into(), "0".into()));
 
-    let resp = execute_propfind(url, &all_headers, body)?;
+    let host = crate::audit_log::host_from_url(url);
+    let resp = match execute_propfind(url, &all_headers, body) {
+        Ok(r) => r,
+        Err(e) => {
+            crate::audit_log::record("caldav", "discover", &host, false, 0, &e);
+            return Err(e);
+        }
+    };
     let hrefs = extract_all_hrefs(&resp.body);
+    crate::audit_log::record("caldav", "discover", &host, true, hrefs.len() as i32, "");
     Ok(hrefs)
 }
 

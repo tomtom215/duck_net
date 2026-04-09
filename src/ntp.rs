@@ -23,6 +23,15 @@ pub struct NtpResult {
 
 /// Query an NTP server for the current time.
 pub fn query(server: &str) -> Result<NtpResult, String> {
+    let result = query_inner(server);
+    match &result {
+        Ok(r) => crate::audit_log::record("ntp", "query", server, true, r.stratum as i32, ""),
+        Err(e) => crate::audit_log::record("ntp", "query", server, false, 0, e),
+    }
+    result
+}
+
+fn query_inner(server: &str) -> Result<NtpResult, String> {
     // Input validation
     crate::security::validate_host(server)?;
     // Atomic resolve-and-validate (closes UDP DNS-rebinding TOCTOU, CWE-918).

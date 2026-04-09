@@ -27,7 +27,15 @@ pub fn call(
         all_headers.push(("Content-Type".into(), "application/json".into()));
     }
 
-    http::execute(Method::Post, url, &all_headers, Some(&body))
+    let resp = http::execute(Method::Post, url, &all_headers, Some(&body));
+    crate::audit_log::record_http(
+        "jsonrpc",
+        method,
+        &crate::audit_log::host_from_url(url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 fn build_jsonrpc_body(method: &str, params: Option<&str>, id: u64) -> String {
@@ -59,7 +67,15 @@ pub fn xmlrpc_call(
         all_headers.push(("Content-Type".into(), "text/xml".into()));
     }
 
-    http::execute(Method::Post, url, &all_headers, Some(&body))
+    let resp = http::execute(Method::Post, url, &all_headers, Some(&body));
+    crate::audit_log::record_http(
+        "xmlrpc",
+        method,
+        &crate::audit_log::host_from_url(url),
+        resp.status,
+        &resp.reason,
+    );
+    resp
 }
 
 fn build_xmlrpc_body(method: &str, params: &[&str]) -> String {
