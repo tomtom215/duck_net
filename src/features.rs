@@ -158,11 +158,37 @@ fn resolve_config_path() -> Option<std::path::PathBuf> {
 }
 
 fn parse_protocol_list(text: &str) -> HashSet<String> {
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(|l| l.to_lowercase())
-        .collect()
+    let all_known: HashSet<&str> = OPT_IN_PROTOCOLS
+        .iter()
+        .map(|(n, _)| *n)
+        .chain(CORE_PROTOCOLS.iter().map(|(n, _)| *n))
+        .collect();
+
+    let mut parsed: HashSet<String> = HashSet::new();
+    let mut unknown: Vec<String> = Vec::new();
+    for raw in text.lines() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let name = trimmed.to_lowercase();
+        if all_known.contains(name.as_str()) {
+            parsed.insert(name);
+        } else {
+            unknown.push(name);
+        }
+    }
+
+    if !unknown.is_empty() {
+        eprintln!(
+            "[duck_net] WARNING: unknown protocol name(s) in config file: {} — \
+             typos or legacy names are silently ignored. Run \
+             SELECT duck_net_generate_config(); to see valid names.",
+            unknown.join(", ")
+        );
+    }
+
+    parsed
 }
 
 // ---------------------------------------------------------------------------

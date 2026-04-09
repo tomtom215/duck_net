@@ -421,18 +421,24 @@ fn send_udp(host: &str, port: u16, data: &[u8]) -> Result<Vec<u8>, String> {
     if !is_valid_host(host) {
         return Err(format!("Invalid SNMP host: {host}"));
     }
-    // SSRF protection: block connections to private/reserved IPs (CWE-918)
-    crate::security::validate_no_ssrf_host(host)?;
+    // Atomic resolve-and-validate: closes the DNS-rebinding window that used
+    // to exist between validate_no_ssrf_host() and send_to("host:port") which
+    // re-resolved via the OS resolver (CWE-918).
+    let addr = crate::security::resolve_and_validate_udp(host, port)?;
 
+    let bind_addr = if addr.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
     let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+        UdpSocket::bind(bind_addr).map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
 
-    let addr = format!("{host}:{port}");
     socket
-        .send_to(data, &addr)
+        .send_to(data, addr)
         .map_err(|e| format!("Failed to send SNMP request to {addr}: {e}"))?;
 
     let mut buf = vec![0u8; MAX_RESPONSE_BYTES];

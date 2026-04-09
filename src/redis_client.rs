@@ -94,13 +94,17 @@ fn scrub_url(url: &str) -> String {
 
 /// Connect to Redis and optionally authenticate + select database.
 fn connect(url: &str) -> Result<BufReader<TcpStream>, String> {
+    // Warn on plaintext redis:// (CWE-319) when credentials are present.
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("redis://") {
+        crate::security_warnings::warn_plaintext("Redis", "PLAINTEXT_REDIS", "rediss://");
+    }
+
     let (host, port, password, db) = parse_url(url)?;
 
-    // SSRF protection: block connections to private/reserved IPs (CWE-918)
+    // SSRF protection: block connections to private/reserved IPs (CWE-918).
+    // This also applies the rate limit via the chokepoint in validate_no_ssrf_host.
     crate::security::validate_no_ssrf_host(&host)?;
-
-    // Rate limiting: apply per-host token bucket (honours global + per-domain config)
-    crate::rate_limit::acquire_for_host(&host);
 
     let addr = format!("{host}:{port}");
     let stream = TcpStream::connect_timeout(

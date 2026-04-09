@@ -25,13 +25,16 @@ pub struct NtpResult {
 pub fn query(server: &str) -> Result<NtpResult, String> {
     // Input validation
     crate::security::validate_host(server)?;
-    // SSRF protection: block connections to private/reserved IPs (CWE-918)
-    crate::security::validate_no_ssrf_host(server)?;
+    // Atomic resolve-and-validate (closes UDP DNS-rebinding TOCTOU, CWE-918).
+    let addr = crate::security::resolve_and_validate_udp(server, NTP_PORT)?;
 
-    let addr = format!("{server}:{NTP_PORT}");
-
+    let bind_addr = if addr.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
     let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+        UdpSocket::bind(bind_addr).map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
@@ -51,7 +54,7 @@ pub fn query(server: &str) -> Result<NtpResult, String> {
     packet[44..48].copy_from_slice(&frac.to_be_bytes());
 
     socket
-        .send_to(&packet, &addr)
+        .send_to(&packet, addr)
         .map_err(|e| format!("Failed to send NTP request: {e}"))?;
 
     let mut response = [0u8; NTP_PACKET_SIZE];

@@ -22,6 +22,25 @@ pub struct SignedRequest {
 /// IAM credentials.
 ///
 /// Returns the Authorization header value and required X-Amz-* headers.
+///
+/// # Security notes
+///
+/// - **Replay window**: Every call generates a fresh `X-Amz-Date` timestamp
+///   via [`amz_datetime`]. AWS enforces a 15-minute validity window on SigV4
+///   signatures at the server side, so even if a caller caches and replays
+///   a signed request, AWS will reject it outside that window. duck_net
+///   therefore does not attempt to implement a nonce; the timestamp + server
+///   enforcement is the canonical mitigation.
+/// - **Constant-time comparison**: duck_net is only a *producer* of SigV4
+///   signatures — it never verifies remote signatures — so there is no
+///   attacker-observable secret-dependent comparison in this module. For
+///   comparisons elsewhere (e.g. authentication tokens), use
+///   [`crate::security::constant_time_eq`].
+/// - **HMAC key lifetime**: The derived signing key is held only for the
+///   duration of one call. Upstream AWS docs recommend caching it across
+///   requests to the same date/region/service, but we prioritise memory
+///   hygiene over throughput. A session-level cache could be added behind
+///   `zeroize::Zeroizing` if profiling shows it is a bottleneck.
 #[allow(clippy::too_many_arguments)]
 pub fn sign(
     method: &str,

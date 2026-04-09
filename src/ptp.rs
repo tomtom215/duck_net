@@ -127,13 +127,16 @@ fn now_unix_secs() -> f64 {
 /// delay with nanosecond granularity.
 pub fn sntp_query(server: &str) -> Result<SntpResult, String> {
     validate_server(server)?;
-    // SSRF protection: block connections to private/reserved IPs (CWE-918)
-    crate::security::validate_no_ssrf_host(server)?;
+    // Atomic resolve-and-validate (closes UDP DNS-rebinding TOCTOU, CWE-918).
+    let addr = crate::security::resolve_and_validate_udp(server, NTP_PORT)?;
 
-    let addr = format!("{server}:{NTP_PORT}");
-
+    let bind_addr = if addr.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
     let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
+        UdpSocket::bind(bind_addr).map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
     socket
         .set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))
         .map_err(|e| format!("Failed to set timeout: {e}"))?;
@@ -152,7 +155,7 @@ pub fn sntp_query(server: &str) -> Result<SntpResult, String> {
     packet[44..48].copy_from_slice(&frac.to_be_bytes());
 
     socket
-        .send_to(&packet, &addr)
+        .send_to(&packet, addr)
         .map_err(|e| format!("Failed to send SNTP request: {e}"))?;
 
     let mut response = [0u8; NTP_PACKET_SIZE];

@@ -159,16 +159,37 @@ impl russh::client::Handler for SshHandler {
         let key_data = base64::engine::general_purpose::STANDARD
             .encode(server_public_key.to_bytes().unwrap_or_default());
 
-        let result = match check_known_hosts(&host, &key_type, &key_data) {
+        let outcome = check_known_hosts(&host, &key_type, &key_data);
+        let result = match outcome {
             KnownHostResult::Matched => true,
-            KnownHostResult::NotFound => {
-                // Warn about TOFU host key verification (CWE-295)
-                crate::security_warnings::warn_tofu("SSH", "TOFU_SSH");
-                // Persist the key to ~/.ssh/known_hosts so subsequent connections
-                // benefit from key-pinning rather than re-issuing TOFU each time.
-                let _ = append_known_host(&host, &key_type, &key_data);
-                true
+            KnownHostResult::Revoked => {
+                // @revoked marker — reject unconditionally.
+                eprintln!(
+                    "[duck_net] CRITICAL: SSH host key for '{}' is marked @revoked in known_hosts — connection refused.",
+                    host
+                );
+                false
             }
+            KnownHostResult::NotFound => match crate::security::ssh_tofu_mode() {
+                crate::security::TofuMode::Strict => {
+                    eprintln!(
+                        "[duck_net] SSH host '{}' not in known_hosts and TOFU mode is 'strict' — connection refused. \
+                         Pre-populate ~/.ssh/known_hosts or use duck_net_set_ssh_tofu('warn' | 'auto').",
+                        host
+                    );
+                    false
+                }
+                crate::security::TofuMode::Warn => {
+                    crate::security_warnings::warn_tofu("SSH", "TOFU_SSH");
+                    // Warn-only: do NOT persist, so the next connection re-prompts.
+                    true
+                }
+                crate::security::TofuMode::Auto => {
+                    crate::security_warnings::warn_tofu("SSH", "TOFU_SSH");
+                    let _ = append_known_host(&host, &key_type, &key_data);
+                    true
+                }
+            },
             KnownHostResult::Changed => false, // Potential MITM
         };
         std::future::ready(Ok(result))
@@ -179,6 +200,7 @@ enum KnownHostResult {
     Matched,
     NotFound,
     Changed,
+    Revoked,
 }
 
 fn check_known_hosts(host: &str, key_type: &str, key_data: &str) -> KnownHostResult {
@@ -186,6 +208,12 @@ fn check_known_hosts(host: &str, key_type: &str, key_data: &str) -> KnownHostRes
         dirs_known_hosts(),
         Some("/etc/ssh/ssh_known_hosts".to_string()),
     ];
+
+    // Normalise the host for matching: strip surrounding brackets and any
+    // trailing :port (IPv6 addresses in known_hosts use [ipv6]:port form).
+    let target = normalize_known_host_entry(host);
+
+    let mut seen_matching_key_type = false;
 
     for path in paths.into_iter().flatten() {
         let contents = match std::fs::read_to_string(&path) {
@@ -198,40 +226,160 @@ fn check_known_hosts(host: &str, key_type: &str, key_data: &str) -> KnownHostRes
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let parts: Vec<&str> = line.split_whitespace().collect();
+            // Parse: [marker] hosts-field keytype keydata [comment]
+            let mut parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
+
+            // Optional @cert-authority / @revoked marker.
+            let marker = if parts[0].starts_with('@') {
+                let m = parts.remove(0);
+                Some(m)
+            } else {
+                None
+            };
             if parts.len() < 3 {
                 continue;
             }
+
             let hosts_field = parts[0];
             let line_key_type = parts[1];
             let line_key_data = parts[2];
 
-            let host_matches = hosts_field.split(',').any(|h| {
-                let h = h.trim_matches(&['[', ']'] as &[char]);
-                h == host || h.split(':').next() == Some(host)
-            });
+            let host_matches = if let Some(hashed) = hosts_field.strip_prefix("|1|") {
+                // Hashed: |1|salt-b64|hash-b64
+                matches_hashed_known_host(hashed, &target)
+            } else {
+                hosts_field
+                    .split(',')
+                    .any(|h| known_host_entry_matches(h, &target))
+            };
 
-            if host_matches {
-                if line_key_type == key_type && line_key_data == key_data {
-                    return KnownHostResult::Matched;
-                } else if line_key_type == key_type {
-                    return KnownHostResult::Changed;
-                }
+            if !host_matches {
+                continue;
+            }
+
+            // Handle @revoked marker immediately.
+            if marker == Some("@revoked") && line_key_type == key_type && line_key_data == key_data
+            {
+                return KnownHostResult::Revoked;
+            }
+            // @cert-authority entries are CA certificates, not leaf host keys;
+            // treat them as "no leaf match" so the caller falls through to
+            // TOFU. Proper CA validation would require verifying the key was
+            // signed by this CA, which russh handles separately.
+            if marker == Some("@cert-authority") {
+                continue;
+            }
+
+            if line_key_type == key_type && line_key_data == key_data {
+                return KnownHostResult::Matched;
+            } else if line_key_type == key_type {
+                seen_matching_key_type = true;
             }
         }
     }
 
-    KnownHostResult::NotFound
+    if seen_matching_key_type {
+        KnownHostResult::Changed
+    } else {
+        KnownHostResult::NotFound
+    }
 }
+
+/// Normalise a host string for known_hosts comparison.
+/// Strips brackets, lowercases, and discards any trailing :port.
+fn normalize_known_host_entry(host: &str) -> String {
+    let s = host.trim();
+    // Bracketed IPv6: [::1]:22
+    if let Some(rest) = s.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            return rest[..end].to_ascii_lowercase();
+        }
+    }
+    // Plain IPv6 (contains >= 2 colons — a port-suffixed host has exactly one)
+    if s.matches(':').count() >= 2 {
+        return s.to_ascii_lowercase();
+    }
+    // Hostname[:port]
+    if let Some(colon) = s.rfind(':') {
+        let after = &s[colon + 1..];
+        if after.chars().all(|c| c.is_ascii_digit()) {
+            return s[..colon].to_ascii_lowercase();
+        }
+    }
+    s.to_ascii_lowercase()
+}
+
+/// Check whether a single entry in a comma-separated hosts field matches a
+/// normalized target host. Handles bracketed IPv6 and trailing port suffixes.
+fn known_host_entry_matches(entry: &str, target_lc: &str) -> bool {
+    let e = entry.trim();
+    let normalised = normalize_known_host_entry(e);
+    normalised == target_lc
+}
+
+/// Match a hashed known_hosts entry (`|1|salt|hash`) against a plaintext host.
+/// `hashed_suffix` is everything after the `|1|` marker.
+fn matches_hashed_known_host(hashed_suffix: &str, target_lc: &str) -> bool {
+    use base64::Engine as _;
+    use hmac::{Hmac, Mac};
+    use sha1::Sha1;
+    type HmacSha1 = Hmac<Sha1>;
+
+    let mut parts = hashed_suffix.split('|');
+    let salt_b64 = match parts.next() {
+        Some(s) => s,
+        None => return false,
+    };
+    let hash_b64 = match parts.next() {
+        Some(s) => s,
+        None => return false,
+    };
+
+    let salt = match base64::engine::general_purpose::STANDARD.decode(salt_b64) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let expected = match base64::engine::general_purpose::STANDARD.decode(hash_b64) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    let mut mac = match HmacSha1::new_from_slice(&salt) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    mac.update(target_lc.as_bytes());
+    let computed = mac.finalize().into_bytes();
+
+    crate::security::constant_time_eq(&computed, &expected)
+}
+
+/// Process-level lock used to serialise known_hosts appends across concurrent
+/// DuckDB sessions / tokio tasks. Combined with POSIX `O_APPEND` (which is
+/// atomic for writes below `PIPE_BUF`, typically 4096 bytes) and the fact that
+/// a single known_hosts entry is well below that limit, this prevents
+/// corruption (CWE-362).
+static KNOWN_HOSTS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Append a newly-learned host key to ~/.ssh/known_hosts.
 ///
-/// On first TOFU acceptance, we persist the key so that future connections
-/// see `Matched` instead of `NotFound`, turning TOFU into proper key-pinning.
-/// Failures are silently ignored — if the file cannot be written (read-only FS,
-/// container, etc.) the TOFU warning was already emitted and the connection proceeds.
+/// On first TOFU acceptance we persist the key so future connections see
+/// `Matched` instead of `NotFound`, turning TOFU into proper key-pinning.
+/// Failures are silently ignored — if the file cannot be written (read-only
+/// FS, container, etc.) the TOFU warning was already emitted and the
+/// connection proceeds.
+///
+/// Concurrency:
+/// - Intra-process: serialised via [`KNOWN_HOSTS_LOCK`].
+/// - Inter-process: relies on POSIX `O_APPEND` atomicity (writes ≤ `PIPE_BUF`
+///   are guaranteed not to interleave). A single known_hosts line is ~200 B.
 fn append_known_host(host: &str, key_type: &str, key_data: &str) -> std::io::Result<()> {
     use std::io::Write;
+
+    let _guard = KNOWN_HOSTS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let path = dirs_known_hosts()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "HOME not set"))?;
@@ -248,7 +396,11 @@ fn append_known_host(host: &str, key_type: &str, key_data: &str) -> std::io::Res
         }
     }
 
+    // Normalise the hostname so check_known_hosts can match it later.
+    let host_for_entry = normalize_known_host_entry(host);
+
     // Append host key in known_hosts format: "host keytype keydata\n"
+    // On POSIX, O_APPEND makes the write atomic with respect to other writers.
     let mut file = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
@@ -264,7 +416,8 @@ fn append_known_host(host: &str, key_type: &str, key_data: &str) -> std::io::Res
         }
     }
 
-    writeln!(file, "{host} {key_type} {key_data}")?;
+    writeln!(file, "{host_for_entry} {key_type} {key_data}")?;
+    file.sync_all().ok();
     Ok(())
 }
 

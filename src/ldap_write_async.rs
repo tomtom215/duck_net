@@ -35,11 +35,16 @@ pub(super) fn parse_modifications(
             if attr.is_empty() {
                 return Err(format!("Empty attribute name in modification: {item}"));
             }
+            // CWE-90: validate attribute name and every value before sending.
+            super::ldap_attr_is_safe(attr)?;
             let values: Vec<String> = value
                 .split(';')
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())
                 .collect();
+            for v in &values {
+                super::ldap_value_is_safe(v)?;
+            }
             mods.push((op, attr.to_string(), values));
         } else {
             // No '=' — valid only for delete (remove entire attribute)
@@ -47,6 +52,7 @@ pub(super) fn parse_modifications(
             if attr.is_empty() {
                 return Err(format!("Empty attribute name in modification: {item}"));
             }
+            super::ldap_attr_is_safe(attr)?;
             if op != "delete" {
                 return Err(format!(
                     "Modification '{op}' requires a value (attr=value): {item}"
@@ -75,12 +81,18 @@ pub(super) async fn add_async(
     use ldap3::LdapConnAsync;
     use std::collections::HashSet;
 
-    // SSRF protection (CWE-918)
+    // SSRF protection (CWE-918) — also acquires a rate-limit token.
     if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        crate::audit_log::record("ldap", "add", host, false, 0, &e);
         return LdapWriteResult {
             success: false,
             message: e,
         };
+    }
+
+    // Warn on plaintext LDAP write with credentials (CWE-319).
+    if !use_tls {
+        crate::security_warnings::warn_plaintext("LDAP", "PLAINTEXT_LDAP", "ldaps://");
     }
 
     let url = if use_tls {
@@ -134,7 +146,7 @@ pub(super) async fn add_async(
         })
         .collect();
 
-    match ldap.add(entry_dn, attr_sets).await {
+    let outcome = match ldap.add(entry_dn, attr_sets).await {
         Ok(result) => {
             let _ = ldap.unbind().await;
             match result.success() {
@@ -155,7 +167,9 @@ pub(super) async fn add_async(
                 message: format!("LDAP add failed: {e}"),
             }
         }
-    }
+    };
+    crate::audit_log::record("ldap", "add", host, outcome.success, 0, &outcome.message);
+    outcome
 }
 
 pub(super) async fn modify_async(
@@ -170,12 +184,17 @@ pub(super) async fn modify_async(
     use ldap3::{LdapConnAsync, Mod};
     use std::collections::HashSet;
 
-    // SSRF protection (CWE-918)
+    // SSRF protection (CWE-918) — also acquires a rate-limit token.
     if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        crate::audit_log::record("ldap", "modify", host, false, 0, &e);
         return LdapWriteResult {
             success: false,
             message: e,
         };
+    }
+
+    if !use_tls {
+        crate::security_warnings::warn_plaintext("LDAP", "PLAINTEXT_LDAP", "ldaps://");
     }
 
     let url = if use_tls {
@@ -234,7 +253,7 @@ pub(super) async fn modify_async(
         })
         .collect();
 
-    match ldap.modify(entry_dn, mods).await {
+    let outcome = match ldap.modify(entry_dn, mods).await {
         Ok(result) => {
             let _ = ldap.unbind().await;
             match result.success() {
@@ -255,7 +274,9 @@ pub(super) async fn modify_async(
                 message: format!("LDAP modify failed: {e}"),
             }
         }
-    }
+    };
+    crate::audit_log::record("ldap", "modify", host, outcome.success, 0, &outcome.message);
+    outcome
 }
 
 pub(super) async fn delete_async(
@@ -268,12 +289,17 @@ pub(super) async fn delete_async(
 ) -> LdapWriteResult {
     use ldap3::LdapConnAsync;
 
-    // SSRF protection (CWE-918)
+    // SSRF protection (CWE-918) — also acquires a rate-limit token.
     if let Err(e) = crate::security::validate_no_ssrf_host(host) {
+        crate::audit_log::record("ldap", "delete", host, false, 0, &e);
         return LdapWriteResult {
             success: false,
             message: e,
         };
+    }
+
+    if !use_tls {
+        crate::security_warnings::warn_plaintext("LDAP", "PLAINTEXT_LDAP", "ldaps://");
     }
 
     let url = if use_tls {
@@ -318,7 +344,7 @@ pub(super) async fn delete_async(
         }
     }
 
-    match ldap.delete(entry_dn).await {
+    let outcome = match ldap.delete(entry_dn).await {
         Ok(result) => {
             let _ = ldap.unbind().await;
             match result.success() {
@@ -339,5 +365,7 @@ pub(super) async fn delete_async(
                 message: format!("LDAP delete failed: {e}"),
             }
         }
-    }
+    };
+    crate::audit_log::record("ldap", "delete", host, outcome.success, 0, &outcome.message);
+    outcome
 }

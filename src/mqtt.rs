@@ -128,15 +128,24 @@ pub fn publish(broker: &str, topic: &str, payload: &str) -> MqttResult {
         crate::rate_limit::acquire_for_host(&host);
     }
 
+    let host_for_audit = parse_broker(broker)
+        .map(|(h, _, _, _)| h)
+        .unwrap_or_default();
     match publish_inner(broker, topic, payload) {
-        Ok(msg) => MqttResult {
-            success: true,
-            message: msg,
-        },
-        Err(e) => MqttResult {
-            success: false,
-            message: e,
-        },
+        Ok(msg) => {
+            crate::audit_log::record("mqtt", "publish", &host_for_audit, true, 0, "");
+            MqttResult {
+                success: true,
+                message: msg,
+            }
+        }
+        Err(e) => {
+            crate::audit_log::record("mqtt", "publish", &host_for_audit, false, 0, &e);
+            MqttResult {
+                success: false,
+                message: e,
+            }
+        }
     }
 }
 
